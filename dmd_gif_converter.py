@@ -29,7 +29,23 @@ FOLDER_PREFIX = "gifs_"
 # ── Scroll ────────────────────────────────────────────────────────────────────
 # Target vertical scroll speed in pixels per second.
 # Increase for faster scroll, decrease for slower.
-SCROLL_SPEED_PX_S = 32.0
+SCROLL_SPEED_PX_S = 24.0
+
+# Fraction of the image bottom to ignore when computing scroll distance.
+# The bottom of a sprite (feet, floor, empty background) rarely contains
+# important content — trimming it reduces scroll distance and makes the
+# motion less aggressive.
+#   0.00 = use full image height
+#   0.15 = ignore bottom 15% (recommended)
+#   0.25 = ignore bottom 25% (very short scroll, near-static feel)
+BOTTOM_CROP_PCT = 0.15
+
+# Pause duration at the center position before restarting the cycle (seconds).
+# Scroll sequence per cycle:  top → bottom → center → [pause] → (loop to top)
+# The center is where the main action is usually visible.
+#   0.0 = no pause, cuts straight back to top
+#   1.5 = recommended — gives the viewer time to see the action
+PAUSE_CENTER_S = 1.5
 
 # ── Render FPS ────────────────────────────────────────────────────────────────
 # For GIF files, ffprobe often reports r_frame_rate="100/1" (centisecond base),
@@ -150,33 +166,49 @@ def process_file(filename, folder_in, folder_out):
 
     # Scale width to 128px, compute proportional height rounded up to nearest even number
     scaled_h = math.ceil(((128.0 / src_w) * src_h) / 2.0) * 2
-    scroll_dist = scaled_h - 32   # pixels to scroll (negative = image fits, center it)
+
+    # Effective height: trim the bottom BOTTOM_CROP_PCT of the image.
+    # The bottom of a sprite (feet, floor) rarely matters — reducing it shortens
+    # the scroll distance and makes the motion less aggressive.
+    effective_h = math.floor(scaled_h * (1.0 - BOTTOM_CROP_PCT) / 2) * 2
+    effective_h = max(effective_h, 32)   # must be at least 32px (panel height)
+
+    scroll_dist = effective_h - 32   # pixels to scroll (0 = image fits, center it)
 
     if scroll_dist > 0:
-        # ── Ping-pong scroll ─────────────────────────────────────────────────
+        # ── Scroll: top → bottom → center → hold → (loop) ───────────────────
         # Step size (px/frame) to maintain a constant scroll speed regardless of FPS
         step = max(1, round(SCROLL_SPEED_PX_S / fps_render))
 
-        # One full ping-pong cycle: 0 → scroll_dist → 0
-        frames_one_way   = math.ceil(scroll_dist / step)
-        frames_per_cycle = 2 * frames_one_way
-        duration_cycle   = frames_per_cycle / fps_render
+        # Center of the image = where the action is
+        center = scroll_dist // 2
 
-        # Output enough complete cycles to cover the source GIF's natural duration
-        # → ensures the full animation is visible and the loop is seamless on ESP32
-        num_cycles   = max(1, math.ceil(duration_src / duration_cycle)) if duration_src > 0 else 1
+        frames_down = math.ceil(scroll_dist / step)              # top → bottom
+        frames_up   = math.ceil((scroll_dist - center) / step)   # bottom → center
+        frames_hold = round(PAUSE_CENTER_S * fps_render)          # hold at center
+        frames_sequence = frames_down + frames_up + frames_hold
+
+        duration_cycle = frames_sequence / fps_render
+        num_cycles  = max(1, math.ceil(duration_src / duration_cycle)) if duration_src > 0 else 1
         duration_out = str(num_cycles * duration_cycle)
 
-        # Triangle wave: y = scroll_dist - |(n×step mod 2×scroll_dist) − scroll_dist|
-        # → always stays within [0, scroll_dist], never overshoots
-        period = 2 * scroll_dist
-        crop_y = f"min(max({scroll_dist}-abs(mod(n*{step},{period})-{scroll_dist}),0),{scroll_dist})"
+        # n_seq = position within the current cycle (resets every frames_sequence)
+        # Phase 1 (n_seq ≤ frames_down)  : scroll down  0 → scroll_dist
+        # Phase 2 (n_seq > frames_down)  : scroll up    scroll_dist → center
+        #   max(..., center) naturally holds at center for the remaining frames_hold
+        n_seq  = f"mod(n,{frames_sequence})"
+        crop_y = (
+            f"if(lte({n_seq},{frames_down}),"
+            f"min({n_seq}*{step},{scroll_dist}),"
+            f"max({scroll_dist}-({n_seq}-{frames_down})*{step},{center}))"
+        )
 
         logger.info(
             f"[SCROLL ] {filename} | src {src_w}x{src_h} "
-            f"→ 128x{scaled_h} (crop→128x32) | scroll={scroll_dist}px | "
-            f"fps_src={fps_src:.1f} → render={fps_render}fps ({100/fps_render:.0f}cs/frame) | "
-            f"step={step}px | speed≈{step*fps_render:.0f}px/s | "
+            f"→ 128x{scaled_h} (effective 128x{effective_h}, crop→128x32) | "
+            f"scroll={scroll_dist}px | center={center}px | "
+            f"fps={fps_render}fps ({100/fps_render:.0f}cs) | step={step}px | "
+            f"speed≈{step*fps_render:.0f}px/s | down={frames_down}f up={frames_up}f hold={frames_hold}f | "
             f"cycle={duration_cycle:.2f}s×{num_cycles}={float(duration_out):.2f}s"
         )
     else:
@@ -187,8 +219,8 @@ def process_file(filename, folder_in, folder_out):
         crop_y = "(in_h-out_h)/2"
         logger.info(
             f"[CENTER ] {filename} | src {src_w}x{src_h} "
-            f"→ 128x{scaled_h} (centered) | fps_src={fps_src:.1f} → render={fps_render:.0f} | "
-            f"duration={float(duration_out):.2f}s"
+            f"→ 128x{scaled_h} (effective 128x{effective_h}, centered) | "
+            f"fps_src={fps_src:.1f} → render={fps_render:.0f} | duration={float(duration_out):.2f}s"
         )
 
     # ── FFmpeg filter graph ───────────────────────────────────────────────────
@@ -263,7 +295,7 @@ if __name__ == "__main__":
             # Each worker is an independent ffmpeg process — no shared state, safe to parallelize
             with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 list(executor.map(
-                    lambda f: process_file(f, folder_in, folder_out),
+                    lambda f, fi=folder_in, fo=folder_out: process_file(f, fi, fo),
                     files
                 ))
 

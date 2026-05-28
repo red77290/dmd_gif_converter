@@ -6,14 +6,14 @@ Convertit n'importe quel GIF animé en un format optimisé pour une **dalle LED 
 
 | Situation | Comportement |
 |---|---|
-| GIF **plus haut que 32px** (personnage, scène) | Scroll vertical **ping-pong** (haut→bas→haut) à vitesse constante |
+| GIF **plus haut que 32px** (personnage, scène) | Scroll **haut → bas → centre → pause** puis boucle |
 | GIF **plus large que haut** (logo, bannière) | Centrage statique, durée naturelle du GIF respectée |
 
 **Pipeline de traitement :**
 1. Fond noir composite (élimine la transparence → plus d'horloge qui transparaît)
-2. Mise à l'échelle proportionnelle à 128px de large
+2. Mise à l'échelle proportionnelle à 128px de large, `BOTTOM_CROP_PCT`% du bas ignorés (pieds/sol = pas important)
 3. Colorimétrie boostée pour dalle LED (contraste, saturation, gamma, sharpening)
-4. Crop 128×32 avec scroll ping-pong (onde triangulaire)
+4. Crop 128×32 avec scroll intelligent : haut → bas → centre → pause
 5. Génération de palette sur les pixels réellement affichés (256 couleurs)
 6. Encodage GIF sans transparence ni delta encoding
 
@@ -118,9 +118,9 @@ ffprobe -version
 
 ### Dépendances Python
 
-`moving_gif_V0.py` **n'utilise aucune bibliothèque externe** — uniquement la bibliothèque standard Python (`os`, `subprocess`, `math`, `json`, `logging`, `concurrent.futures`).
+`dmd_gif_converter.py` **n'utilise aucune bibliothèque externe** — uniquement la bibliothèque standard Python (`os`, `subprocess`, `math`, `json`, `logging`, `concurrent.futures`).
 
-> ⚠️ Le fichier `requirements.txt` présent dans ce dépôt concerne d'**autres scripts** du projet (versions plus anciennes utilisant Pillow/numpy/imageio). Il n'est **pas nécessaire** pour `moving_gif_V0.py`.
+> ⚠️ Le fichier `requirements.txt` présent dans ce dépôt concerne d'**autres scripts** du projet (versions plus anciennes utilisant Pillow/numpy/imageio). Il n'est **pas nécessaire** pour `dmd_gif_converter.py`.
 
 Aucun `pip install` n'est requis. Vous pouvez toutefois utiliser un environnement virtuel si vous le souhaitez :
 
@@ -128,26 +128,24 @@ Aucun `pip install` n'est requis. Vous pouvez toutefois utiliser un environnemen
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-# Aucun pip install nécessaire — lancer directement :
-python3 moving_gif_V0.py
+python3 dmd_gif_converter.py
 ```
 
 **Windows (PowerShell)**
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-# Aucun pip install nécessaire — lancer directement :
-python moving_gif_V0.py
+python dmd_gif_converter.py
 ```
 
 ### Récupérer le script
 
 ```bash
 git clone https://github.com/fjgordillo86/RetroPixelLED-Lite.git
-cd RetroPixelLED-Lite
+cd RetroPixelLED-Lite/dmd_gif_converter
 ```
 
-Ou simplement télécharger `moving_gif_V0.py` seul depuis la page GitHub.
+Ou simplement télécharger `dmd_gif_converter.py` seul depuis la page GitHub.
 
 ---
 
@@ -157,7 +155,7 @@ Le script détecte automatiquement tous les dossiers commençant par `gifs_` dan
 
 ```
 mon_dossier/
-├── moving_gif_V0.py
+├── dmd_gif_converter.py
 ├── gifs_Arcade/          ← dossier source (préfixe "gifs_")
 │   ├── mslug.gif
 │   ├── kof98.gif
@@ -169,7 +167,7 @@ mon_dossier/
 │   (après exécution)
 │
 ├── Arcade/               ← sortie générée (même nom sans "gifs_")
-│   ├── mslug.gif
+│   ├── mslug.gif         ← 128×32, scroll haut→bas→centre
 │   └── kof98.gif
 └── Consoles/
     └── mario.gif
@@ -180,20 +178,17 @@ mon_dossier/
 ## ▶️ Utilisation
 
 ```bash
-# Placer le script dans le dossier contenant vos dossiers gifs_*
 cd /chemin/vers/mon_dossier
-
-# Lancer la conversion
-python3 moving_gif_V0.py
+python3 dmd_gif_converter.py
 ```
 
 **Exemple de log de sortie :**
 ```
-12:34:01 [INFO   ] === Traitement : gifs_Arcade → Arcade (42 fichier(s)) ===
-12:34:02 [INFO   ] [PINGPONG] mslug.gif | src 320x240 → 128x96 (crop→128x32) | scroll=64px | fps_src=12.0 → rendu=12.5fps (8cs/frame) | pas=3px | vitesse≈37px/s | cycle=10.67s×1=10.67s
-12:34:04 [INFO   ] [OK]     mslug.gif
-12:34:02 [INFO   ] [CENTRE]  logo.gif  | src 640x80  → 128x16 (centré) | fps_src=10.0 → rendu=10 | durée=3.00s
-12:34:05 [INFO   ] [OK]     logo.gif
+12:34:01 [INFO   ] === Traitement : gifs_Arcade → Arcade (42 fichier(s)) | mode=pixel_art ===
+12:34:02 [INFO   ] [SCROLL ] mslug.gif | src 320x240 → 128x96 (effective 128x82, crop→128x32) | scroll=50px | center=25px | fps=12.5fps (8cs) | step=2px | speed≈24px/s | down=25f up=13f hold=19f | cycle=4.54s×1=4.54s
+12:34:04 [INFO   ] [OK    ] mslug.gif
+12:34:02 [INFO   ] [CENTER ] logo.gif | src 640x80 → 128x16 (effective 128x14, centered) | fps_src=10.0 → render=10 | duration=3.00s
+12:34:05 [INFO   ] [OK    ] logo.gif
 ```
 
 ---
@@ -232,20 +227,26 @@ MAX_WORKERS = 2        # Nombre de conversions en parallèle
                        # SSD + 8 cœurs + 16Go → 6-8 | HDD ou laptop → 2
 
 # ── Scroll ─────────────────────────────────────────────────────────────────────
-VITESSE_SCROLL_PX_S = 32.0   # Vitesse de défilement (px/seconde)
+SCROLL_SPEED_PX_S = 24.0   # Vitesse de défilement (px/seconde) — plus bas = plus doux
+
+BOTTOM_CROP_PCT = 0.15     # Part du bas de l'image ignorée (pieds, sol, fond vide)
+                           # 0.00 = hauteur complète | 0.15 = coupe 15% | 0.25 = coupe 25%
+
+PAUSE_CENTER_S = 1.5       # Secondes de pause au centre avant de recommencer le cycle
+                           # Le centre = là où l'action est. 0.0 = pas de pause.
 
 # ── FPS de rendu ────────────────────────────────────────────────────────────────
-FPS_MIN_RENDU = 10.0   # FPS minimum (upsampling si source plus lent)
-FPS_MAX_RENDU = 25.0   # FPS maximum (plafond ESP32)
+FPS_MIN = 10.0   # FPS minimum (upsampling si source plus lent)
+FPS_MAX = 25.0   # FPS maximum (plafond ESP32)
 
 # ── Colorimétrie manuelle (MODE = "custom" uniquement) ─────────────────────────
-CONTRASTE    = 1.6     # 0.5–2.0  Séparation plans sombre/clair
-SATURATION   = 2.2     # 0.0–3.0  Vivacité des couleurs
-LUMINOSITE   = -0.03   # -1–+1    Compensation dalle LED
-GAMMA        = 0.85    # 0.1–2.0  Correction gamma (< 1 = midtones plus sombres)
-SHARPEN_LUMA = 1.8     # Netteté des contours (luminance)
-SHARPEN_CHR  = 0.5     # Netteté chroma (léger pour éviter les halos)
-DITHER       = "none"  # "none" | "bayer:bayer_scale=1" | "bayer:bayer_scale=2"
+CONTRAST    = 1.6     # 0.5–2.0  Séparation plans sombre/clair
+SATURATION  = 2.2     # 0.0–3.0  Vivacité des couleurs
+BRIGHTNESS  = -0.03   # -1–+1    Compensation dalle LED
+GAMMA       = 0.85    # 0.1–2.0  Correction gamma (< 1 = midtones plus sombres)
+SHARPEN_LUM = 1.8     # Netteté des contours (luminance)
+SHARPEN_CHR = 0.5     # Netteté chroma (léger pour éviter les halos)
+DITHER      = "none"  # "none" | "bayer:bayer_scale=1" | "bayer:bayer_scale=2"
 ```
 
 ### Réglage de `MAX_WORKERS` selon votre machine
@@ -263,9 +264,15 @@ DITHER       = "none"  # "none" | "bayer:bayer_scale=1" | "bayer:bayer_scale=2"
 
 ### GIF avec personnage (hauteur > 32px après mise à l'échelle)
 
-Le script crée un **scroll ping-pong** : le personnage défile de haut en bas puis revient, en boucle. L'action au centre de l'image est vue deux fois par cycle (aller et retour).
+Le script génère un **cycle de scroll en 3 phases** :
 
-- La vitesse est **constante en px/seconde** (indépendamment du FPS source)
+```
+haut (y=0) ──scroll bas──▶ bas ──scroll haut──▶ centre ──pause──▶ (retour en haut)
+```
+
+- **Crop du bas** (`BOTTOM_CROP_PCT`) : les 15% inférieurs de l'image (pieds, sol, fond vide) sont ignorés — réduit la distance de scroll et rend le mouvement moins agressif
+- **Pause au centre** (`PAUSE_CENTER_S`) : l'image marque une pause de 1.5s au centre (là où l'action est) avant de recommencer
+- La vitesse est **constante en px/seconde** indépendamment du FPS source (`SCROLL_SPEED_PX_S = 24.0`)
 - Le FPS de sortie est snappé sur les valeurs **propres GIF** (10, 12.5, 20, 25fps) pour éviter le judder par quantification centiseconde
 - La durée du GIF de sortie couvre au moins un cycle complet **ET** la durée naturelle du GIF source
 
@@ -290,9 +297,11 @@ Le script élimine toute transparence à deux niveaux :
 | Aucun dossier trouvé | Vérifier que vos dossiers sources commencent bien par `gifs_` et que vous lancez le script depuis le bon répertoire |
 | Conversion très lente | Augmenter `MAX_WORKERS` si vous avez un SSD et plusieurs cœurs |
 | Couleurs trop saturées | Passer en `MODE = "anime"` ou baisser `SATURATION` en mode `"custom"` |
-| GIF semble trop sombre | Augmenter `LUMINOSITE` (ex. `0.05`) ou `GAMMA` (ex. `0.95`) |
-| Scroll trop rapide/lent | Ajuster `VITESSE_SCROLL_PX_S` |
-| Banding sur dégradés (ciel, ombres) | Passer en `MODE = "anime"` ou `MODE = "cinema"` pour une colorimétrie plus douce — le dithering ne peut pas être utilisé avec du contenu qui défile (crée des raies) |
+| GIF semble trop sombre | Augmenter `BRIGHTNESS` (ex. `0.05`) ou `GAMMA` (ex. `0.95`) |
+| Scroll trop rapide/lent | Ajuster `SCROLL_SPEED_PX_S` (défaut : `24.0`) |
+| Trop de scroll, action difficile à suivre | Augmenter `BOTTOM_CROP_PCT` (ex. `0.20`) ou réduire `SCROLL_SPEED_PX_S` |
+| Pause au centre trop courte/longue | Ajuster `PAUSE_CENTER_S` (défaut : `1.5`) |
+| Banding sur dégradés (ciel, ombres) | Passer en `MODE = "anime"` ou `MODE = "cinema"` — le dithering ne peut pas être utilisé avec du contenu qui défile (crée des raies) |
 
 ---
 

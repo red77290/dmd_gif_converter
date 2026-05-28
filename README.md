@@ -6,14 +6,14 @@ Converts any animated GIF into a format optimized for a **128×32 HUB75 LED matr
 
 | Input GIF | Output behavior |
 |---|---|
-| **Taller than 32px** (character, scene) | Vertical **ping-pong scroll** (top→bottom→top) at constant speed |
+| **Taller than 32px** (character, scene) | Scroll **top → bottom → center → pause** then loop |
 | **Wider than tall** (logo, banner) | Vertical centering, natural GIF duration preserved |
 
 **Processing pipeline:**
 1. Black background composite → eliminates source transparency (no clock bleeding through)
-2. Proportional scale to 128px wide
+2. Proportional scale to 128px wide, bottom `BOTTOM_CROP_PCT`% ignored (feet/floor = not important)
 3. Colorimetry boost for LED panels (contrast, saturation, gamma, sharpening)
-4. 128×32 crop with ping-pong scroll (triangle wave expression)
+4. 128×32 crop with smart scroll: top → bottom → center → hold
 5. Palette generation on actually-displayed pixels only (256 colors)
 6. GIF encoding with transparency compression disabled
 
@@ -179,10 +179,10 @@ python  dmd_gif_converter.py        # Windows
 
 **Sample log output:**
 ```
-12:34:01 [INFO   ] === Processing: gifs_Arcade → Arcade (42 file(s)) ===
-12:34:02 [INFO   ] [SCROLL ] metalslug.gif | src 320x240 → 128x96 (crop→128x32) | scroll=64px | fps_src=12.0 → render=12.5fps (8cs/frame) | step=3px | speed≈37px/s | cycle=10.67s×1=10.67s
+12:34:01 [INFO   ] === Processing: gifs_Arcade → Arcade (42 file(s)) | mode=pixel_art ===
+12:34:02 [INFO   ] [SCROLL ] metalslug.gif | src 320x240 → 128x96 (effective 128x82, crop→128x32) | scroll=50px | center=25px | fps=12.5fps (8cs) | step=2px | speed≈24px/s | down=25f up=13f hold=19f | cycle=4.54s×1=4.54s
 12:34:04 [INFO   ] [OK    ] metalslug.gif
-12:34:02 [INFO   ] [CENTER ] logo.gif | src 640x80 → 128x16 (centered) | fps_src=10.0 → render=10 | duration=3.00s
+12:34:02 [INFO   ] [CENTER ] logo.gif | src 640x80 → 128x16 (effective 128x14, centered) | fps_src=10.0 → render=10 | duration=3.00s
 12:34:05 [INFO   ] [OK    ] logo.gif
 ```
 
@@ -221,7 +221,13 @@ MODE = "pixel_art"   # "pixel_art" | "anime" | "cinema" | "custom"
 MAX_WORKERS = 2        # Number of parallel ffmpeg conversions
 
 # ── Scroll ─────────────────────────────────────────────────────────────────────
-SCROLL_SPEED_PX_S = 32.0   # Scroll speed (pixels per second)
+SCROLL_SPEED_PX_S = 24.0   # Scroll speed (pixels per second) — lower = smoother feel
+
+BOTTOM_CROP_PCT = 0.15     # Fraction of image bottom to ignore (feet, floor, empty bg)
+                           # 0.00 = full height | 0.15 = trim 15% | 0.25 = trim 25%
+
+PAUSE_CENTER_S = 1.5       # Seconds to hold at center before restarting the cycle
+                           # Center = where the action is. 0.0 = no pause.
 
 # ── Render FPS ──────────────────────────────────────────────────────────────────
 FPS_MIN = 10.0             # Upsample sources below this FPS
@@ -250,13 +256,19 @@ DITHER      = "none"       # "none" | "bayer:bayer_scale=1" | "bayer:bayer_scale
 
 ## 🔍 How it works
 
-### Tall GIFs — ping-pong scroll
+### Tall GIFs — smart scroll
 
-When the source GIF is taller than 32px after scaling, the script generates a **ping-pong scroll**: the content slides from top to bottom, then back up, in a seamless loop. The center of the image (where the action usually is) appears on both the downward and upward passes.
+When the source GIF is taller than 32px after scaling, the script generates a **3-phase scroll cycle**:
 
-- Scroll speed is **constant in px/second** regardless of source FPS
+```
+top (y=0) ──scroll down──▶ bottom ──scroll up──▶ center ──hold──▶ (loop to top)
+```
+
+- **Bottom crop** (`BOTTOM_CROP_PCT`): the bottom 15% of the image (feet, floor, empty space) is ignored — reduces scroll distance and makes the motion less aggressive
+- **Center hold** (`PAUSE_CENTER_S`): the image pauses at the center (where the action is) for 1.5s before restarting
+- Scroll speed is **constant in px/second** regardless of source FPS (`SCROLL_SPEED_PX_S = 24.0`)
 - Output FPS is snapped to a **clean GIF value** (10, 12.5, 20 or 25fps) to avoid judder from centisecond quantization
-- Output duration covers at least one full ping-pong cycle **and** the full source GIF animation
+- Output duration covers at least one full cycle **and** the full source GIF animation
 
 ### Wide GIFs — static centering
 
@@ -300,7 +312,9 @@ The `snap_to_clean_fps()` function always selects a value from `[10, 12.5, 20, 2
 | Very slow conversion | Increase `MAX_WORKERS` if you have an SSD and multiple CPU cores |
 | Colors look too saturated | Switch to `MODE = "anime"` or lower `SATURATION` in `"custom"` mode |
 | Output looks too dark | Raise `BRIGHTNESS` (e.g. `0.05`) or `GAMMA` (e.g. `0.95`) |
-| Scroll too fast / too slow | Adjust `SCROLL_SPEED_PX_S` |
+| Scroll too fast / too slow | Adjust `SCROLL_SPEED_PX_S` (default: `24.0`) |
+| Too much scrolling, action hard to follow | Increase `BOTTOM_CROP_PCT` (e.g. `0.20`) or reduce `SCROLL_SPEED_PX_S` |
+| Center hold too short / too long | Adjust `PAUSE_CENTER_S` (default: `1.5`) |
 | Color banding on gradients (sky, shadows) | Switch to `MODE = "anime"` or `MODE = "cinema"` for gentler colorimetry — dithering cannot be used with scrolling content (causes streaks) |
 
 ---
