@@ -176,31 +176,34 @@ def process_file(filename, folder_in, folder_out):
     scroll_dist = effective_h - 32   # pixels to scroll (0 = image fits, center it)
 
     if scroll_dist > 0:
-        # ── Scroll: top → bottom → center → hold → (loop) ───────────────────
-        # Step size (px/frame) to maintain a constant scroll speed regardless of FPS
+        # ── Scroll: top → bottom → center → hold until GIF ends ──────────────
+        # Step size (px/frame) for constant scroll speed
         step = max(1, round(SCROLL_SPEED_PX_S / fps_render))
 
-        # Center of the image = where the action is
+        # Center = where the action is
         center = scroll_dist // 2
 
         frames_down = math.ceil(scroll_dist / step)              # top → bottom
         frames_up   = math.ceil((scroll_dist - center) / step)   # bottom → center
-        frames_hold = round(PAUSE_CENTER_S * fps_render)          # hold at center
-        frames_sequence = frames_down + frames_up + frames_hold
+        frames_move = frames_down + frames_up                     # total movement
 
-        duration_cycle = frames_sequence / fps_render
-        num_cycles  = max(1, math.ceil(duration_src / duration_cycle)) if duration_src > 0 else 1
-        duration_out = str(num_cycles * duration_cycle)
+        # Minimum hold = PAUSE_CENTER_S, but hold is extended if source GIF is longer.
+        # The GIF plays exactly ONE ping-pong pass, then holds at center until the end.
+        frames_hold_min = round(PAUSE_CENTER_S * fps_render)
+        frames_src      = max(1, round(duration_src * fps_render)) if duration_src > 0 else 1
+        frames_total    = max(frames_move + frames_hold_min, frames_src)
+        frames_hold     = frames_total - frames_move   # actual hold (≥ minimum)
 
-        # n_seq = position within the current cycle (resets every frames_sequence)
-        # Phase 1 (n_seq ≤ frames_down)  : scroll down  0 → scroll_dist
-        # Phase 2 (n_seq > frames_down)  : scroll up    scroll_dist → center
-        #   max(..., center) naturally holds at center for the remaining frames_hold
-        n_seq  = f"mod(n,{frames_sequence})"
+        duration_out = str(frames_total / fps_render)
+
+        # No mod() — single pass only, n grows from 0 to frames_total-1.
+        # Phase 1 (n ≤ frames_down)  : scroll down  0 → scroll_dist
+        # Phase 2 (n > frames_down)  : scroll up    scroll_dist → center
+        #   max(..., center) naturally holds at center for all remaining frames
         crop_y = (
-            f"if(lte({n_seq},{frames_down}),"
-            f"min({n_seq}*{step},{scroll_dist}),"
-            f"max({scroll_dist}-({n_seq}-{frames_down})*{step},{center}))"
+            f"if(lte(n,{frames_down}),"
+            f"min(n*{step},{scroll_dist}),"
+            f"max({scroll_dist}-(n-{frames_down})*{step},{center}))"
         )
 
         logger.info(
@@ -208,8 +211,9 @@ def process_file(filename, folder_in, folder_out):
             f"→ 128x{scaled_h} (effective 128x{effective_h}, crop→128x32) | "
             f"scroll={scroll_dist}px | center={center}px | "
             f"fps={fps_render}fps ({100/fps_render:.0f}cs) | step={step}px | "
-            f"speed≈{step*fps_render:.0f}px/s | down={frames_down}f up={frames_up}f hold={frames_hold}f | "
-            f"cycle={duration_cycle:.2f}s×{num_cycles}={float(duration_out):.2f}s"
+            f"speed≈{step*fps_render:.0f}px/s | "
+            f"down={frames_down}f up={frames_up}f hold={frames_hold}f ({frames_hold/fps_render:.1f}s) | "
+            f"total={float(duration_out):.2f}s"
         )
     else:
         # ── Static centering ─────────────────────────────────────────────────
