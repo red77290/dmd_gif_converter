@@ -23,6 +23,16 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ## 🖥️ Interface graphique — nouveauté v2.0
 
+### Captures d'écran
+
+**Aperçu source** — lecture animée du fichier original, curseurs de trim, panneau de paramètres complet :
+
+![Aperçu source](media/UI_SOURCE.png)
+
+**Aperçu DMD** — le rendu réel 128×32 agrandi ×5, prêt à flasher :
+
+![Aperçu DMD](media/UI_PREVIEW.png)
+
 ### Fonctionnalités
 
 | Fonctionnalité | Détails |
