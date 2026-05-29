@@ -114,8 +114,8 @@ pip install customtkinter Pillow "darkdetect==0.7.1"
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/fjgordillo86/RetroPixelLED-Lite.git
-cd RetroPixelLED-Lite/dmd_gif_converter
+git clone [https://github.com/fjgordillo86/RetroPixelLED-Lite.git](https://github.com/red77290/dmd_gif_converter.git)
+cd /dmd_gif_converter
 ```
 
 Then launch with the script for your OS — **it sets everything up automatically on the first run** (creates a Python venv, installs dependencies):
