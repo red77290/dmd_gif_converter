@@ -1,304 +1,224 @@
-# 🎞️ dmd_gif_converter.py — GIF Converter for 128×32 DMD LED Panels
+# 🎞️ DMD GIF Converter — v2.0
 
-Converts any animated GIF into a format optimized for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
+Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
+
+Now ships with a **full cross-platform graphical interface** — no command line needed.
 
 ## ✨ What it does
 
-| Input GIF | Output behavior |
+| Source | Output behaviour |
 |---|---|
-| **Taller than 32px** (character, scene) | Scroll **top → bottom → center → pause** then loop |
-| **Wider than tall** (logo, banner) | Vertical centering, natural GIF duration preserved |
+| **Taller than 32 px** (character, scene) | Scroll **top → bottom → centre → hold** then loop |
+| **Wider than tall** (logo, banner) | Vertical centring, natural GIF duration preserved |
 
 **Processing pipeline:**
-1. Black background composite → eliminates source transparency (no clock bleeding through)
-2. Proportional scale to 128px wide, bottom `BOTTOM_CROP_PCT`% ignored (feet/floor = not important)
+1. Black background composite → eliminates source transparency (no clock bleed-through)
+2. Proportional scale to 128 px wide, `bottom_crop_pct` % of bottom ignored (feet/floor)
 3. Colorimetry boost for LED panels (contrast, saturation, gamma, sharpening)
-4. 128×32 crop with smart scroll: top → bottom → center → hold
-5. Palette generation on actually-displayed pixels only (256 colors)
+4. 128×32 crop with smart scroll: top → bottom → centre → hold
+5. Palette generation on actually-displayed pixels only (256 colours)
 6. GIF encoding with transparency compression disabled
+
+---
+
+## 🖥️ Graphical interface — new in v2.0
+
+### Features at a glance
+
+| Feature | Details |
+|---|---|
+| **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
+| **Animated source preview** | Plays the source file directly in the app |
+| **DMD preview** | Runs the full conversion pipeline and shows the 128×32 result scaled ×5 |
+| **Trim / clip** | Set start and end time — single-file conversion only |
+| **All parameters exposed** | Sliders and drop-downs for every setting |
+| **Batch folder** | Convert an entire folder in one click |
+| **Convert all listed files** | One click to process the whole current list |
+| **Real-time log** | Live progress feed in the UI |
+| **Cross-platform** | macOS · Windows · Linux |
+
+### Launch
+
+```bash
+python3 dmd_gif_converter_ui.py      # macOS / Linux
+python  dmd_gif_converter_ui.py      # Windows
+```
 
 ---
 
 ## 📋 Requirements
 
-### System dependencies
+### 1 — System: Python 3.8+ and FFmpeg
 
-The script requires **Python 3.8+** and **FFmpeg** (including `ffprobe`).
-
----
-
-### 🍎 macOS
-
-**Option A — Homebrew (recommended)**
+#### 🍎 macOS
 ```bash
-# Install Homebrew if not already installed
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install FFmpeg
 brew install ffmpeg
 ```
 
-**Option B — MacPorts**
-```bash
-sudo port install ffmpeg
-```
-
-**Verify:**
-```bash
-python3 --version   # must be 3.8+
-ffmpeg -version
-ffprobe -version
-```
-
-> Python comes pre-installed on macOS. If needed: `brew install python`
-
----
-
-### 🪟 Windows
-
-**1. Python**
-
-Download and install from [python.org](https://www.python.org/downloads/).  
-⚠️ Check **"Add Python to PATH"** during installation.
-
-**2. FFmpeg**
-
-**Option A — winget (Windows 10/11, recommended)**
+#### 🪟 Windows
 ```powershell
 winget install Gyan.FFmpeg
 ```
+Or download from [ffmpeg.org](https://ffmpeg.org/download.html) and add `C:\ffmpeg\bin` to your `PATH`.
 
-**Option B — Manual**
-1. Download the *full build* from [ffmpeg.org/download.html](https://ffmpeg.org/download.html) → Windows → gyan.dev
-2. Extract to a permanent location (e.g. `C:\ffmpeg\`)
-3. Add `C:\ffmpeg\bin` to your **PATH** environment variable:
-   - Search "Environment variables" in Start menu
-   - `System variables` → `Path` → `Edit` → `New` → `C:\ffmpeg\bin`
-4. Restart your terminal
-
-**Verify (PowerShell or cmd):**
-```powershell
-python --version
-ffmpeg -version
-ffprobe -version
+#### 🐧 Linux (Debian / Ubuntu)
+```bash
+sudo apt update && sudo apt install python3 ffmpeg
 ```
 
----
-
-### 🐧 Linux
-
-**Debian / Ubuntu / Mint**
+**Fedora:**
 ```bash
-sudo apt update
-sudo apt install python3 ffmpeg
-```
-
-**Fedora / RHEL / CentOS**
-```bash
-sudo dnf install python3 ffmpeg
-# If ffmpeg is not in official repos:
 sudo dnf install https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
-sudo dnf install ffmpeg
+sudo dnf install python3 ffmpeg
 ```
 
-**Arch Linux**
+**Arch:**
 ```bash
 sudo pacman -S python ffmpeg
 ```
 
 **Verify:**
 ```bash
-python3 --version
+python3 --version   # 3.8+
 ffmpeg -version
-ffprobe -version
 ```
 
 ---
 
-## 🐍 Python dependencies
+### 2 — Python dependencies (UI only)
 
-**`dmd_gif_converter.py` has zero external dependencies** — it uses only the Python standard library (`os`, `subprocess`, `math`, `json`, `logging`, `concurrent.futures`).
-
-> ⚠️ The `requirements.txt` in this repository applies to **other scripts** in the project (older versions using Pillow / numpy / imageio). It is **not needed** for `dmd_gif_converter.py`.
-
-No `pip install` is required. If you want an isolated environment anyway:
-
-**macOS / Linux**
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 dmd_gif_converter.py
+pip install -r requirements_ui.txt
 ```
 
-**Windows (PowerShell)**
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python dmd_gif_converter.py
+Or directly:
+```bash
+pip install customtkinter Pillow
 ```
+
+> `dmd_gif_converter.py` (CLI / engine) has **zero external dependencies** — standard library only.
 
 ---
 
-## 📁 Folder structure
+## 🚀 Quick start
 
-The script auto-detects all folders starting with `gifs_` in the **current working directory** and creates a matching output folder with the prefix removed.
+```bash
+git clone https://github.com/fjgordillo86/RetroPixelLED-Lite.git
+cd RetroPixelLED-Lite/dmd_gif_converter
+```
+
+Then launch with the script for your OS — **it sets everything up automatically on the first run** (creates a Python venv, installs dependencies):
+
+| OS | Command |
+|---|---|
+| 🍎 macOS / 🐧 Linux | `./launch_ui.sh` |
+| 🪟 Windows (double-click) | `launch_ui.bat` |
+| 🪟 Windows (PowerShell) | `.\launch_ui.ps1` |
+
+> **Why a launcher script instead of plain `python3`?**  
+> On macOS, the system Python (CommandLineTools) ships with Tcl/Tk 8.5 which **crashes on macOS 15+ / 26 (Tahoe)**. The launcher automatically picks Homebrew Python 3.13 (Tk 9.0) and isolates dependencies in a venv.  
+> On Linux, make sure `python3-tk` is installed alongside Python:  
+> `sudo apt install python3-tk` · `sudo dnf install python3-tkinter` · `sudo pacman -S tk`
+
+---
+
+## ▶️ CLI usage (no UI required)
+
+Place the script next to folders named `gifs_*`:
 
 ```
 my_folder/
 ├── dmd_gif_converter.py
-│
-├── gifs_Arcade/             ← source folder (must start with "gifs_")
+├── gifs_Arcade/
 │   ├── metalslug.gif
-│   ├── kof98.gif
-│   └── ...
-├── gifs_Consoles/           ← another source folder
-│   ├── mario.gif
-│   └── ...
-│
-│   (after running the script)
-│
-├── Arcade/                  ← generated output (same name without "gifs_")
-│   ├── metalslug.gif        ← 128×32, ping-pong scroll
-│   └── kof98.gif
-└── Consoles/
-    └── mario.gif            ← 128×32, centered or scrolled
+│   └── kof98.mp4        ← MP4, MKV, MOV, AVI, WEBM… also accepted
+└── gifs_Consoles/
+    └── mario.gif
 ```
 
----
-
-## ▶️ Usage
-
 ```bash
-# Place the script in the folder that contains your gifs_* folders
-cd /path/to/my_folder
-
-# Run
+cd my_folder
 python3 dmd_gif_converter.py        # macOS / Linux
 python  dmd_gif_converter.py        # Windows
 ```
 
-**Sample log output:**
+Output folders are created automatically (`Arcade/`, `Consoles/`…).
+
+**Sample log:**
 ```
 12:34:01 [INFO   ] === Processing: gifs_Arcade → Arcade (42 file(s)) | mode=pixel_art ===
-12:34:02 [INFO   ] [SCROLL ] metalslug.gif | src 320x240 → 128x96 (effective 128x82, crop→128x32) | scroll=50px | center=25px | fps=12.5fps (8cs) | step=2px | speed≈24px/s | down=25f up=13f hold=19f | cycle=4.54s×1=4.54s
+12:34:02 [INFO   ] [SCROLL ] metalslug.gif | src 320x240 → 128x96 (effective 128x82) | scroll=50px | fps=12.5 | total=4.54s
 12:34:04 [INFO   ] [OK    ] metalslug.gif
-12:34:02 [INFO   ] [CENTER ] logo.gif | src 640x80 → 128x16 (effective 128x14, centered) | fps_src=10.0 → render=10 | duration=3.00s
-12:34:05 [INFO   ] [OK    ] logo.gif
 ```
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Parameters
 
-All parameters are grouped at the **top of the file** with inline documentation:
+All parameters are available as **sliders/drop-downs in the UI** and as constants at the top of the script for CLI use.
 
-### Content mode (`MODE`)
+### Content mode
 
-**This is the only setting you need to change** based on your source GIFs. It automatically adjusts all colorimetry and dithering:
+| Mode | Best for | Saturation | Sharpening |
+|---|---|---|---|
+| `pixel_art` | Retro sprites, arcade, consoles ★ default | `2.2` 🔥 | `1.8` aggressive |
+| `anime` | Softer for complex gradients | `1.9` ✨ | `1.3` crisp |
+| `cinema` | Live-action films, photography | `1.3` 🎞️ | `0.8` gentle |
+| `custom` | Manual control | free | free |
 
-```python
-MODE = "pixel_art"   # "pixel_art" | "anime" | "cinema" | "custom"
-```
+### Full parameter reference
 
-| Mode | Best for | Saturation | Sharpening | Dithering |
-|---|---|---|---|---|
-| `"pixel_art"` | Retro sprites, arcade, consoles, **anime** ★ default | `2.2` 🔥 max | `1.8` aggressive | `none` |
-| `"anime"` | Softer alternative if `pixel_art` feels too aggressive | `1.9` ✨ vibrant | `1.3` crisp outlines | `none` |
-| `"cinema"` | Live-action films, real photography | `1.3` 🎞️ natural | `0.8` gentle | `none` |
-| `"custom"` | Manual tuning of each constant | free | free | free |
+| Parameter | Default | Description |
+|---|---|---|
+| `max_workers` | `2` | Parallel ffmpeg processes |
+| `scroll_speed` | `24.0` | Scroll speed (px/s) |
+| `bottom_crop_pct` | `0.15` | Bottom fraction ignored (feet/floor) |
+| `pause_center_s` | `1.5` | Pause at centre before restarting (s) |
+| `fps_min` | `10.0` | Upsample sources below this FPS |
+| `fps_max` | `25.0` | Hard cap (ESP32 compatibility) |
+| `contrast` | `1.6` | Custom mode — 0.5 to 2.5 |
+| `saturation` | `2.2` | Custom mode — 0.0 to 4.0 |
+| `brightness` | `-0.03` | Custom mode — LED glow compensation |
+| `gamma` | `0.85` | Custom mode — midtone correction |
+| `sharpen_lum` | `1.8` | Luma sharpening |
+| `sharpen_chr` | `0.5` | Chroma sharpening |
+| `dither` | `none` | Recommended `none` for scrolling content |
 
-> ✅ **`"pixel_art"` is the default and produces output identical to the original `moving_gif_V0.py`** — same contrast, saturation, gamma, sharpening and filter graph. If your anime GIFs looked great in V0, keep this mode.  
-> The `"anime"` preset is only an optional softer alternative to try if a specific source looks over-saturated or too sharp.  
-> Bayer dithering applies its grid pattern in **output frame coordinates** (fixed on screen). As content scrolls, the same pixel appears at a different Y position each frame while the Bayer grid stays still → **persistent vertical streaks in the scroll direction**.  
-> Error-diffusion (`sierra2_4a`) causes temporal noise that "crawls" frame to frame.  
-> At 128×32 with 256 colors, flat quantization (`"none"`) gives cleaner results than any dithering for scrolling content.  
-> If your source never scrolls (logo/banner, `distance ≤ 0`), you can set `DITHER = "bayer:bayer_scale=1"` in `"custom"` mode for smoother gradients.
+### `MAX_WORKERS` tuning
 
-### Detailed parameters
-
-```python
-# ── Parallelism ────────────────────────────────────────────────────────────────
-MAX_WORKERS = 2        # Number of parallel ffmpeg conversions
-
-# ── Scroll ─────────────────────────────────────────────────────────────────────
-SCROLL_SPEED_PX_S = 24.0   # Scroll speed (pixels per second) — lower = smoother feel
-
-BOTTOM_CROP_PCT = 0.15     # Fraction of image bottom to ignore (feet, floor, empty bg)
-                           # 0.00 = full height | 0.15 = trim 15% | 0.25 = trim 25%
-
-PAUSE_CENTER_S = 1.5       # Seconds to hold at center before restarting the cycle
-                           # Center = where the action is. 0.0 = no pause.
-
-# ── Render FPS ──────────────────────────────────────────────────────────────────
-FPS_MIN = 10.0             # Upsample sources below this FPS
-FPS_MAX = 25.0             # Hard cap for ESP32 compatibility
-
-# ── Manual colorimetry (MODE = "custom" only) ───────────────────────────────────
-CONTRAST    = 1.6          # 0.5–2.0  Dark/bright plane separation
-SATURATION  = 2.2          # 0.0–3.0  Color vividness
-BRIGHTNESS  = -0.03        # -1–+1    LED glow compensation
-GAMMA       = 0.85         # 0.1–2.0  Midtone correction (< 1 = darker mids)
-SHARPEN_LUM = 1.8          # Luma sharpening  → crisp edges
-SHARPEN_CHR = 0.5          # Chroma sharpening → no color fringing
-DITHER      = "none"       # "none" | "bayer:bayer_scale=1" | "bayer:bayer_scale=2"
-```
-
-### `MAX_WORKERS` tuning guide
-
-| Machine | `MAX_WORKERS` |
+| Machine | Recommended |
 |---|---|
-| MacBook Pro M3 Pro (11 cores, 36GB) | `8` |
-| Desktop SSD, 8+ cores, 16GB+ RAM | `6` to `8` |
-| Desktop SSD, 4 cores, 8GB RAM | `3` to `4` |
+| MacBook Pro M3 Pro (11 cores, 36 GB) | `8` |
+| Desktop SSD, 8+ cores, 16 GB+ | `6`–`8` |
+| Desktop SSD, 4 cores, 8 GB | `3`–`4` |
 | Laptop or HDD | `2` |
 
 ---
 
 ## 🔍 How it works
 
-### Tall GIFs — smart scroll
-
-When the source GIF is taller than 32px after scaling, the script generates a **3-phase scroll cycle**:
+### Tall sources — smart scroll
 
 ```
-top (y=0) ──scroll down──▶ bottom ──scroll up──▶ center ──hold──▶ (loop to top)
+top (y=0) ──scroll down──▶ bottom ──scroll up──▶ centre ──hold──▶ (loop to top)
 ```
 
-- **Bottom crop** (`BOTTOM_CROP_PCT`): the bottom 15% of the image (feet, floor, empty space) is ignored — reduces scroll distance and makes the motion less aggressive
-- **Center hold** (`PAUSE_CENTER_S`): the image pauses at the center (where the action is) for 1.5s before restarting
-- Scroll speed is **constant in px/second** regardless of source FPS (`SCROLL_SPEED_PX_S = 24.0`)
-- Output FPS is snapped to a **clean GIF value** (10, 12.5, 20 or 25fps) to avoid judder from centisecond quantization
-- Output duration covers at least one full cycle **and** the full source GIF animation
+- **Bottom crop**: bottom 15 % (feet, floor) ignored → shorter scroll distance
+- **Centre hold**: 1.5 s pause at centre before restarting
+- Speed constant in **px/second** regardless of source FPS
+- Output FPS snapped to clean GIF values (10, 12.5, 20, 25 fps) — no judder
 
-### Wide GIFs — static centering
+### Wide sources — static centring
 
-When the GIF is wider than tall (logo, banner), it is **vertically centered** on the 32px panel. The natural source duration is respected (minimum 1 second).
+Vertically centred on the 32-pixel panel. Natural source duration preserved (minimum 1 s).
 
 ### Transparency elimination
 
-Two layers of protection against the ESP32 frame buffer (clock) showing through:
-
-| Layer | Mechanism | Blocks |
-|---|---|---|
-| `color=black` + `overlay` | ffmpeg compositor | Source alpha / transparent frames (sprite with transparent background) |
-| `-gifflags -offsetting-transdiff` | GIF muxer option | Delta encoding (unchanged pixels marked transparent → clock bleeds through) |
-
-### GIF FPS quantization
-
-GIF stores frame delays as **whole centiseconds**. Using a non-clean FPS causes rounding:
-
-```
-Requested FPS  → Frame delay  → Actual FPS    → Effect
-─────────────────────────────────────────────────────────
-15.0 fps       → 6.67cs → 7cs → 14.28 fps  ❌ visible judder
-12.0 fps       → 8.33cs → 8cs → 12.5  fps  ⚠️ slight
-10.0 fps       → 10cs         → 10.0  fps  ✅ clean
-12.5 fps       → 8cs          → 12.5  fps  ✅ clean
-20.0 fps       → 5cs          → 20.0  fps  ✅ clean
-25.0 fps       → 4cs          → 25.0  fps  ✅ clean
-```
-
-The `snap_to_clean_fps()` function always selects a value from `[10, 12.5, 20, 25]`.
+| Layer | Mechanism |
+|---|---|
+| `color=black` + `overlay` | Source alpha → black — no clock bleed-through |
+| `-gifflags -offsetting-transdiff` | Disables GIF delta encoding |
 
 ---
 
@@ -306,16 +226,14 @@ The `snap_to_clean_fps()` function always selects a value from `[10, 12.5, 20, 2
 
 | Problem | Solution |
 |---|---|
-| `ffmpeg: command not found` | FFmpeg is not in PATH → re-read the installation section |
-| `[ERROR] xxx.gif - metadata unreadable` | Corrupted or unsupported GIF → inspect the file |
-| No folders found | Check that source folders start with `gifs_` and that you run the script from the right directory |
-| Very slow conversion | Increase `MAX_WORKERS` if you have an SSD and multiple CPU cores |
-| Colors look too saturated | Switch to `MODE = "anime"` or lower `SATURATION` in `"custom"` mode |
-| Output looks too dark | Raise `BRIGHTNESS` (e.g. `0.05`) or `GAMMA` (e.g. `0.95`) |
-| Scroll too fast / too slow | Adjust `SCROLL_SPEED_PX_S` (default: `24.0`) |
-| Too much scrolling, action hard to follow | Increase `BOTTOM_CROP_PCT` (e.g. `0.20`) or reduce `SCROLL_SPEED_PX_S` |
-| Center hold too short / too long | Adjust `PAUSE_CENTER_S` (default: `1.5`) |
-| Color banding on gradients (sky, shadows) | Switch to `MODE = "anime"` or `MODE = "cinema"` for gentler colorimetry — dithering cannot be used with scrolling content (causes streaks) |
+| `ffmpeg: command not found` | FFmpeg not in PATH → re-read installation section |
+| Preview is blank | FFmpeg must be installed and in PATH |
+| `[ERROR] xxx — metadata unreadable` | Corrupted or unsupported file |
+| Very slow conversion | Increase `max_workers` (SSD + multi-core recommended) |
+| Colours too saturated | Switch to `anime` or lower `saturation` in `custom` mode |
+| Output too dark | Raise `brightness` (e.g. `0.05`) or `gamma` (e.g. `0.95`) |
+| Scroll too fast / slow | Adjust `scroll_speed` (default `24.0`) |
+| Banding on gradients | Switch to `anime` or `cinema` — dithering causes streaks with scrolling |
 
 ---
 
@@ -328,6 +246,8 @@ MIT — free to use, modify and distribute.
 ## 🙏 Credits
 
 - **[FFmpeg](https://ffmpeg.org/)** — video processing engine
+- **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** — modern cross-platform UI framework
+- **[Pillow](https://python-pillow.org/)** — image handling for the UI preview
 - **[Bitbank2](https://github.com/bitbank2/AnimatedGIF)** — AnimatedGIF library for ESP32
 - **[Mrfaptastic](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA)** — high-performance DMA HUB75 driver for ESP32
 - **[Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite)** — the project this tool was built for

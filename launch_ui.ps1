@@ -1,0 +1,80 @@
+# =============================================================================
+# launch_ui.ps1 — DMD GIF Converter UI launcher
+# Windows (PowerShell)
+#
+# First run : creates a Python venv and installs all dependencies.
+# Next runs  : activates the venv and starts the UI directly.
+#
+# Usage:
+#   Right-click → "Run with PowerShell"
+#   or from a terminal:  .\launch_ui.ps1
+#
+# If you get an execution-policy error, run once as admin:
+#   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+# =============================================================================
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Venv      = Join-Path $ScriptDir ".venv"
+$UI        = Join-Path $ScriptDir "dmd_gif_converter_ui.py"
+$VenvPy    = Join-Path $Venv "Scripts\python.exe"
+$VenvPip   = Join-Path $Venv "Scripts\pip.exe"
+
+# ── Check / create venv ───────────────────────────────────────────────────────
+if (-not (Test-Path $VenvPy)) {
+    Write-Host "==> First run — setting up virtual environment..." -ForegroundColor Cyan
+    Write-Host ""
+
+    # Find Python 3.10+
+    $Python = $null
+    foreach ($candidate in @("python3.13","python3.12","python3.11","python3.10","python3","python","py")) {
+        try {
+            $p = Get-Command $candidate -ErrorAction Stop
+            $Python = $p.Source
+            break
+        } catch { }
+    }
+
+    if (-not $Python) {
+        Write-Host "ERROR: Python 3.10+ not found." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Download and install from https://www.python.org/downloads/"
+        Write-Host "  Make sure to check 'Add Python to PATH' during installation."
+        Write-Host ""
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+
+    $version = & $Python --version 2>&1
+    Write-Host "    Python  : $Python" -ForegroundColor Gray
+    Write-Host "    Version : $version" -ForegroundColor Gray
+    Write-Host ""
+
+    & $Python -m venv $Venv
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Could not create virtual environment." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+
+    Write-Host "==> Installing dependencies..." -ForegroundColor Cyan
+    & $VenvPip install --quiet --upgrade pip
+    & $VenvPip install --quiet customtkinter Pillow "darkdetect==0.7.1"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: pip install failed." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+
+    Write-Host "==> Environment ready." -ForegroundColor Green
+    Write-Host ""
+}
+
+# ── Launch the UI ─────────────────────────────────────────────────────────────
+& $VenvPy $UI
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "ERROR: The application exited with an error. See output above." -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+}
+
