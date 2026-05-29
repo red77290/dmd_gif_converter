@@ -23,6 +23,16 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ## 🖥️ Graphical interface — new in v2.0
 
+### Screenshots
+
+**Source preview** — animated playback of the original file, trim sliders, full parameter panel:
+
+![Source preview](media/UI_SOURCE.png)
+
+**DMD preview** — the actual 128×32 render scaled ×5, ready to flash:
+
+![DMD preview](media/UI_PREVIEW.png)
+
 ### Features at a glance
 
 | Feature | Details |
