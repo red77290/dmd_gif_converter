@@ -123,7 +123,7 @@ pip install customtkinter Pillow "darkdetect==0.7.1"
 ## 🚀 Démarrage rapide
 
 ```bash
-git clone https://github.com/fjgordillo86/RetroPixelLED-Lite.git
+git clone https://github.com/red77290/dmd_gif_converter.git
 cd RetroPixelLED-Lite/dmd_gif_converter
 ```
 
