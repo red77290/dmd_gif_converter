@@ -8,14 +8,14 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 | Situation | Comportement |
 |---|---|
-| GIF / vidéo **plus haut que 32 px** (personnage, scène) | Scroll **haut → bas → centre → pause** puis boucle |
+| GIF / vidéo **plus haut que 32 px** (personnage, scène) | Scroll N cycles (bas→haut), puis s'arrête à une position configurable |
 | GIF / vidéo **plus large que haut** (logo, bannière) | Centrage statique, durée naturelle respectée |
 
 **Pipeline de traitement :**
 1. Fond noir composite (élimine la transparence → plus d'horloge qui transparaît)
 2. Mise à l'échelle proportionnelle à 128 px de large, `bottom_crop_pct` % du bas ignorés
 3. Colorimétrie boostée pour dalle LED (contraste, saturation, gamma, sharpening)
-4. Crop 128×32 avec scroll intelligent : haut → bas → centre → pause
+4. Crop 128×32 avec scroll intelligent (nombre de cycles + position d'arrêt)
 5. Génération de palette sur les pixels réellement affichés (256 couleurs)
 6. Encodage GIF sans transparence ni delta encoding
 
@@ -50,8 +50,8 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 ### Lancer l'interface
 
 ```bash
-python3 dmd_gif_converter_ui.py      # macOS / Linux
-python  dmd_gif_converter_ui.py      # Windows
+./launch_ui.sh          # macOS / Linux  (recommandé — gère le venv automatiquement)
+python3 dmd_gif_converter_ui.py   # si le venv est déjà activé
 ```
 
 ---
@@ -63,10 +63,7 @@ python  dmd_gif_converter_ui.py      # Windows
 #### 🍎 macOS
 
 ```bash
-# Installer Homebrew si pas déjà installé
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Installer FFmpeg
 brew install ffmpeg
 ```
 
@@ -116,7 +113,7 @@ pip install -r requirements_ui.txt
 
 Ou directement :
 ```bash
-pip install customtkinter Pillow
+pip install customtkinter Pillow "darkdetect==0.7.1"
 ```
 
 > `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.
@@ -160,17 +157,31 @@ mon_dossier/
 ```
 
 ```bash
-cd mon_dossier
-python3 dmd_gif_converter.py    # macOS / Linux
-python  dmd_gif_converter.py    # Windows
+# Par défaut : mode pixel_art, détecte automatiquement les dossiers gifs_*
+./dmd_gif_converter.py
+
+# Changer le mode ou le nombre de workers
+./dmd_gif_converter.py --mode anime --workers 6
+
+# Traiter des dossiers spécifiques
+./dmd_gif_converter.py gifs_Arcade gifs_Consoles
+
+# Colorimétrie custom complète
+./dmd_gif_converter.py --mode custom --saturation 2.8 --contrast 1.7
+
+# Régler le scroll
+./dmd_gif_converter.py --scroll-speed 32 --scroll-cycles 1.75
+
+# Aide
+./dmd_gif_converter.py --help
 ```
 
 Les dossiers de sortie sont créés automatiquement (`Arcade/`, `Consoles/`…).
 
 **Exemple de log :**
 ```
-12:34:01 [INFO   ] === Processing: gifs_Arcade → Arcade (42 file(s)) | mode=pixel_art ===
-12:34:02 [INFO   ] [SCROLL ] mslug.gif | src 320x240 → 128x96 | scroll=50px | fps=12.5 | total=4.54s
+12:34:01 [INFO   ] === gifs_Arcade → Arcade  (42 file(s)) | mode=pixel_art ===
+12:34:02 [INFO   ] [SCROLL ] mslug.gif | src 320x240 → 128x96 | scroll_dist=64px | cycles=1.5 (full=1 frac=0.50 stop=32px) | fps=12.5 | total=4.54s
 12:34:04 [INFO   ] [OK    ] mslug.gif
 ```
 
@@ -178,7 +189,7 @@ Les dossiers de sortie sont créés automatiquement (`Arcade/`, `Consoles/`…).
 
 ## ⚙️ Paramètres
 
-Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans l'interface**, et sous forme de constantes en haut du script pour l'usage CLI.
+Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans l'interface**, et via **flags `--arg` en ligne de commande**.
 
 ### Mode de contenu
 
@@ -191,23 +202,35 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 
 ### Référence complète des paramètres
 
-| Paramètre | Défaut | Description |
-|---|---|---|
-| `max_workers` | `2` | Processus ffmpeg en parallèle |
-| `scroll_speed` | `24.0` | Vitesse de défilement (px/s) |
-| `bottom_crop_pct` | `0.15` | Part du bas ignorée (pieds, sol) |
-| `pause_center_s` | `1.5` | Pause au centre avant de recommencer (s) |
-| `fps_min` | `10.0` | FPS minimum (upsampling si source plus lent) |
-| `fps_max` | `25.0` | FPS maximum (plafond ESP32) |
-| `contrast` | `1.6` | Mode custom — 0.5 à 2.5 |
-| `saturation` | `2.2` | Mode custom — 0.0 à 4.0 |
-| `brightness` | `-0.03` | Mode custom — compensation dalle LED |
-| `gamma` | `0.85` | Mode custom — correction gamma |
-| `sharpen_lum` | `1.8` | Netteté luminance |
-| `sharpen_chr` | `0.5` | Netteté chroma |
-| `dither` | `none` | `none` recommandé pour contenu défilant |
+| Paramètre | Flag CLI | Défaut | Description |
+|---|---|---|---|
+| `max_workers` | `--workers` | `2` | Processus ffmpeg en parallèle |
+| `scroll_speed` | `--scroll-speed` | `24.0` | Vitesse de défilement (px/s) |
+| `bottom_crop_pct` | `--bottom-crop` | `0.15` | Part du bas ignorée (pieds, sol) |
+| `scroll_cycles` | `--scroll-cycles` | `1.5` | Nombre de cycles + position d'arrêt (voir ci-dessous) |
+| `fps_min` | `--fps-min` | `10.0` | FPS minimum (upsampling si source plus lent) |
+| `fps_max` | `--fps-max` | `25.0` | FPS maximum (plafond ESP32) |
+| `contrast` | `--contrast` | `1.6` | Mode custom — 0.5 à 2.5 |
+| `saturation` | `--saturation` | `2.2` | Mode custom — 0.0 à 4.0 |
+| `brightness` | `--brightness` | `-0.03` | Mode custom — compensation dalle LED |
+| `gamma` | `--gamma` | `0.85` | Mode custom — correction gamma |
+| `sharpen_lum` | `--sharpen-lum` | `1.8` | Netteté luminance |
+| `sharpen_chr` | `--sharpen-chr` | `0.5` | Netteté chroma |
+| `dither` | `--dither` | `none` | `none` recommandé pour contenu défilant |
 
-### Réglage de `max_workers`
+### `scroll_cycles` expliqué
+
+La partie entière = nombre d'**allers-retours complets** (bas→haut) ; la partie fractionnaire × `scroll_dist` = **position d'arrêt** où l'image se fige jusqu'à la fin de la source :
+
+| Valeur | Comportement |
+|---|---|
+| `0.5` | Descend à mi-chemin, s'arrête au centre |
+| `1.0` | 1 aller-retour, s'arrête en haut |
+| `1.5` ★ défaut | 1 aller-retour puis s'arrête au centre (50 %) |
+| `1.75` | 1 aller-retour puis s'arrête aux ¾ |
+| `2.0` | 2 allers-retours, s'arrête en haut |
+
+### Réglage de `--workers`
 
 | Machine | Recommandé |
 |---|---|
@@ -223,11 +246,12 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 ### Contenu haut — scroll intelligent
 
 ```
-haut (y=0) ──scroll bas──▶ bas ──scroll haut──▶ centre ──pause──▶ (retour en haut)
+[cycle 1]  haut ──bas──▶ fond ──haut──▶ haut
+[partiel]  haut ──bas──▶ stop_pos ──pause jusqu'à fin source──▶ (boucle)
 ```
 
-- **Crop du bas** : les 15 % inférieurs (pieds, sol, fond vide) sont ignorés → réduit la distance de scroll
-- **Pause au centre** : 1,5 s de pause avant de recommencer le cycle
+- **`scroll_cycles = 1.5`** (défaut) : 1 aller-retour complet puis descend jusqu'au centre (50 % de la distance), s'arrête là
+- **Crop du bas** (`bottom_crop_pct`) : les 15 % inférieurs (pieds, sol) sont ignorés → distance de scroll réduite
 - Vitesse **constante en px/seconde** indépendamment du FPS source
 - FPS de sortie snappé sur les valeurs propres GIF (10, 12,5, 20, 25 fps) — zéro judder
 
@@ -251,10 +275,11 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | `ffmpeg: command not found` | FFmpeg non installé ou pas dans le PATH |
 | Aperçu vide | FFmpeg doit être installé et accessible dans le PATH |
 | `[ERROR] xxx — metadata unreadable` | Fichier corrompu ou format non supporté |
-| Conversion très lente | Augmenter `max_workers` (SSD + multi-cœurs recommandé) |
-| Couleurs trop saturées | Passer en mode `anime` ou baisser `saturation` en mode `custom` |
-| GIF trop sombre | Augmenter `brightness` (ex. `0.05`) ou `gamma` (ex. `0.95`) |
-| Scroll trop rapide / lent | Ajuster `scroll_speed` (défaut : `24.0`) |
+| Conversion très lente | Augmenter `--workers` (SSD + multi-cœurs recommandé) |
+| Couleurs trop saturées | Passer en `--mode anime` ou baisser `--saturation` en mode custom |
+| GIF trop sombre | Augmenter `--brightness` (ex. `0.05`) ou `--gamma` (ex. `0.95`) |
+| Scroll trop rapide / lent | Ajuster `--scroll-speed` (défaut : `24.0`) |
+| Arrêt à la mauvaise position | Ajuster `--scroll-cycles` (défaut `1.5` = arrêt au centre) |
 | Banding sur les dégradés | Passer en mode `anime` ou `cinema` — le dithering crée des raies avec du contenu défilant |
 
 ---
@@ -273,4 +298,3 @@ MIT — libre d'utilisation, modification et distribution.
 - **[Bitbank2](https://github.com/bitbank2/AnimatedGIF)** — bibliothèque AnimatedGIF pour ESP32
 - **[Mrfaptastic](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA)** — moteur DMA HUB75 pour ESP32
 - Projet **[Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite)**
-
