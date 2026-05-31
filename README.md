@@ -23,6 +23,16 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ## 🖥️ Graphical interface
 
+### Screenshots
+
+**Dual live preview** — SOURCE (animated source, left) + DMD OUTPUT (128×32 result scaled ×2.5, right):
+
+![Source and DMD preview](media/UI_SOURCE.png)
+
+**Advanced Settings panel** — Manual positioning + visual effects, all hidden by default:
+
+![Advanced Settings](media/UI_PREVIEW.png)
+
 ### Features at a glance
 
 | Feature | Details |

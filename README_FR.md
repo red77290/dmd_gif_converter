@@ -23,6 +23,16 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ## 🖥️ Interface graphique
 
+### Captures d'écran
+
+**Double aperçu en direct** — SOURCE (source animée, gauche) + SORTIE DMD (résultat 128×32 agrandi ×2.5, droite) :
+
+![Aperçu source et DMD](media/UI_SOURCE.png)
+
+**Panneau Paramètres Avancés** — Positionnement manuel + effets visuels, masqués par défaut :
+
+![Paramètres avancés](media/UI_PREVIEW.png)
+
 ### Fonctionnalités
 
 | Fonctionnalité | Détails |
