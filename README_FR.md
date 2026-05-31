@@ -143,8 +143,8 @@ pip install customtkinter Pillow "darkdetect==0.7.1"
 ## 🚀 Démarrage rapide
 
 ```bash
-git clone https://github.com/fjgordillo86/RetroPixelLED-Lite.git
-cd RetroPixelLED-Lite/dmd_gif_converter
+git clone hhttps://github.com/red77290/dmd_gif_converter.git
+cd dmd_gif_converter
 ```
 
 Lancez ensuite le script correspondant à votre OS — **tout est configuré automatiquement à la première exécution** (création du venv, installation des dépendances) :
