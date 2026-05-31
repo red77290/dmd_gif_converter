@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v2.0
+# 🎞️ DMD GIF Converter — v2.1
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
@@ -21,31 +21,51 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ---
 
-## 🖥️ Interface graphique — nouveauté v2.0
-
-### Captures d'écran
-
-**Aperçu source** — lecture animée du fichier original, curseurs de trim, panneau de paramètres complet :
-
-![Aperçu source](media/UI_SOURCE.png)
-
-**Aperçu DMD** — le rendu réel 128×32 agrandi ×5, prêt à flasher :
-
-![Aperçu DMD](media/UI_PREVIEW.png)
+## 🖥️ Interface graphique
 
 ### Fonctionnalités
 
 | Fonctionnalité | Détails |
 |---|---|
 | **Import par fichier ou dossier** | ➕ fichiers individuels, 📂 dossier entier — tous les formats vidéo acceptés |
-| **Prévisualisation source animée** | Lit le fichier source directement dans l'application |
-| **Aperçu DMD** | Lance le pipeline complet et affiche le rendu 128×32 agrandi ×5 |
-| **Trim / extrait** | Définit un début et une fin dans l'aperçu — mode fichier unique uniquement |
-| **Tous les paramètres accessibles** | Curseurs et listes déroulantes pour chaque réglage |
+| **Double aperçu en direct** | SOURCE (animée, gauche) + SORTIE DMD 128×32 (droite) — toujours visibles côte à côte |
+| **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
+| **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
+| **Tous les paramètres standards** | Curseurs et menus pour le mode, le scroll, les FPS, la colorimétrie |
+| **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, valeurs par défaut = sortie identique à v2.0 |
 | **Batch dossier** | Convertit un dossier entier en un clic |
 | **Convertir toute la liste** | Un clic pour traiter tous les fichiers listés |
 | **Journal en temps réel** | Progression visible dans l'interface |
 | **Multi-plateforme** | macOS · Windows · Linux |
+
+### 🔧 Panneau Paramètres Avancés (nouveau en v2.1)
+
+Cliquer sur le bouton **🔧 Advanced Settings ▼** en bas du panneau Paramètres.  
+Toutes les valeurs par défaut = « aucun effet » — la sortie standard est identique à v2.0.
+
+#### 📍 Positionnement
+
+| Contrôle | Description | Défaut |
+|---|---|---|
+| **Auto vertical scroll** ✅ | Coché = comportement de défilement standard (inchangé) | ✅ coché |
+| **Zoom** | Multiplicateur de mise à l'échelle avant crop (1.0 = ajusté à 128 px) | `1.0×` |
+| **X offset** | Décalage horizontal du crop en pixels (mode manuel uniquement) | `0 px` |
+| **Y offset** | Décalage vertical du crop en pixels (mode manuel uniquement) | `0 px` |
+
+> Décocher **Auto vertical scroll** pour activer le mode manuel. Augmenter d'abord le Zoom,
+> puis régler X/Y pour choisir exactement quelle fenêtre 128×32 extraire.
+> L'aperçu DMD se met à jour automatiquement ~2 s après l'arrêt du glissement.
+
+#### ✨ Effets visuels
+
+| Effet | Filtre | Défaut |
+|---|---|---|
+| **Hue shift** (décalage de teinte) | ffmpeg `hue=h=…` | `0°` (inactif) |
+| **Noise reduction** (réduction de bruit) | ffmpeg `hqdn3d` | `0` (inactif) |
+| **Film grain** (grain de film) | ffmpeg `noise=alls=…` | `0` (inactif) |
+| **Vignette** | ffmpeg `vignette` | ☐ décoché |
+
+Tous les effets sont désactivés par défaut. Une valeur non nulle ajoute des passes de filtres ffmpeg *après* la chaîne de colorimétrie standard.
 
 ### Lancer l'interface
 
@@ -218,6 +238,19 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `sharpen_chr` | `--sharpen-chr` | `0.5` | Netteté chroma |
 | `dither` | `--dither` | `none` | `none` recommandé pour contenu défilant |
 
+**Paramètres avancés** (interface uniquement — pas de flag CLI, tous défaut = aucun changement) :
+
+| Paramètre | Défaut | Description |
+|---|---|---|
+| `scroll_enabled` | `True` | `False` = mode crop manuel |
+| `zoom` | `1.0` | Multiplicateur de mise à l'échelle avant crop |
+| `manual_x` | `0` | Décalage horizontal du crop en px (mode manuel) |
+| `manual_y` | `0` | Décalage vertical du crop en px (mode manuel) |
+| `hue_shift` | `0.0` | Rotation de teinte en degrés |
+| `noise_reduction` | `0.0` | Force du filtre hqdn3d |
+| `film_grain` | `0` | Quantité de bruit additif |
+| `vignette` | `False` | Assombrissement des bords |
+
 ### `scroll_cycles` expliqué
 
 La partie entière = nombre d'**allers-retours complets** (bas→haut) ; la partie fractionnaire × `scroll_dist` = **position d'arrêt** où l'image se fige jusqu'à la fin de la source :
@@ -281,6 +314,8 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Scroll trop rapide / lent | Ajuster `--scroll-speed` (défaut : `24.0`) |
 | Arrêt à la mauvaise position | Ajuster `--scroll-cycles` (défaut `1.5` = arrêt au centre) |
 | Banding sur les dégradés | Passer en mode `anime` ou `cinema` — le dithering crée des raies avec du contenu défilant |
+| L'aperçu DMD ne se rafraîchit pas | Attendre ~2 s après le dernier déplacement de curseur ; vérifier qu'un fichier est sélectionné |
+| Mode manuel montre la mauvaise zone | Augmenter d'abord le Zoom, puis ajuster les curseurs X/Y |
 
 ---
 
