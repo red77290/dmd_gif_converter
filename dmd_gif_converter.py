@@ -16,6 +16,8 @@ import json
 import logging
 from pathlib import Path
 
+from dmd_auto_action import AutoActionConfig, preprocess_video_for_dmd
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-7s] %(message)s",
@@ -76,6 +78,19 @@ DEFAULT_PARAMS = {
     "noise_reduction": 0.0,   # hqdn3d strength, 0 = disabled
     "film_grain":      0,     # additive noise amount, 0 = disabled
     "vignette":        False, # apply a vignette darkening at the edges
+    # ── Duration cap ──────────────────────────────────────────────────────
+    # 0.0 = no limit; >0 = hard cap in seconds applied after trim_start.
+    # Useful for batch processing: clips longer than max_duration are
+    # trimmed from trim_start to trim_start + max_duration.
+    "max_duration": 0.0,
+    # ── Advanced: Auto action framing (pre-ffmpeg stage) ─────────────────
+    "auto_action_enabled": False,
+    "action_detector":     "person",   # person | motion | hybrid | center
+    "action_strength":     0.65,       # 0..1 tighter framing around action
+    "action_smoothness":   0.85,       # 0..0.98 camera smoothing
+    "action_zoom_max":     1.8,        # max dynamic zoom factor
+    "action_padding":      0.20,       # ROI padding before aspect crop
+    "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
 }
 
 _PRESETS = {
@@ -144,14 +159,52 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         if callback:
             callback(msg, level)
 
+    # Optional preprocessor temp dir (auto action mode).
+    temp_pre_src = None
+
+    # ── Auto action preprocessor (outside ffmpeg pipeline) ───────────────────
+    # Default is disabled, so this block has zero effect unless explicitly enabled.
+    if bool(p.get("auto_action_enabled", False)):
+        cfg = AutoActionConfig(
+            detector=str(p.get("action_detector", "person") or "person"),
+            strength=float(p.get("action_strength", 0.65)),
+            smoothness=float(p.get("action_smoothness", 0.85)),
+            zoom_max=float(p.get("action_zoom_max", 1.8)),
+            padding=float(p.get("action_padding", 0.20)),
+            intro_duration=float(p.get("action_intro", 1.5)),
+            start_s=float(start_s) if start_s is not None else None,
+            end_s=float(end_s) if end_s is not None else None,
+        )
+        ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg)
+        if ok_pre and pre_src:
+            src_path = pre_src
+            temp_pre_src = os.path.dirname(pre_src)
+            # Trim already applied during preprocessor stage.
+            start_s = None
+            end_s = None
+            log(f"[ACTION ] {filename} — {pre_msg}")
+        else:
+            # Fall back to normal pipeline when dependency/tooling is unavailable.
+            log(f"[ACTION ] {filename} — disabled fallback: {pre_msg}", "warning")
+
     src_w, src_h, fps_src, duration_full = get_metadata(src_path)
     if not src_w:
+        if temp_pre_src and os.path.isdir(temp_pre_src):
+            import shutil
+            shutil.rmtree(temp_pre_src, ignore_errors=True)
         log(f"[ERROR] {filename} — could not read metadata", "error")
         return False, f"[ERROR] {filename} — metadata unreadable"
 
-    # ── Clip timing ───────────────────────────────────────────────────────────
+    # ── Clip timing ───────────────────────────────────────────────────────
     trim_start   = float(start_s) if start_s is not None else 0.0
     trim_end     = float(end_s)   if end_s   is not None else duration_full
+
+    # Apply max_duration cap: trim_end = min(trim_end, trim_start + max_duration)
+    max_dur = float(p.get("max_duration", 0.0))
+    if max_dur > 0.0:
+        trim_end = min(trim_end, trim_start + max_dur)
+        log(f"[MAXDUR ] {filename} — cap {max_dur:.0f}s → [{trim_start:.1f}s … {trim_end:.1f}s]")
+
     duration_src = max(0.1, trim_end - trim_start)
 
     # ── Colorimetry preset ────────────────────────────────────────────────────
@@ -312,6 +365,10 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
+    if temp_pre_src and os.path.isdir(temp_pre_src):
+        import shutil
+        shutil.rmtree(temp_pre_src, ignore_errors=True)
+
     if result.returncode == 0:
         log(f"[OK    ] {filename}")
         return True, f"[OK] {filename}"
@@ -323,7 +380,21 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
 
 def process_folder(folder_in, folder_out, params=None, callback=None):
-    """Batch-convert all supported video files in a folder to DMD GIFs."""
+    """Batch-convert all supported video files in a folder to DMD GIFs.
+
+    When auto_action is enabled the pipeline is split into two parallelised
+    phases to avoid CPU over-subscription:
+
+      Phase 1 — OpenCV preprocessing (all files, N workers)
+        Each file gets a native-resolution 4:1 cropped intermediate MP4.
+
+      Phase 2 — ffmpeg conversion (all files, N workers)
+        ffmpeg processes the preprocessed MP4 (or original when phase 1 is
+        skipped) to produce the final 128×32 DMD GIF.
+
+    When auto_action is disabled the two phases are merged into a single pass
+    (identical behaviour to the previous single-phase pipeline).
+    """
     p = {**DEFAULT_PARAMS, **(params or {})}
     os.makedirs(str(folder_out), exist_ok=True)
 
@@ -335,13 +406,76 @@ def process_folder(folder_in, folder_out, params=None, callback=None):
         logger.warning(f"No supported files found in {folder_in}")
         return []
 
-    def _one(filename):
-        src = os.path.join(str(folder_in), filename)
-        out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
-        return process_file(src, out, params=p, callback=callback)
+    max_workers = p["max_workers"]
+    auto_enabled = bool(p.get("auto_action_enabled", False))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=p["max_workers"]) as ex:
-        results = list(ex.map(_one, files))
+    # ── Single-phase path (auto_action disabled — unchanged behaviour) ─────────
+    if not auto_enabled:
+        def _one(filename):
+            src = os.path.join(str(folder_in), filename)
+            out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
+            return process_file(src, out, params=p, callback=callback)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            return list(ex.map(_one, files))
+
+    # ── Two-phase path (auto_action enabled) ──────────────────────────────────
+    # Phase 1: run OpenCV preprocessing for all files in parallel.
+    # This avoids interleaving heavy HOG detection with ffmpeg on the same cores.
+    def log(msg, level="info"):
+        getattr(logger, level)(msg)
+        if callback:
+            callback(msg, level)
+
+    action_cfg = AutoActionConfig(
+        detector=str(p.get("action_detector", "person") or "person"),
+        strength=float(p.get("action_strength", 0.65)),
+        smoothness=float(p.get("action_smoothness", 0.85)),
+        zoom_max=float(p.get("action_zoom_max", 1.8)),
+        padding=float(p.get("action_padding", 0.20)),
+        intro_duration=float(p.get("action_intro", 1.5)),
+    )
+
+    def _preprocess(filename):
+        src = os.path.join(str(folder_in), filename)
+        cfg = AutoActionConfig(
+            detector=action_cfg.detector,
+            strength=action_cfg.strength,
+            smoothness=action_cfg.smoothness,
+            zoom_max=action_cfg.zoom_max,
+            padding=action_cfg.padding,
+            intro_duration=action_cfg.intro_duration,
+        )
+        ok, pre_src, msg = preprocess_video_for_dmd(src, cfg)
+        if ok and pre_src:
+            log(f"[ACTION ] {filename} — {msg}")
+            return filename, pre_src, os.path.dirname(pre_src)
+        else:
+            log(f"[ACTION ] {filename} — fallback: {msg}", "warning")
+            return filename, src, None   # use original on failure
+
+    log(f"[BATCH  ] Phase 1/2 — auto_action preprocessing ({len(files)} files, {max_workers} workers)")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        pre_results = list(ex.map(_preprocess, files))
+
+    # Phase 2: run ffmpeg on all (pre-processed or original) sources in parallel.
+    # Build a params copy with auto_action disabled so process_file skips
+    # the preprocessor stage (it already ran in phase 1).
+    p_no_action = {**p, "auto_action_enabled": False}
+
+    log(f"[BATCH  ] Phase 2/2 — ffmpeg conversion ({len(files)} files, {max_workers} workers)")
+
+    def _convert(item):
+        filename, pre_src, tmpdir = item
+        out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
+        success, msg = process_file(pre_src, out, params=p_no_action, callback=callback)
+        if tmpdir and os.path.isdir(tmpdir):
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        return success, msg
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        results = list(ex.map(_convert, pre_results))
 
     return results
 
@@ -436,6 +570,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="GIF dithering (default: none — use bayer only for static content).",
     )
 
+    # ── Auto action framing (experimental pre-ffmpeg stage) ─────────────
+    ag = p.add_argument_group("Auto action framing (experimental)")
+    ag.add_argument(
+        "--max-duration", type=float, default=DEFAULT_PARAMS["max_duration"], metavar="F",
+        help="Hard cap on clip length in seconds (0 = no limit, default). "
+             "Combined with trim-start to place the window anywhere in the source.",
+    )
+    ag.add_argument(
+        "--auto-action", action="store_true", default=DEFAULT_PARAMS["auto_action_enabled"],
+        help="Enable pre-ffmpeg cinematic auto framing (default: disabled).",
+    )
+    ag.add_argument(
+        "--action-detector", default=DEFAULT_PARAMS["action_detector"],
+        choices=["person", "motion", "hybrid", "center"],
+        metavar="STR",
+        help="Auto framing detector mode (default: person).",
+    )
+    ag.add_argument("--action-strength", type=float, default=DEFAULT_PARAMS["action_strength"], metavar="F")
+    ag.add_argument("--action-smoothness", type=float, default=DEFAULT_PARAMS["action_smoothness"], metavar="F")
+    ag.add_argument("--action-zoom-max", type=float, default=DEFAULT_PARAMS["action_zoom_max"], metavar="F")
+    ag.add_argument("--action-padding", type=float, default=DEFAULT_PARAMS["action_padding"], metavar="F")
+
     return p
 
 
@@ -458,6 +614,13 @@ if __name__ == "__main__":
         "sharpen_lum":    args.sharpen_lum,
         "sharpen_chr":    args.sharpen_chr,
         "dither":         args.dither,
+        "auto_action_enabled": args.auto_action,
+        "action_detector": args.action_detector,
+        "action_strength": args.action_strength,
+        "action_smoothness": args.action_smoothness,
+        "action_zoom_max": args.action_zoom_max,
+        "action_padding": args.action_padding,
+        "max_duration": args.max_duration,
     }
     prefix = args.prefix
 

@@ -4,6 +4,87 @@ Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a form
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
+---
+
+## 🤖 Auto Action Framing — AI-powered cinematic camera
+
+> **TL;DR — enable it, sit back, and watch the magic.**  
+> Hidden in **🔧 Advanced Settings → 🎯 Auto Action Framing** · disabled by default.
+
+This is the most powerful feature of the converter. Instead of a static crop or a simple vertical scroll, the **Auto Action engine** analyses every frame of your source video using **computer vision (OpenCV)** and generates a fully automated, **cinema-quality camera movement** before handing the result to ffmpeg:
+
+```
+Source video  ──[AI analysis]──▶  4:1 cinematic crop  ──[ffmpeg]──▶  128×32 DMD GIF
+                    ↑
+        Person detection (HOG)
+        Motion detection (optical flow)
+        Smooth exponential camera
+        Intro panoramic establishing shot
+```
+
+### What it does automatically
+
+| Phase | What happens |
+|---|---|
+| **Intro panoramic** | Opens with a wide establishing shot (1.5 s by default) so the viewer understands the scene |
+| **AI detection** | Detects persons (HOG/SVM) and/or motion (background subtraction + optical flow) frame by frame |
+| **Cinematic framing** | Computes the ideal 4:1 crop window centred on the action with configurable padding |
+| **Smooth camera** | Applies exponential smoothing to simulate a real camera operator — no jitter, no jumps |
+| **Tail extension** | If the source is too short for the camera to finish its movement, the last frame is extended until the camera settles |
+
+### Why it is disabled by default
+
+Auto Action performs **full CPU-intensive computer vision** on every frame (HOG person detection, background subtraction, optical flow). This is significantly heavier than a simple ffmpeg pass:
+
+- **CPU usage:** ~2–5× higher than standard conversion
+- **Processing time per file:** roughly doubles
+- **Memory:** each worker loads the full video as raw frames
+
+For batch conversion of large libraries, this cost adds up. If you are converting retro sprites or pixel-art GIFs, the standard scroll pipeline is already optimal.  
+**For live footage, sports, cinema clips, or any video with a person or moving subject → enable Auto Action and get professional results automatically.**
+
+### How to enable it
+
+1. Open the UI with `./launch_ui.sh`
+2. Select a video file
+3. Scroll down to the **⚙️ Parameters** panel → click **🔧 Advanced Settings ▼**
+4. At the very top of the panel: **🎯 Auto Action Framing**
+5. Check **"Enable cinematic auto-framing before ffmpeg"**
+6. The **AUTO ACTION** preview canvas (middle) will generate immediately
+
+### Parameters
+
+| Parameter | UI slider | Default | Description |
+|---|---|---|---|
+| `auto_action_enabled` | Checkbox | `OFF` | Master switch — enable AI framing |
+| `action_detector` | Detection mode menu | `person` | `person` · `motion` · `hybrid` · `center` |
+| `action_intro` | Intro panoramic | `1.5 s` | Duration of the wide establishing shot prepended before AI tracking |
+| `action_strength` | Action strength | `0.65` | `0` = loose framing · `1` = tight zoom on subject |
+| `action_smoothness` | Camera smooth | `0.85` | `0` = instant · `0.98` = very slow camera |
+| `action_zoom_max` | Zoom max | `1.8×` | Maximum dynamic zoom the AI camera can apply |
+| `action_padding` | ROI padding | `0.20` | Extra space added around the detected subject |
+
+### Detector modes
+
+| Mode | Best for |
+|---|---|
+| `person` ★ default | Videos with people — uses HOG/SVM person detector, falls back to motion |
+| `motion` | Sports, vehicles, fast action without clear human silhouette |
+| `hybrid` | Merges person + motion bounding boxes — broadest coverage |
+| `center` | No detection — keeps the camera centred (intro pan only) |
+
+### Requirements
+
+Auto Action requires **OpenCV** (installed automatically by `launch_ui.sh`):
+
+```bash
+pip install opencv-python   # or: pip install -r requirements_ui.txt
+```
+
+If OpenCV is not installed, the feature is silently skipped and the standard pipeline runs instead — **no crash, no data loss**.
+
+---
+
 ## ✨ What it does
 
 | Source | Output behaviour |
@@ -38,7 +119,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 | Feature | Details |
 |---|---|
 | **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
-| **Dual live preview** | SOURCE (animated, left) + DMD OUTPUT (128×32 scaled, right) — always visible side by side |
+| **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
 | **All standard parameters** | Sliders and drop-downs for mode, scroll, FPS, colorimetry |
@@ -52,6 +133,32 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 Expand the **🔧 Advanced Settings ▼** button at the bottom of the Parameters panel.  
 All values default to "no effect" — standard output is 100% identical to v2.0.
+
+#### 🎯 Auto Action Framing — AI cinematic camera
+
+> See the full dedicated section at the top of this README for the complete guide.
+
+- **Disabled by default** — enable when you need intelligent camera movement on live footage
+- Runs a full **computer vision pass** (OpenCV) on every frame before ffmpeg
+- Generates a **4:1 native-resolution** intermediate clip that follows the action
+- The **AUTO ACTION** preview canvas (middle panel) shows the result in real time
+- Falls back gracefully to standard conversion if OpenCV is unavailable
+
+| Slider | Default | Effect |
+|---|---|---|
+| Enable checkbox | `OFF` | Master switch |
+| Detection mode | `person` | `person` / `motion` / `hybrid` / `center` |
+| **Intro panoramic** | `1.5 s` | Wide establishing shot prepended (first frame frozen, full source replayed) |
+| Action strength | `0.65` | How tightly the camera frames the subject |
+| Camera smooth | `0.85` | Exponential smoothing — higher = slower camera |
+| Zoom max | `1.8×` | Maximum allowed zoom-in |
+| ROI padding | `0.20` | Breathing room around the detected subject |
+
+#### ⏱ Max Duration
+
+Caps the output clip length to a configurable maximum (default **2:00 min**).  
+Move the **trim Start** slider to place the 2-minute window anywhere in the source video.  
+Set to `0` or uncheck to disable.
 
 #### 📍 Positioning
 
@@ -134,10 +241,11 @@ pip install -r requirements_ui.txt
 
 Or directly:
 ```bash
-pip install customtkinter Pillow "darkdetect==0.7.1"
+pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python
 ```
 
-> `dmd_gif_converter.py` (CLI / engine) has **zero external dependencies** — standard library only.
+> `dmd_gif_converter.py` (CLI / engine) has **zero external dependencies** — standard library only.  
+> `opencv-python` is optional — only required for the **Auto Action** AI feature. If absent, Auto Action is silently skipped.
 
 ---
 
@@ -239,7 +347,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `sharpen_chr` | `--sharpen-chr` | `0.5` | Chroma sharpening |
 | `dither` | `--dither` | `none` | Recommended `none` for scrolling content |
 
-**Advanced parameters** (UI only — no CLI flags, all default = no change):
+**Advanced parameters** (UI — all default = no change):
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -251,6 +359,14 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `noise_reduction` | `0.0` | hqdn3d strength |
 | `film_grain` | `0` | Additive noise amount |
 | `vignette` | `False` | Edge darkening vignette |
+| `max_duration` | `0.0` | Hard cap on clip length in seconds (`0` = no limit) |
+| `auto_action_enabled` | `False` | 🤖 AI cinematic camera — see dedicated section |
+| `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
+| `action_intro` | `1.5` | Establishing shot duration in seconds |
+| `action_strength` | `0.65` | Framing tightness around subject |
+| `action_smoothness` | `0.85` | Camera exponential smoothing factor |
+| `action_zoom_max` | `1.8` | Maximum AI zoom factor |
+| `action_padding` | `0.20` | Padding around detected ROI |
 
 ### `scroll_cycles` explained
 
@@ -317,6 +433,9 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Banding on gradients | Switch to `anime` or `cinema` — dithering causes streaks with scrolling |
 | DMD preview not auto-refreshing | Wait ~2 s after last slider move; make sure a file is selected |
 | Manual mode shows wrong area | Increase Zoom first, then move X/Y sliders |
+| Auto Action says "OpenCV not installed" | Run `pip install opencv-python` or re-run `./launch_ui.sh` (installs automatically) |
+| Auto Action preview is slow to appear | Normal — AI analysis takes a few seconds per video; progress shown in the AUTO ACTION canvas |
+| Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
 
 ---
 

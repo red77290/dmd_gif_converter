@@ -4,6 +4,87 @@ Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, W
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
+---
+
+## 🤖 Auto Action Framing — caméra cinématique par IA
+
+> **En bref — activez-le, laissez tourner, admirez le résultat.**  
+> Accessible dans **🔧 Advanced Settings → 🎯 Auto Action Framing** · désactivé par défaut.
+
+C'est la fonctionnalité la plus puissante du convertisseur. Au lieu d'un crop statique ou d'un simple scroll vertical, le moteur **Auto Action** analyse chaque image de votre vidéo source avec de la **vision par ordinateur (OpenCV)** et génère automatiquement des **mouvements de caméra de qualité cinématique** avant de transmettre le résultat à ffmpeg :
+
+```
+Vidéo source  ──[analyse IA]──▶  crop 4:1 cinématique  ──[ffmpeg]──▶  GIF DMD 128×32
+                     ↑
+         Détection de personnes (HOG/SVM)
+         Détection de mouvement (soustraction de fond + flux optique)
+         Caméra virtuelle à lissage exponentiel
+         Plan large d'introduction panoramique
+```
+
+### Ce que ça fait automatiquement
+
+| Phase | Ce qui se passe |
+|---|---|
+| **Panoramique intro** | Commence par un plan large (1,5 s par défaut) pour que le spectateur comprenne la scène |
+| **Détection IA** | Détecte les personnes (HOG/SVM) et/ou les mouvements image par image |
+| **Cadrage cinématique** | Calcule la fenêtre de crop 4:1 idéale centrée sur l'action, avec un padding configurable |
+| **Caméra lissée** | Applique un lissage exponentiel pour simuler un vrai caméraman — pas de saccades |
+| **Extension queue** | Si la vidéo est trop courte pour que la caméra finisse son mouvement, la dernière image est prolongée jusqu'à convergence |
+
+### Pourquoi c'est désactivé par défaut
+
+Auto Action effectue une **analyse d'image intensive en CPU** sur chaque frame (détection HOG de personnes, soustraction de fond, flux optique). C'est nettement plus lourd qu'une simple passe ffmpeg :
+
+- **Charge CPU :** 2 à 5× plus élevée que la conversion standard
+- **Temps de traitement par fichier :** approximativement doublé
+- **Mémoire :** chaque worker charge la vidéo entière en frames brutes
+
+Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scroll standard est déjà optimal.  
+**Pour de la vidéo live, du sport, du cinéma, ou toute vidéo avec une personne ou un sujet en mouvement → activez Auto Action et obtenez un résultat professionnel entièrement automatisé.**
+
+### Comment l'activer
+
+1. Lancez l'interface avec `./launch_ui.sh`
+2. Sélectionnez un fichier vidéo
+3. Descendez dans le panneau **⚙️ Parameters** → cliquez sur **🔧 Advanced Settings ▼**
+4. En haut du panneau : **🎯 Auto Action Framing**
+5. Cochez **"Enable cinematic auto-framing before ffmpeg"**
+6. Le canvas de prévisualisation **AUTO ACTION** (milieu) se génère immédiatement
+
+### Paramètres
+
+| Paramètre | Curseur UI | Défaut | Description |
+|---|---|---|---|
+| `auto_action_enabled` | Case à cocher | `OFF` | Interrupteur principal — active le cadrage IA |
+| `action_detector` | Mode de détection | `person` | `person` · `motion` · `hybrid` · `center` |
+| `action_intro` | Intro panoramique | `1,5 s` | Durée du plan large ajouté en préfixe (première image gelée, source rejouée intégralement) |
+| `action_strength` | Action strength | `0,65` | `0` = cadrage large · `1` = zoom serré sur le sujet |
+| `action_smoothness` | Camera smooth | `0,85` | `0` = instantané · `0,98` = caméra très lente |
+| `action_zoom_max` | Zoom max | `1,8×` | Zoom dynamique maximum que la caméra IA peut appliquer |
+| `action_padding` | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
+
+### Modes de détection
+
+| Mode | Idéal pour |
+|---|---|
+| `person` ★ défaut | Vidéos avec des personnes — HOG/SVM, repli sur le mouvement si aucune silhouette détectée |
+| `motion` | Sport, véhicules, action rapide sans silhouette humaine claire |
+| `hybrid` | Fusionne les boîtes person + motion — couverture la plus large |
+| `center` | Pas de détection — caméra centrée (panoramique intro uniquement) |
+
+### Dépendance requise
+
+Auto Action nécessite **OpenCV** (installé automatiquement par `launch_ui.sh`) :
+
+```bash
+pip install opencv-python   # ou : pip install -r requirements_ui.txt
+```
+
+Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée et le pipeline standard s'exécute à la place — **pas de crash, pas de perte de données**.
+
+---
+
 ## ✨ Ce que fait le script
 
 | Situation | Comportement |
@@ -38,7 +119,7 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 | Fonctionnalité | Détails |
 |---|---|
 | **Import par fichier ou dossier** | ➕ fichiers individuels, 📂 dossier entier — tous les formats vidéo acceptés |
-| **Double aperçu en direct** | SOURCE (animée, gauche) + SORTIE DMD 128×32 (droite) — toujours visibles côte à côte |
+| **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
 | **Tous les paramètres standards** | Curseurs et menus pour le mode, le scroll, les FPS, la colorimétrie |
@@ -52,6 +133,32 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 Cliquer sur le bouton **🔧 Advanced Settings ▼** en bas du panneau Paramètres.  
 Toutes les valeurs par défaut = « aucun effet » — la sortie standard est identique à v2.0.
+
+#### 🎯 Auto Action Framing — caméra IA
+
+> Voir la section dédiée en tête de ce README pour le guide complet.
+
+- **Désactivé par défaut** — à activer pour tout contenu vidéo live avec de l'action
+- Effectue une **passe de vision par ordinateur** (OpenCV) sur chaque image avant ffmpeg
+- Génère un clip intermédiaire à **résolution native 4:1** qui suit l'action
+- Le canvas de prévisualisation **AUTO ACTION** (panneau central) montre le résultat en temps réel
+- Repli automatique sur la conversion standard si OpenCV n'est pas installé
+
+| Curseur | Défaut | Effet |
+|---|---|---|
+| Case à cocher | `OFF` | Interrupteur principal |
+| Mode de détection | `person` | `person` / `motion` / `hybrid` / `center` |
+| **Intro panoramique** | `1,5 s` | Plan large en préfixe (première image gelée, source rejouée intégralement) |
+| Action strength | `0,65` | Serrage du cadre autour du sujet |
+| Camera smooth | `0,85` | Lissage exponentiel — plus élevé = caméra plus lente |
+| Zoom max | `1,8×` | Zoom maximum autorisé |
+| ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
+
+#### ⏱ Max Duration
+
+Limite la durée du clip de sortie (défaut **2:00 min**).  
+Déplacer le curseur **Start** du trim pour placer la fenêtre de 2 minutes où vous le souhaitez dans la vidéo.  
+Mettre à `0` ou décocher pour désactiver.
 
 #### 📍 Positionnement
 
@@ -143,10 +250,11 @@ pip install -r requirements_ui.txt
 
 Ou directement :
 ```bash
-pip install customtkinter Pillow "darkdetect==0.7.1"
+pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python
 ```
 
-> `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.
+> `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.  
+> `opencv-python` est optionnel — uniquement nécessaire pour la fonctionnalité **Auto Action** IA. En son absence, Auto Action est silencieusement ignoré.
 
 ---
 
@@ -248,7 +356,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `sharpen_chr` | `--sharpen-chr` | `0.5` | Netteté chroma |
 | `dither` | `--dither` | `none` | `none` recommandé pour contenu défilant |
 
-**Paramètres avancés** (interface uniquement — pas de flag CLI, tous défaut = aucun changement) :
+**Paramètres avancés** (interface uniquement — tous défaut = aucun changement) :
 
 | Paramètre | Défaut | Description |
 |---|---|---|
@@ -260,6 +368,14 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `noise_reduction` | `0.0` | Force du filtre hqdn3d |
 | `film_grain` | `0` | Quantité de bruit additif |
 | `vignette` | `False` | Assombrissement des bords |
+| `max_duration` | `0.0` | Durée maximale du clip en secondes (`0` = pas de limite) |
+| `auto_action_enabled` | `False` | 🤖 Caméra IA cinématique — voir section dédiée |
+| `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
+| `action_intro` | `1.5` | Durée du plan large d'introduction en secondes |
+| `action_strength` | `0.65` | Serrage du cadre autour du sujet |
+| `action_smoothness` | `0.85` | Facteur de lissage exponentiel de la caméra |
+| `action_zoom_max` | `1.8` | Zoom IA maximum |
+| `action_padding` | `0.20` | Marge autour du ROI détecté |
 
 ### `scroll_cycles` expliqué
 
@@ -326,6 +442,9 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Banding sur les dégradés | Passer en mode `anime` ou `cinema` — le dithering crée des raies avec du contenu défilant |
 | L'aperçu DMD ne se rafraîchit pas | Attendre ~2 s après le dernier déplacement de curseur ; vérifier qu'un fichier est sélectionné |
 | Mode manuel montre la mauvaise zone | Augmenter d'abord le Zoom, puis ajuster les curseurs X/Y |
+| Auto Action : « OpenCV not installed » | Lancer `pip install opencv-python` ou re-lancer `./launch_ui.sh` (installe automatiquement) |
+| Aperçu Auto Action lent à apparaître | Normal — l'analyse IA prend quelques secondes par vidéo ; progression affichée dans le canvas AUTO ACTION |
+| Résultat Auto Action incorrect | Essayer un autre **mode de détection** (`motion` ou `hybrid`) — le mode `person` fonctionne mieux avec des silhouettes humaines visibles |
 
 ---
 
