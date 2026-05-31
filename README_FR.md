@@ -106,13 +106,7 @@ Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée e
 
 ### Captures d'écran
 
-**Double aperçu en direct** — SOURCE (source animée, gauche) + SORTIE DMD (résultat 128×32 agrandi ×2.5, droite) :
-
-![Aperçu source et DMD](media/UI_SOURCE.png)
-
-**Panneau Paramètres Avancés** — Positionnement manuel + effets visuels, masqués par défaut :
-
-![Paramètres avancés](media/UI_PREVIEW.png)
+![DMD GIF Converter UI](media/UI_PREVIEW.png)
 
 ### Fonctionnalités
 

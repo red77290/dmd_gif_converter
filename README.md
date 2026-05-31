@@ -106,13 +106,7 @@ If OpenCV is not installed, the feature is silently skipped and the standard pip
 
 ### Screenshots
 
-**Dual live preview** — SOURCE (animated source, left) + DMD OUTPUT (128×32 result scaled ×2.5, right):
-
-![Source and DMD preview](media/UI_SOURCE.png)
-
-**Advanced Settings panel** — Manual positioning + visual effects, all hidden by default:
-
-![Advanced Settings](media/UI_PREVIEW.png)
+![DMD GIF Converter UI](media/UI_PREVIEW.png)
 
 ### Features at a glance
 
