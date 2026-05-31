@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v2.0
+# 🎞️ DMD GIF Converter — v2.1
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -21,31 +21,51 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ---
 
-## 🖥️ Graphical interface — new in v2.0
-
-### Screenshots
-
-**Source preview** — animated playback of the original file, trim sliders, full parameter panel:
-
-![Source preview](media/UI_SOURCE.png)
-
-**DMD preview** — the actual 128×32 render scaled ×5, ready to flash:
-
-![DMD preview](media/UI_PREVIEW.png)
+## 🖥️ Graphical interface
 
 ### Features at a glance
 
 | Feature | Details |
 |---|---|
 | **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
-| **Animated source preview** | Plays the source file directly in the app |
-| **DMD preview** | Runs the full conversion pipeline and shows the 128×32 result scaled ×5 |
+| **Dual live preview** | SOURCE (animated, left) + DMD OUTPUT (128×32 scaled, right) — always visible side by side |
+| **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
-| **All parameters exposed** | Sliders and drop-downs for every setting |
+| **All standard parameters** | Sliders and drop-downs for mode, scroll, FPS, colorimetry |
+| **🔧 Advanced Settings** | Collapsible panel — all extras hidden by default, default values never alter the output |
 | **Batch folder** | Convert an entire folder in one click |
 | **Convert all listed files** | One click to process the whole current list |
 | **Real-time log** | Live progress feed in the UI |
 | **Cross-platform** | macOS · Windows · Linux |
+
+### 🔧 Advanced Settings panel (new in v2.1)
+
+Expand the **🔧 Advanced Settings ▼** button at the bottom of the Parameters panel.  
+All values default to "no effect" — standard output is 100% identical to v2.0.
+
+#### 📍 Positioning
+
+| Control | Description | Default |
+|---|---|---|
+| **Auto vertical scroll** ✅ | When checked: standard scroll behaviour (unchanged) | ✅ checked |
+| **Zoom** | Scale multiplier before cropping (1.0 = fit to 128 px) | `1.0×` |
+| **X offset** | Horizontal crop start in pixels (manual mode only) | `0 px` |
+| **Y offset** | Vertical crop start in pixels (manual mode only) | `0 px` |
+
+> Uncheck **Auto vertical scroll** to enable manual mode. Zoom first, then set X/Y to
+> choose exactly which 128×32 window to crop from the scaled frame.
+> The DMD preview updates automatically ~2 s after you stop dragging.
+
+#### ✨ Visual Effects
+
+| Effect | Filter | Default |
+|---|---|---|
+| **Hue shift** | ffmpeg `hue=h=…` | `0°` (off) |
+| **Noise reduction** | ffmpeg `hqdn3d` | `0` (off) |
+| **Film grain** | ffmpeg `noise=alls=…` | `0` (off) |
+| **Vignette** | ffmpeg `vignette` | ☐ unchecked |
+
+All effects are disabled by default. Non-zero values add extra ffmpeg filter passes *after* the standard colorimetry chain.
 
 ### Launch
 
@@ -209,6 +229,19 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `sharpen_chr` | `--sharpen-chr` | `0.5` | Chroma sharpening |
 | `dither` | `--dither` | `none` | Recommended `none` for scrolling content |
 
+**Advanced parameters** (UI only — no CLI flags, all default = no change):
+
+| Parameter | Default | Description |
+|---|---|---|
+| `scroll_enabled` | `True` | `False` = manual crop mode |
+| `zoom` | `1.0` | Scale multiplier before crop (manual mode) |
+| `manual_x` | `0` | Horizontal crop offset px (manual mode) |
+| `manual_y` | `0` | Vertical crop offset px (manual mode) |
+| `hue_shift` | `0.0` | Hue rotation in degrees |
+| `noise_reduction` | `0.0` | hqdn3d strength |
+| `film_grain` | `0` | Additive noise amount |
+| `vignette` | `False` | Edge darkening vignette |
+
 ### `scroll_cycles` explained
 
 The integer part is the number of complete **round-trips** (down→up); the fractional part × `scroll_dist` is the **stop position** where the image holds until the source ends:
@@ -272,6 +305,8 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Scroll too fast / slow | Adjust `--scroll-speed` (default `24.0`) |
 | Stops at wrong position | Adjust `--scroll-cycles` (default `1.5` = centre hold) |
 | Banding on gradients | Switch to `anime` or `cinema` — dithering causes streaks with scrolling |
+| DMD preview not auto-refreshing | Wait ~2 s after last slider move; make sure a file is selected |
+| Manual mode shows wrong area | Increase Zoom first, then move X/Y sliders |
 
 ---
 

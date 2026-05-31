@@ -64,6 +64,18 @@ DEFAULT_PARAMS = {
     "sharpen_lum": 1.8,
     "sharpen_chr": 0.5,
     "dither": "none",
+    # ── Advanced: Positioning ──────────────────────────────────────────────────
+    # scroll_enabled=True  → default vertical auto-scroll behaviour (unchanged)
+    # scroll_enabled=False → manual crop at (manual_x, manual_y) with zoom
+    "scroll_enabled": True,
+    "zoom":           1.0,   # scale multiplier (1.0 = fit to 128 px width)
+    "manual_x":       0,     # horizontal crop offset in pixels (manual mode)
+    "manual_y":       0,     # vertical   crop offset in pixels (manual mode)
+    # ── Advanced: Visual effects (all default to "no change") ─────────────────
+    "hue_shift":       0.0,   # hue rotation in degrees, -180 … +180
+    "noise_reduction": 0.0,   # hqdn3d strength, 0 = disabled
+    "film_grain":      0,     # additive noise amount, 0 = disabled
+    "vignette":        False, # apply a vignette darkening at the edges
 }
 
 _PRESETS = {
@@ -151,92 +163,135 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         g  = p["gamma"];     sl = p["sharpen_lum"]; sc = p["sharpen_chr"]
         dither = p["dither"]
 
-    fps_render  = snap_to_clean_fps(fps_src, p["fps_min"], p["fps_max"])
-    scaled_h    = math.ceil(((128.0 / src_w) * src_h) / 2.0) * 2
-    effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
-    effective_h = max(effective_h, 32)
-    scroll_dist = effective_h - 32
+    fps_render = snap_to_clean_fps(fps_src, p["fps_min"], p["fps_max"])
 
-    if scroll_dist > 0:
-        step = max(1, round(p["scroll_speed"] / fps_render))
+    # ── Advanced parameters ────────────────────────────────────────────────────
+    scroll_enabled  = bool(p.get("scroll_enabled", True))
+    zoom            = max(0.25, float(p.get("zoom", 1.0)))
+    manual_x        = int(p.get("manual_x", 0))
+    manual_y        = int(p.get("manual_y", 0))
+    hue_shift       = float(p.get("hue_shift", 0.0))
+    noise_reduction = float(p.get("noise_reduction", 0.0))
+    film_grain      = int(p.get("film_grain", 0))
+    vignette_on     = bool(p.get("vignette", False))
 
-        # ── Cycle decomposition ───────────────────────────────────────────────
-        # scroll_cycles = <integer full round-trips> + <fractional stop position>
-        cycles   = float(p.get("scroll_cycles", 1.5))
-        full_cyc = int(cycles)
-        frac     = round(cycles - full_cyc, 10)   # guard fp drift (e.g. 1.5-1 = 0.5)
+    # ── Scale (zoom-aware) ────────────────────────────────────────────────────
+    # When zoom=1.0 (default), target_w=128 — identical to previous behaviour.
+    target_w = max(128, round(128.0 * zoom / 2) * 2)   # even, ≥ 128
+    scaled_h = math.ceil(((target_w / src_w) * src_h) / 2.0) * 2
 
-        # One-way frames: top→bottom (or bottom→top, same count)
-        frames_one_way    = math.ceil(scroll_dist / step)
-        frames_full_cycle = 2 * frames_one_way   # one complete down+up round-trip
+    if scroll_enabled:
+        # ── Auto-scroll (default behaviour, unchanged) ────────────────────────
+        effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
+        effective_h = max(effective_h, 32)
+        scroll_dist = effective_h - 32
+        # Horizontal: centered when zoomed (= "0" for default zoom=1.0)
+        crop_x = str((target_w - 128) // 2) if target_w > 128 else "0"
 
-        # Stop position: frac × scroll_dist  (pixels from top, on the way down)
-        stop_pos      = min(round(frac * scroll_dist), scroll_dist)
-        frames_partial = math.ceil(stop_pos / step) if stop_pos > 0 else 0
+        if scroll_dist > 0:
+            step = max(1, round(p["scroll_speed"] / fps_render))
 
-        # Frame counts
-        n_cyc_end    = full_cyc * frames_full_cycle    # end of all full cycles
-        frames_move  = n_cyc_end + frames_partial       # end of all movement
-        frames_src   = max(1, round(duration_src * fps_render)) if duration_src > 0 else 1
-        frames_total = max(frames_move + 1, frames_src) # +1 = at least 1 hold frame
-        duration_out = str(frames_total / fps_render)
+            # ── Cycle decomposition ───────────────────────────────────────────
+            cycles   = float(p.get("scroll_cycles", 1.5))
+            full_cyc = int(cycles)
+            frac     = round(cycles - full_cyc, 10)
 
-        # ── FFmpeg crop_y expression ──────────────────────────────────────────
-        # n < n_cyc_end         → triangular wave (mod-based cycling)
-        # n_cyc_end ≤ n < frames_move → partial downward pass to stop_pos
-        # n ≥ frames_move       → hold at stop_pos
-        if full_cyc > 0:
-            n_seq   = f"mod(n,{frames_full_cycle})"
-            cycle_y = (
-                f"if(lte({n_seq},{frames_one_way}),"
-                f"min({n_seq}*{step},{scroll_dist}),"
-                f"max({scroll_dist}-({n_seq}-{frames_one_way})*{step},0))"
+            frames_one_way    = math.ceil(scroll_dist / step)
+            frames_full_cycle = 2 * frames_one_way
+
+            stop_pos       = min(round(frac * scroll_dist), scroll_dist)
+            frames_partial = math.ceil(stop_pos / step) if stop_pos > 0 else 0
+
+            n_cyc_end    = full_cyc * frames_full_cycle
+            frames_move  = n_cyc_end + frames_partial
+            frames_src   = max(1, round(duration_src * fps_render)) if duration_src > 0 else 1
+            frames_total = max(frames_move + 1, frames_src)
+            duration_out = str(frames_total / fps_render)
+
+            # ── FFmpeg crop_y expression ──────────────────────────────────────
+            if full_cyc > 0:
+                n_seq   = f"mod(n,{frames_full_cycle})"
+                cycle_y = (
+                    f"if(lte({n_seq},{frames_one_way}),"
+                    f"min({n_seq}*{step},{scroll_dist}),"
+                    f"max({scroll_dist}-({n_seq}-{frames_one_way})*{step},0))"
+                )
+                if frac > 0:
+                    pn = f"(n-{n_cyc_end})"
+                    crop_y = (
+                        f"if(lt(n,{n_cyc_end}),"
+                        f"{cycle_y},"
+                        f"if(lt(n,{frames_move}),"
+                        f"min({pn}*{step},{stop_pos}),"
+                        f"{stop_pos}))"
+                    )
+                else:
+                    crop_y = f"if(lt(n,{n_cyc_end}),{cycle_y},0)"
+            else:
+                if frac > 0:
+                    crop_y = (
+                        f"if(lt(n,{frames_partial}),"
+                        f"min(n*{step},{stop_pos}),"
+                        f"{stop_pos})"
+                    )
+                else:
+                    crop_y = "0"
+
+            log(
+                f"[SCROLL ] {filename} | src {src_w}x{src_h} → {target_w}x{effective_h} "
+                f"| scroll_dist={scroll_dist}px | cycles={cycles} "
+                f"(full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
+                f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
             )
-            if frac > 0:
-                pn = f"(n-{n_cyc_end})"
-                crop_y = (
-                    f"if(lt(n,{n_cyc_end}),"
-                    f"{cycle_y},"
-                    f"if(lt(n,{frames_move}),"
-                    f"min({pn}*{step},{stop_pos}),"
-                    f"{stop_pos}))"
-                )
-            else:
-                # frac = 0 → hold at top (y=0) after last cycle
-                crop_y = f"if(lt(n,{n_cyc_end}),{cycle_y},0)"
         else:
-            # No full cycles: go down to stop_pos then hold
-            if frac > 0:
-                crop_y = (
-                    f"if(lt(n,{frames_partial}),"
-                    f"min(n*{step},{stop_pos}),"
-                    f"{stop_pos})"
-                )
-            else:
-                # cycles = 0 → static at top
-                crop_y = "0"
-
-        log(
-            f"[SCROLL ] {filename} | src {src_w}x{src_h} → 128x{effective_h} "
-            f"| scroll_dist={scroll_dist}px | cycles={cycles} "
-            f"(full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
-            f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
-        )
+            duration_out = str(max(duration_src, 1.0))
+            crop_y       = "(in_h-out_h)/2"
+            log(
+                f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w}x{effective_h} (centered) "
+                f"| fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
+            )
     else:
+        # ── Manual positioning mode ───────────────────────────────────────────
+        max_x      = max(0, target_w - 128)
+        max_y      = max(0, scaled_h - 32)
+        crop_x_val = max(0, min(manual_x, max_x))
+        crop_y_val = max(0, min(manual_y, max_y))
+        crop_x       = str(crop_x_val)
+        crop_y       = str(crop_y_val)
         duration_out = str(max(duration_src, 1.0))
-        crop_y       = "(in_h-out_h)/2"
         log(
-            f"[CENTER ] {filename} | src {src_w}x{src_h} → 128x{effective_h} (centered) "
-            f"| fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
+            f"[MANUAL ] {filename} | src {src_w}x{src_h} → {target_w}x{scaled_h} "
+            f"| zoom={zoom:.2f} | pos=({crop_x_val},{crop_y_val}px) "
+            f"| fps={fps_render} | dur={float(duration_out):.2f}s"
         )
+
+    # ── Extra visual-effects filters (all inactive at default values) ──────────
+    extras = []
+    if abs(hue_shift) > 0.1:
+        extras.append(f"hue=h={hue_shift:.1f}")
+    if noise_reduction > 0.05:
+        nr = noise_reduction
+        extras.append(f"hqdn3d={nr:.1f}:{nr * 0.75:.1f}:{nr * 4:.1f}:{nr * 3:.1f}")
+    if film_grain > 0:
+        extras.append(f"noise=alls={film_grain}:allf=t+u")
+    if vignette_on:
+        extras.append("vignette=PI/4")
+
+    # Build the middle filter chain (eq + unsharp + optional extras)
+    # When all advanced params are at default this produces the same string as v2.0.
+    mid_filters = (
+        f"eq=contrast={c}:saturation={s}:brightness={b}:gamma={g},"
+        f"unsharp=5:5:{sl}:3:3:{sc}"
+    )
+    if extras:
+        mid_filters += "," + ",".join(extras)
 
     filter_graph = (
-        f"color=black:s=128x{scaled_h}:r={fps_render}[bg];"
-        f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},scale=128:-2:flags=lanczos[fg];"
+        f"color=black:s={target_w}x{scaled_h}:r={fps_render}[bg];"
+        f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},scale={target_w}:-2:flags=lanczos[fg];"
         f"[bg][fg]overlay=0:0:shortest=1,format=rgb24,"
-        f"eq=contrast={c}:saturation={s}:brightness={b}:gamma={g},"
-        f"unsharp=5:5:{sl}:3:3:{sc},"
-        f"crop=128:32:0:'{crop_y}'[v_crop];"
+        f"{mid_filters},"
+        f"crop=128:32:{crop_x}:'{crop_y}'[v_crop];"
         "[v_crop]split[v1][v2];"
         "[v1]palettegen=max_colors=256:reserve_transparent=0[pal];"
         f"[v2][pal]paletteuse=dither={dither}"
@@ -387,7 +442,6 @@ def _build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_parser().parse_args()
 
-    # Build params dict from CLI args
     params = {
         "mode":           args.mode,
         "max_workers":    args.workers,
@@ -407,7 +461,6 @@ if __name__ == "__main__":
     }
     prefix = args.prefix
 
-    # Resolve source folders
     if args.folders:
         source_folders = []
         for f in args.folders:
@@ -431,7 +484,6 @@ if __name__ == "__main__":
         )
         sys.exit(0)
 
-    # Process each folder
     for folder_in in source_folders:
         base = os.path.basename(folder_in.rstrip("/\\"))
         folder_out = base[len(prefix):] if base.startswith(prefix) else base + "_DMD"
