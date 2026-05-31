@@ -6,8 +6,8 @@ Cross-platform UI (macOS · Windows · Linux) to convert any video/GIF
 to 128×32 LED DMD format.
 
 New in v2.1:
-  • Dual real-time preview  (SOURCE animated + DMD output, side by side)
-  • DMD preview auto-refreshes ~2 s after any parameter change
+  • Triple real-time preview (SOURCE + AUTO ACTION + DMD)
+  • Auto/DMD preview auto-refreshes ~2 s after any parameter change
   • 🔧 Advanced Settings panel (collapsed by default):
       – Manual positioning: disable auto-scroll, set zoom / X / Y manually
       – Visual effects: hue shift, noise reduction, film grain, vignette
@@ -18,6 +18,7 @@ Usage:
 
 import os
 import sys
+import platform
 import glob
 import shutil
 import threading
@@ -55,16 +56,24 @@ except ImportError as exc:
     print(f"❌  Could not import dmd_gif_converter: {exc}")
     sys.exit(1)
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-# Source preview canvas (scales source to fit)
-SRC_CANVAS_W  = 320
-SRC_CANVAS_H  = 180
+try:
+    from dmd_auto_action import AutoActionConfig, preprocess_video_for_dmd
+except ImportError:
+    AutoActionConfig = None
+    preprocess_video_for_dmd = None
 
-# DMD preview canvas – the 128×32 result is shown at ×2.5 scale
-DMD_CANVAS_W  = 320
-DMD_CANVAS_H  = 180
-DMD_DISP_W    = 320    # 128 × 2.5
-DMD_DISP_H    = 80     # 32  × 2.5
+# ── Constants ─────────────────────────────────────────────────────────────────
+# Three preview canvases
+SRC_CANVAS_W  = 300
+SRC_CANVAS_H  = 170
+AUTO_CANVAS_W = 300
+AUTO_CANVAS_H = 170
+DMD_CANVAS_W  = 300
+DMD_CANVAS_H  = 170
+
+# DMD output is still displayed at 128×32 scaled ×2.34
+DMD_DISP_W    = 300
+DMD_DISP_H    = 75
 
 BG_CANVAS     = "#0d0d1a"
 APP_VERSION   = "2.1"
@@ -123,6 +132,14 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_tmpdir        = None
         self._dmd_rendering     = False
 
+        # Auto-action preview state (intermediate pre-ffmpeg stage)
+        self._auto_frames: list = []
+        self._auto_delays: list = []
+        self._auto_idx          = 0
+        self._auto_job          = None
+        self._auto_tmpdir       = None
+        self._auto_rendering    = False
+
         # Auto-refresh debounce job
         self._adv_refresh_job   = None
 
@@ -157,6 +174,17 @@ class DMDConverterApp(ctk.CTk):
         self.v_noise_reduction = tk.DoubleVar(value=0.0)
         self.v_film_grain      = tk.IntVar   (value=0)
         self.v_vignette        = tk.BooleanVar(value=False)
+        self.v_auto_action_enabled = tk.BooleanVar(value=False)
+        self.v_action_detector     = tk.StringVar(value="person")
+        self.v_action_strength     = tk.DoubleVar(value=0.65)
+        self.v_action_smoothness   = tk.DoubleVar(value=0.85)
+        self.v_action_zoom_max     = tk.DoubleVar(value=1.8)
+        self.v_action_padding      = tk.DoubleVar(value=0.20)
+        self.v_action_intro        = tk.DoubleVar(value=1.5)
+
+        # ── Tkinter vars — max duration cap ───────────────────────────────────
+        self.v_max_dur_enabled = tk.BooleanVar(value=True)    # ON by default (2 min cap)
+        self.v_max_duration    = tk.DoubleVar(value=120.0)    # 2 minutes
 
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
@@ -166,9 +194,15 @@ class DMDConverterApp(ctk.CTk):
             self.v_dither, self.v_scroll_enabled, self.v_zoom,
             self.v_manual_x, self.v_manual_y, self.v_hue_shift,
             self.v_noise_reduction, self.v_film_grain, self.v_vignette,
+            self.v_auto_action_enabled, self.v_action_detector,
+            self.v_action_strength, self.v_action_smoothness,
+            self.v_action_zoom_max, self.v_action_padding,
+            self.v_action_intro,
+            self.v_trim_start, self.v_trim_end,
+            self.v_max_dur_enabled, self.v_max_duration,
         ]
         for var in _watch:
-            var.trace_add("write", self._schedule_dmd_refresh)
+            var.trace_add("write", self._schedule_pipeline_refresh)
 
         self._build_ui()
 
@@ -306,19 +340,30 @@ class DMDConverterApp(ctk.CTk):
         tr.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
         tr.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            tr, text="🖥️  Preview  —  live side-by-side",
+            tr, text="🖥️  Preview  —  SOURCE → AUTO ACTION → DMD",
             font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=0, column=0, sticky="w")
 
         pb = ctk.CTkFrame(tr, fg_color="transparent")
         pb.grid(row=0, column=1, sticky="e")
+        self._btn_all_prev = ctk.CTkButton(
+            pb, text="🔄 Refresh All", width=120, height=28,
+            command=self.refresh_all_previews
+        )
+        self._btn_all_prev.pack(side="left", padx=3)
         self._btn_src = ctk.CTkButton(
-            pb, text="▶  Refresh Source", width=130, height=28,
+            pb, text="▶ Source", width=92, height=28,
             command=self.show_source_preview
         )
         self._btn_src.pack(side="left", padx=3)
+        self._btn_auto = ctk.CTkButton(
+            pb, text="🎯 Auto", width=92, height=28,
+            fg_color="#2b4b8a", hover_color="#234073",
+            command=self.show_auto_preview
+        )
+        self._btn_auto.pack(side="left", padx=3)
         self._btn_dmd = ctk.CTkButton(
-            pb, text="🔬 Refresh DMD", width=130, height=28,
+            pb, text="🔬 DMD", width=92, height=28,
             fg_color="#1e6a3c", hover_color="#155230",
             command=self.show_dmd_preview
         )
@@ -345,11 +390,28 @@ class DMDConverterApp(ctk.CTk):
         )
         self._src_info.pack(pady=(0, 4))
 
+        # Auto-action canvas (middle)
+        auto_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        auto_wrap.pack(side="left", padx=4)
+        ctk.CTkLabel(
+            auto_wrap, text="AUTO ACTION",
+            font=ctk.CTkFont(size=10, weight="bold"), text_color="#4f7bd9"
+        ).pack(pady=(4, 0))
+        self._auto_canvas = tk.Canvas(
+            auto_wrap, width=AUTO_CANVAS_W, height=AUTO_CANVAS_H,
+            bg=BG_CANVAS, highlightthickness=0
+        )
+        self._auto_canvas.pack(padx=2, pady=(2, 2))
+        self._auto_info = ctk.CTkLabel(
+            auto_wrap, text="", text_color="#888899", font=ctk.CTkFont(size=10)
+        )
+        self._auto_info.pack(pady=(0, 4))
+
         # DMD canvas (right)
         dmd_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
         dmd_wrap.pack(side="left", padx=(4, 0))
         ctk.CTkLabel(
-            dmd_wrap, text="DMD OUTPUT  128×32",
+            dmd_wrap, text="DMD OUTPUT 128×32",
             font=ctk.CTkFont(size=10, weight="bold"), text_color="#2e7a4a"
         ).pack(pady=(4, 0))
         self._dmd_canvas = tk.Canvas(
@@ -367,6 +429,7 @@ class DMDConverterApp(ctk.CTk):
         self._preview_info = self._src_info
 
         self._draw_canvas_idle()
+        self._draw_auto_canvas_idle()
         self._draw_dmd_canvas_idle()
 
         # Trim controls
@@ -488,6 +551,55 @@ class DMDConverterApp(ctk.CTk):
         slider_row("FPS minimum", self.v_fps_min, 5.0,  30.0, "{:.1f}", " fps")
         slider_row("FPS maximum", self.v_fps_max, 10.0, 60.0, "{:.1f}", " fps")
 
+        # ── Max Duration ──────────────────────────────────────────────────────
+        section("⏱  Max Duration")
+
+        def _fmt_dur(s):
+            s = int(round(s))
+            return f"{s // 60}:{s % 60:02d} min"
+
+        dur_toggle = ctk.CTkFrame(parent, fg_color="transparent")
+        dur_toggle.pack(fill="x", padx=8, pady=(2, 0))
+        self._max_dur_cb = ctk.CTkCheckBox(
+            dur_toggle,
+            text="Limit clip length  (0 = no limit)",
+            variable=self.v_max_dur_enabled,
+            command=self._on_max_dur_toggle,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        self._max_dur_cb.pack(side="left")
+
+        dur_row = ctk.CTkFrame(parent, fg_color="transparent")
+        dur_row.pack(fill="x", padx=8, pady=2)
+        dur_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(dur_row, text="Max length", width=135, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._max_dur_slider = ctk.CTkSlider(
+            dur_row, from_=10, to=600, variable=self.v_max_duration,
+            number_of_steps=118,
+        )
+        self._max_dur_slider.grid(row=0, column=1, sticky="ew", padx=4)
+        self._max_dur_lbl = ctk.CTkLabel(
+            dur_row, text=_fmt_dur(self.v_max_duration.get()),
+            width=72, anchor="e", font=ctk.CTkFont(size=11)
+        )
+        self._max_dur_lbl.grid(row=0, column=2, padx=(4, 4))
+        self.v_max_duration.trace_add(
+            "write",
+            lambda *_: (
+                self._max_dur_lbl.configure(text=_fmt_dur(self.v_max_duration.get())),
+                self._apply_max_duration(),
+            )
+        )
+
+        ctk.CTkLabel(
+            parent,
+            text="  ↳ Move trim Start slider to place the window anywhere in the video.",
+            text_color="#667788", font=ctk.CTkFont(size=10),
+        ).pack(padx=8, pady=(0, 6), anchor="w")
+
+        self._on_max_dur_toggle()   # set initial state
+
         # Colorimetry (custom mode only)
         self._custom_header = ctk.CTkLabel(
             parent, text="🎛️  Colorimetry  (custom mode only)",
@@ -562,12 +674,83 @@ class DMDConverterApp(ctk.CTk):
             self._adv_toggle_btn.configure(text="🔧  Advanced Settings  ▼")
 
     def _build_advanced_content(self, parent):
+        def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
+                       steps=None, is_int=False):
+            f = ctk.CTkFrame(par, fg_color="transparent")
+            f.pack(fill="x", padx=10, pady=2)
+            f.grid_columnconfigure(1, weight=1)
+            ctk.CTkLabel(f, text=label, width=145, anchor="w",
+                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+            kw = dict(from_=from_, to=to, variable=var)
+            if steps is not None:
+                kw["number_of_steps"] = steps
+            sl = ctk.CTkSlider(f, **kw)
+            sl.grid(row=0, column=1, sticky="ew", padx=4)
+            lbl_txt = (lambda: fmt.format(int(var.get())) + suffix) if is_int \
+                      else (lambda: fmt.format(var.get()) + suffix)
+            lbl = ctk.CTkLabel(f, text=lbl_txt(), width=80, anchor="e",
+                               font=ctk.CTkFont(size=11))
+            lbl.grid(row=0, column=2, padx=(4, 4))
+            var.trace_add("write", lambda *_: lbl.configure(text=lbl_txt()))
+            return sl
+
         ctk.CTkLabel(
             parent,
             text="ℹ️  All settings here are hidden by default.\n"
                  "    Default values reproduce the standard v2.0 output unchanged.",
             text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
         ).pack(padx=12, pady=(8, 4), anchor="w")
+
+        # ── SECTION 0: AUTO ACTION FRAMING ───────────────────────────────────
+        ctk.CTkLabel(
+            parent, text="━━  🎯  Auto Action Framing (pre-ffmpeg)",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).pack(fill="x", padx=10, pady=(10, 4), anchor="w")
+
+        auto_row = ctk.CTkFrame(parent, fg_color="transparent")
+        auto_row.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkCheckBox(
+            auto_row,
+            text="Enable cinematic auto-framing before ffmpeg (default OFF)",
+            variable=self.v_auto_action_enabled,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        ).pack(side="left")
+
+        mode_row = ctk.CTkFrame(parent, fg_color="transparent")
+        mode_row.pack(fill="x", padx=10, pady=2)
+        mode_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(mode_row, text="Detection mode", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        ctk.CTkOptionMenu(
+            mode_row,
+            variable=self.v_action_detector,
+            values=["person", "motion", "hybrid", "center"],
+            width=200,
+        ).grid(row=0, column=1, sticky="w", padx=4)
+
+        ctk.CTkLabel(
+            parent,
+            text="Default mode is person. Change detection mode here if you prefer.\n"
+                 "Processed output keeps 4:1 ratio before standard DMD conversion.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
+
+        adv_slider(parent, "Action strength", self.v_action_strength, 0.0, 1.0,
+                   "{:.2f}", "", steps=100)
+        adv_slider(parent, "Camera smooth", self.v_action_smoothness, 0.0, 0.98,
+                   "{:.2f}", "", steps=98)
+        adv_slider(parent, "Zoom max", self.v_action_zoom_max, 1.0, 3.0,
+                   "{:.2f}", "×", steps=100)
+        adv_slider(parent, "ROI padding", self.v_action_padding, 0.0, 0.6,
+                   "{:.2f}", "", steps=60)
+        adv_slider(parent, "Intro panoramic", self.v_action_intro, 0.0, 5.0,
+                   "{:.1f}", " s", steps=50)
+        ctk.CTkLabel(
+            parent,
+            text="    Intro: full-frame overview shown before zooming in on action.\n"
+                 "    Set to 0 to disable (start immediately on action).",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
 
         # ── SECTION 1: POSITIONING ────────────────────────────────────────────
         ctk.CTkLabel(
@@ -588,25 +771,6 @@ class DMDConverterApp(ctk.CTk):
         # Manual positioning frame (hidden when scroll is on)
         self._manual_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=6)
 
-        def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
-                       steps=None, is_int=False):
-            f = ctk.CTkFrame(par, fg_color="transparent")
-            f.pack(fill="x", padx=10, pady=2)
-            f.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(f, text=label, width=145, anchor="w",
-                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-            kw = dict(from_=from_, to=to, variable=var)
-            if steps is not None:
-                kw["number_of_steps"] = steps
-            sl = ctk.CTkSlider(f, **kw)
-            sl.grid(row=0, column=1, sticky="ew", padx=4)
-            lbl_txt = (lambda: fmt.format(int(var.get())) + suffix) if is_int \
-                      else (lambda: fmt.format(var.get()) + suffix)
-            lbl = ctk.CTkLabel(f, text=lbl_txt(), width=80, anchor="e",
-                               font=ctk.CTkFont(size=11))
-            lbl.grid(row=0, column=2, padx=(4, 4))
-            var.trace_add("write", lambda *_: lbl.configure(text=lbl_txt()))
-            return sl
 
         ctk.CTkLabel(
             self._manual_frame,
@@ -668,6 +832,13 @@ class DMDConverterApp(ctk.CTk):
             self._manual_frame.pack(fill="x", padx=10, pady=(4, 4))
 
     def _reset_advanced(self):
+        self.v_auto_action_enabled.set(False)
+        self.v_action_detector.set("person")
+        self.v_action_strength.set(0.65)
+        self.v_action_smoothness.set(0.85)
+        self.v_action_zoom_max.set(1.8)
+        self.v_action_padding.set(0.20)
+        self.v_action_intro.set(1.5)
         self.v_scroll_enabled.set(True)
         self.v_zoom.set(1.0)
         self.v_manual_x.set(0)
@@ -809,10 +980,12 @@ class DMDConverterApp(ctk.CTk):
         iid = sel[0]
         if self._selected_iid == iid:
             self._stop_src_preview()
+            self._stop_auto_preview()
             self._stop_dmd_preview()
             self._selected_iid = ""
             self._trim_frame.grid_remove()
             self._draw_canvas_idle()
+            self._draw_auto_canvas_idle()
             self._draw_dmd_canvas_idle()
         path = self._file_data.pop(iid, None)
         if path:
@@ -822,6 +995,7 @@ class DMDConverterApp(ctk.CTk):
 
     def clear_files(self):
         self._stop_src_preview()
+        self._stop_auto_preview()
         self._stop_dmd_preview()
         self._tree.delete(*self._tree.get_children())
         self._file_data.clear()
@@ -829,6 +1003,7 @@ class DMDConverterApp(ctk.CTk):
         self._selected_iid = ""
         self._trim_frame.grid_remove()
         self._draw_canvas_idle()
+        self._draw_auto_canvas_idle()
         self._draw_dmd_canvas_idle()
         self._update_count()
 
@@ -869,6 +1044,16 @@ class DMDConverterApp(ctk.CTk):
         if hasattr(self, "_dmd_info"):
             self._dmd_info.configure(text="")
 
+    def _draw_auto_canvas_idle(self):
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(
+            AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+            text="Auto action preview\n(disabled by default)",
+            fill="#334466", font=("Helvetica", 11), justify="center"
+        )
+        if hasattr(self, "_auto_info"):
+            self._auto_info.configure(text="")
+
     def _stop_src_preview(self):
         if self._src_job:
             self.after_cancel(self._src_job)
@@ -879,6 +1064,17 @@ class DMDConverterApp(ctk.CTk):
         if self._src_tmpdir and os.path.isdir(self._src_tmpdir):
             shutil.rmtree(self._src_tmpdir, ignore_errors=True)
             self._src_tmpdir = None
+
+    def _stop_auto_preview(self):
+        if self._auto_job:
+            self.after_cancel(self._auto_job)
+            self._auto_job = None
+        self._auto_frames.clear()
+        self._auto_delays.clear()
+        self._auto_idx = 0
+        if self._auto_tmpdir and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
 
     # Backward-compat alias
     def _stop_preview(self):
@@ -901,6 +1097,10 @@ class DMDConverterApp(ctk.CTk):
             target=self._extract_source_frames,
             args=(file_path,), daemon=True
         ).start()
+
+        # Keep all three previews in sync when a new file is selected.
+        self._start_auto_generation(file_path)
+        self._start_dmd_generation(file_path)
 
     def _extract_source_frames(self, file_path):
         tmpdir = tempfile.mkdtemp(prefix="dmd_src_")
@@ -969,6 +1169,134 @@ class DMDConverterApp(ctk.CTk):
         else:
             messagebox.showinfo("Info", "Select a file first.")
 
+    def refresh_all_previews(self):
+        if not self._selected_iid:
+            messagebox.showinfo("Info", "Select a file first.")
+            return
+        path = self._file_data.get(self._selected_iid)
+        if not path:
+            return
+        self._load_preview(path)
+        self._start_auto_generation(path)
+        self._start_dmd_generation(path)
+
+    def show_auto_preview(self):
+        if not self._selected_iid:
+            messagebox.showinfo("Info", "Select a file first.")
+            return
+        src = self._file_data.get(self._selected_iid)
+        if not src:
+            return
+        self._start_auto_generation(src)
+
+    def _start_auto_generation(self, src):
+        if self._auto_rendering:
+            return
+        if not self.v_auto_action_enabled.get():
+            self._stop_auto_preview()
+            self._draw_auto_canvas_idle()
+            self._auto_info.configure(text="Auto action disabled")
+            return
+        if preprocess_video_for_dmd is None or AutoActionConfig is None:
+            self._draw_auto_canvas_idle()
+            self._auto_info.configure(text="Auto action unavailable (module missing)")
+            return
+
+        self._auto_rendering = True
+        self._stop_auto_preview()
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(
+            AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+            text="⏳  Generating auto-action preview…",
+            fill="#7aa2ff", font=("Helvetica", 11), justify="center"
+        )
+        self._btn_auto.configure(state="disabled", text="⏳ Auto…")
+
+        start_s, end_s = self._get_trim()
+        cfg = AutoActionConfig(
+            detector=self.v_action_detector.get(),
+            strength=float(self.v_action_strength.get()),
+            smoothness=float(self.v_action_smoothness.get()),
+            zoom_max=float(self.v_action_zoom_max.get()),
+            padding=float(self.v_action_padding.get()),
+            intro_duration=float(self.v_action_intro.get()),
+            start_s=start_s,
+            end_s=end_s,
+        )
+        threading.Thread(
+            target=self._generate_auto_preview,
+            args=(src, cfg), daemon=True
+        ).start()
+
+    def _generate_auto_preview(self, src, cfg):
+        ok, out_mp4, msg = preprocess_video_for_dmd(src, cfg)
+        if not ok or not out_mp4:
+            self.after(0, lambda: self._on_auto_fail(msg))
+            return
+
+        tmpdir = os.path.dirname(out_mp4)
+        fps_prev = 12.5
+        cmd = [
+            "ffmpeg", "-y", "-i", out_mp4,
+            "-vf", (
+                f"fps={fps_prev},"
+                f"scale={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:"
+                f"force_original_aspect_ratio=decrease,"
+                f"pad={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:(ow-iw)/2:(oh-ih)/2"
+                f":color={BG_CANVAS[1:]}"
+            ),
+            "-f", "image2", os.path.join(tmpdir, "a%04d.png"),
+        ]
+        subprocess.run(cmd, capture_output=True)
+
+        paths = sorted(glob.glob(os.path.join(tmpdir, "a*.png")))
+        frames, delays = [], []
+        delay_ms = int(1000 / fps_prev)
+        for fp in paths:
+            try:
+                img = Image.open(fp).convert("RGB")
+                frames.append(ImageTk.PhotoImage(img))
+                delays.append(delay_ms)
+            except Exception:
+                pass
+
+        self.after(0, lambda: self._on_auto_ready(frames, delays, tmpdir, msg))
+
+    def _on_auto_ready(self, frames, delays, tmpdir, msg):
+        self._auto_rendering = False
+        self._btn_auto.configure(state="normal", text="🎯 Auto")
+        if not frames:
+            self._on_auto_fail("No frames produced for auto-action preview")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return
+        self._stop_auto_preview()
+        self._auto_tmpdir = tmpdir
+        self._auto_frames = frames
+        self._auto_delays = delays
+        self._auto_idx = 0
+        self._auto_info.configure(text=f"{msg}  ·  {len(frames)} frames")
+        self._animate_auto()
+
+    def _on_auto_fail(self, msg):
+        self._auto_rendering = False
+        self._btn_auto.configure(state="normal", text="🎯 Auto")
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(
+            AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+            text="❌  Auto-action failed", fill="#e74c3c", font=("Helvetica", 11)
+        )
+        self._auto_info.configure(text=msg)
+
+    def _animate_auto(self):
+        if not self._auto_frames:
+            return
+        idx = self._auto_idx % len(self._auto_frames)
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_image(0, 0, anchor="nw", image=self._auto_frames[idx])
+        self._auto_idx = idx + 1
+        delay = self._auto_delays[idx] if self._auto_delays else 80
+        self._auto_job = self.after(delay, self._animate_auto)
+
     # ══════════════════════════════════════════════════════════════════════════
     #  DMD PREVIEW  (independent canvas + animation loop)
     # ══════════════════════════════════════════════════════════════════════════
@@ -1004,7 +1332,7 @@ class DMDConverterApp(ctk.CTk):
             text="⏳  Generating DMD…\n  (a few seconds)",
             fill="#f39c12", font=("Helvetica", 11), justify="center"
         )
-        self._btn_dmd.configure(state="disabled", text="⏳  Rendering…")
+        self._btn_dmd.configure(state="disabled", text="⏳ DMD…")
         params  = self._collect_params()
         start_s, end_s = self._get_trim()
         threading.Thread(
@@ -1041,7 +1369,7 @@ class DMDConverterApp(ctk.CTk):
 
     def _on_dmd_ready(self, frames, delays, tmpdir, out_gif):
         self._dmd_rendering = False
-        self._btn_dmd.configure(state="normal", text="🔬 Refresh DMD")
+        self._btn_dmd.configure(state="normal", text="🔬 DMD")
         self._stop_dmd_preview()
         self._dmd_tmpdir = tmpdir
         self._dmd_frames = frames
@@ -1055,7 +1383,7 @@ class DMDConverterApp(ctk.CTk):
 
     def _on_dmd_fail(self, msg, tmpdir):
         self._dmd_rendering = False
-        self._btn_dmd.configure(state="normal", text="🔬 Refresh DMD")
+        self._btn_dmd.configure(state="normal", text="🔬 DMD")
         shutil.rmtree(tmpdir, ignore_errors=True)
         self._dmd_canvas.delete("all")
         self._dmd_canvas.create_text(
@@ -1078,36 +1406,77 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_job = self.after(delay, self._animate_dmd)
 
     # ── Auto-refresh debounce ─────────────────────────────────────────────────
-    def _schedule_dmd_refresh(self, *_):
+    def _schedule_pipeline_refresh(self, *_):
         if self._adv_refresh_job:
             self.after_cancel(self._adv_refresh_job)
-        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_dmd)
+        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_pipeline)
 
-    def _auto_refresh_dmd(self):
+    def _auto_refresh_pipeline(self):
         self._adv_refresh_job = None
-        if self._selected_iid and not self._busy and not self._dmd_rendering:
+        if self._selected_iid and not self._busy and not self._auto_rendering and not self._dmd_rendering:
             src = self._file_data.get(self._selected_iid)
             if src:
+                self._start_auto_generation(src)
                 self._start_dmd_generation(src)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  TRIM
     # ══════════════════════════════════════════════════════════════════════════
 
+    # ── Max-duration helpers ──────────────────────────────────────────────────
+    def _on_max_dur_toggle(self):
+        """Enable/disable the max-duration slider and refresh the trim end."""
+        enabled = self.v_max_dur_enabled.get()
+        self._max_dur_slider.configure(state="normal" if enabled else "disabled")
+        if hasattr(self, "_sl_end"):
+            self._sl_end.configure(state="disabled" if enabled else "normal")
+        self._apply_max_duration()
+
+    def _apply_max_duration(self):
+        """If max_duration is active, snap trim_end to trim_start + max_duration."""
+        if not self.v_max_dur_enabled.get():
+            return
+        if not hasattr(self, "_sl_end"):
+            return
+        start = self.v_trim_start.get()
+        max_dur = self.v_max_duration.get()
+        new_end = min(start + max_dur, self._source_duration)
+        self.v_trim_end.set(new_end)
+        if hasattr(self, "_lbl_end"):
+            self._lbl_end.configure(text=f"{new_end:.1f} s")
+
     def _update_trim_sliders(self):
         dur = max(self._source_duration, 0.1)
         self._sl_start.configure(to=dur)
         self._sl_end.configure(to=dur)
         self.v_trim_start.set(0.0)
-        self.v_trim_end.set(dur)
+        # When max_duration is active, initialise end = min(max_dur, dur)
+        if self.v_max_dur_enabled.get():
+            init_end = min(self.v_max_duration.get(), dur)
+        else:
+            init_end = dur
+        self.v_trim_end.set(init_end)
         self._lbl_start.configure(text="0.0 s")
-        self._lbl_end.configure(text=f"{dur:.1f} s")
+        self._lbl_end.configure(text=f"{init_end:.1f} s")
+        # Reflect max-dur state on end slider
+        self._sl_end.configure(
+            state="disabled" if self.v_max_dur_enabled.get() else "normal"
+        )
 
     def _on_start_drag(self, val):
         v = float(val)
         end = self.v_trim_end.get()
-        if v >= end:
-            self.v_trim_start.set(max(0.0, end - 0.05))
+        if self.v_max_dur_enabled.get():
+            # End follows start automatically — clamp start to leave room
+            max_dur = self.v_max_duration.get()
+            v = min(v, max(0.0, self._source_duration - max_dur))
+            self.v_trim_start.set(v)
+            new_end = min(v + max_dur, self._source_duration)
+            self.v_trim_end.set(new_end)
+            self._lbl_end.configure(text=f"{new_end:.1f} s")
+        else:
+            if v >= end:
+                self.v_trim_start.set(max(0.0, end - 0.05))
         self._lbl_start.configure(text=f"{self.v_trim_start.get():.1f} s")
 
     def _on_end_drag(self, val):
@@ -1173,6 +1542,15 @@ class DMDConverterApp(ctk.CTk):
             "noise_reduction": self.v_noise_reduction.get(),
             "film_grain":      int(self.v_film_grain.get()),
             "vignette":        self.v_vignette.get(),
+            "auto_action_enabled": self.v_auto_action_enabled.get(),
+            "action_detector": self.v_action_detector.get(),
+            "action_strength": self.v_action_strength.get(),
+            "action_smoothness": self.v_action_smoothness.get(),
+            "action_zoom_max": self.v_action_zoom_max.get(),
+            "action_padding": self.v_action_padding.get(),
+            "action_intro": self.v_action_intro.get(),
+            # max_duration: 0 = no limit when checkbox is off
+            "max_duration": self.v_max_duration.get() if self.v_max_dur_enabled.get() else 0.0,
         }
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1273,6 +1651,8 @@ class DMDConverterApp(ctk.CTk):
         state = "disabled" if busy else "normal"
         for btn in (self._btn_convert, self._btn_all, self._btn_batch):
             btn.configure(state=state)
+        for btn in (self._btn_all_prev, self._btn_src, self._btn_auto, self._btn_dmd):
+            btn.configure(state=state)
         self._status_lbl.configure(text="⏳  Converting…" if busy else "Ready")
         if not busy:
             self._progress.set(1.0)
@@ -1294,6 +1674,7 @@ class DMDConverterApp(ctk.CTk):
 
     def _on_close(self):
         self._stop_src_preview()
+        self._stop_auto_preview()
         self._stop_dmd_preview()
         if self._adv_refresh_job:
             self.after_cancel(self._adv_refresh_job)
@@ -1304,6 +1685,30 @@ class DMDConverterApp(ctk.CTk):
 #  Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
+    # Prevent known hard crash on macOS when using Apple CommandLineTools Python + Tk 8.5.
+    if platform.system() == "Darwin":
+        try:
+            import tkinter as _tk
+            tk_ver = float(_tk.TkVersion)
+        except Exception:
+            tk_ver = 0.0
+
+        if (
+            "CommandLineTools" in sys.executable
+            and tk_ver > 0.0
+            and tk_ver < 8.6
+        ):
+            print(
+                "\n❌  Incompatible Python/Tk detected:\n"
+                f"    Python: {sys.executable}\n"
+                f"    Tk: {tk_ver}\n\n"
+                "This macOS Python build uses Tk 8.5 and crashes with this UI.\n"
+                "Use the launcher script (recommended) or Homebrew Python.\n\n"
+                "  ./launch_ui.sh\n"
+                "  brew install python@3.13\n"
+            )
+            sys.exit(1)
+
     try:
         subprocess.run(
             ["ffmpeg", "-version"], capture_output=True, timeout=5, check=True
