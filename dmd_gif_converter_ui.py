@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DMD GIF Converter — Graphical Interface
+DMD GIF Converter — Graphical Interface  v2.1
 Cross-platform UI (macOS · Windows · Linux) to convert any video/GIF
 to 128×32 LED DMD format.
+
+New in v2.1:
+  • Dual real-time preview  (SOURCE animated + DMD output, side by side)
+  • DMD preview auto-refreshes ~2 s after any parameter change
+  • 🔧 Advanced Settings panel (collapsed by default):
+      – Manual positioning: disable auto-scroll, set zoom / X / Y manually
+      – Visual effects: hue shift, noise reduction, film grain, vignette
 
 Usage:
     python dmd_gif_converter_ui.py
@@ -49,10 +56,21 @@ except ImportError as exc:
     sys.exit(1)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-PREVIEW_W   = 640   # canvas width  = 128 × 5
-PREVIEW_H   = 160   # canvas height =  32 × 5
-BG_CANVAS   = "#0d0d1a"
-APP_VERSION = "2.0"
+# Source preview canvas (scales source to fit)
+SRC_CANVAS_W  = 320
+SRC_CANVAS_H  = 180
+
+# DMD preview canvas – the 128×32 result is shown at ×2.5 scale
+DMD_CANVAS_W  = 320
+DMD_CANVAS_H  = 180
+DMD_DISP_W    = 320    # 128 × 2.5
+DMD_DISP_H    = 80     # 32  × 2.5
+
+BG_CANVAS     = "#0d0d1a"
+APP_VERSION   = "2.1"
+
+# Auto-refresh debounce: ms to wait after last param change before rebuilding DMD
+DMD_REFRESH_DELAY_MS = 1800
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -72,53 +90,6 @@ _MODE_DESC = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  FileRow — one row in the file list
-# ─────────────────────────────────────────────────────────────────────────────
-class FileRow(ctk.CTkFrame):
-    """Widget representing a single source file in the list."""
-
-    def __init__(self, master, file_path, on_select, on_remove, **kw):
-        super().__init__(master, corner_radius=6, fg_color="#2a2a3e", cursor="hand2", **kw)
-        self.file_path = file_path
-        self.on_select = on_select
-        self.on_remove = on_remove
-        self.status = "idle"
-
-        ext  = Path(file_path).suffix.lower()
-        icon = "🎞️" if ext == ".gif" else "🎬"
-        name = Path(file_path).name
-        disp = (name[:26] + "…") if len(name) > 28 else name
-
-        self.grid_columnconfigure(1, weight=1)
-
-        self._icon  = ctk.CTkLabel(self, text=icon, width=22, font=ctk.CTkFont(size=13))
-        self._icon.grid(row=0, column=0, padx=(6, 2), pady=5)
-
-        self._name  = ctk.CTkLabel(self, text=disp, anchor="w", font=ctk.CTkFont(size=12))
-        self._name.grid(row=0, column=1, padx=4, pady=5, sticky="ew")
-
-        self._dot   = ctk.CTkLabel(self, text="●", text_color=_STATUS_COLOR["idle"], width=14)
-        self._dot.grid(row=0, column=2, padx=2, pady=5)
-
-        self._rm    = ctk.CTkButton(
-            self, text="✕", width=22, height=22, corner_radius=4,
-            fg_color="transparent", hover_color="#c0392b",
-            command=lambda: self.on_remove(self)
-        )
-        self._rm.grid(row=0, column=3, padx=(2, 6), pady=5)
-
-        for w in (self, self._icon, self._name, self._dot):
-            w.bind("<Button-1>", lambda _e: self.on_select(self))
-
-    def set_selected(self, selected):
-        self.configure(fg_color="#1e3a5f" if selected else "#2a2a3e")
-
-    def set_status(self, status):
-        self.status = status
-        self._dot.configure(text_color=_STATUS_COLOR.get(status, "#666688"))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 #  DMDConverterApp — main window
 # ─────────────────────────────────────────────────────────────────────────────
 class DMDConverterApp(ctk.CTk):
@@ -126,41 +97,78 @@ class DMDConverterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(f"🎞️  DMD GIF Converter  v{APP_VERSION}")
-        self.geometry("1300x840")
-        self.minsize(980, 660)
+        self.geometry("1300x880")
+        self.minsize(980, 680)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # ── State ─────────────────────────────────────────────────────────────
-        # iid (treeview row id) → file_path  — fast O(1) lookup, no widget per row
-        self._file_data:    dict = {}   # iid → path
-        self._file_paths:   set  = set()  # deduplicate fast
+        self._file_data:    dict = {}
+        self._file_paths:   set  = set()
         self._selected_iid: str  = ""
-        self._preview_frames: list  = []
-        self._preview_delays: list  = []
-        self._preview_idx           = 0
-        self._preview_job           = None
-        self._preview_tmpdir        = None
-        self._source_duration       = 0.0
         self._busy                  = False
+        self._source_duration       = 0.0
 
-        # ── Tkinter vars ──────────────────────────────────────────────────────
-        self.v_output_dir   = tk.StringVar(value="")
-        self.v_mode         = tk.StringVar(value="pixel_art")
-        self.v_workers      = tk.IntVar   (value=2)
-        self.v_scroll       = tk.DoubleVar(value=24.0)
-        self.v_bottom_crop  = tk.DoubleVar(value=0.15)
+        # Source preview state
+        self._src_frames: list  = []
+        self._src_delays: list  = []
+        self._src_idx           = 0
+        self._src_job           = None
+        self._src_tmpdir        = None
+
+        # DMD preview state (independent animation loop)
+        self._dmd_frames: list  = []
+        self._dmd_delays: list  = []
+        self._dmd_idx           = 0
+        self._dmd_job           = None
+        self._dmd_tmpdir        = None
+        self._dmd_rendering     = False
+
+        # Auto-refresh debounce job
+        self._adv_refresh_job   = None
+
+        # Advanced panel expansion state
+        self._adv_expanded      = False
+
+        # ── Tkinter vars — standard parameters (unchanged from v2.0) ──────────
+        self.v_output_dir    = tk.StringVar(value="")
+        self.v_mode          = tk.StringVar(value="pixel_art")
+        self.v_workers       = tk.IntVar   (value=2)
+        self.v_scroll        = tk.DoubleVar(value=24.0)
+        self.v_bottom_crop   = tk.DoubleVar(value=0.15)
         self.v_scroll_cycles = tk.DoubleVar(value=1.5)
-        self.v_fps_min      = tk.DoubleVar(value=10.0)
-        self.v_fps_max      = tk.DoubleVar(value=25.0)
-        self.v_contrast     = tk.DoubleVar(value=1.6)
-        self.v_saturation   = tk.DoubleVar(value=2.2)
-        self.v_brightness   = tk.DoubleVar(value=-0.03)
-        self.v_gamma        = tk.DoubleVar(value=0.85)
-        self.v_sharpen_lum  = tk.DoubleVar(value=1.8)
-        self.v_sharpen_chr  = tk.DoubleVar(value=0.5)
-        self.v_dither       = tk.StringVar(value="none")
-        self.v_trim_start   = tk.DoubleVar(value=0.0)
-        self.v_trim_end     = tk.DoubleVar(value=0.0)
+        self.v_fps_min       = tk.DoubleVar(value=10.0)
+        self.v_fps_max       = tk.DoubleVar(value=25.0)
+        self.v_contrast      = tk.DoubleVar(value=1.6)
+        self.v_saturation    = tk.DoubleVar(value=2.2)
+        self.v_brightness    = tk.DoubleVar(value=-0.03)
+        self.v_gamma         = tk.DoubleVar(value=0.85)
+        self.v_sharpen_lum   = tk.DoubleVar(value=1.8)
+        self.v_sharpen_chr   = tk.DoubleVar(value=0.5)
+        self.v_dither        = tk.StringVar(value="none")
+        self.v_trim_start    = tk.DoubleVar(value=0.0)
+        self.v_trim_end      = tk.DoubleVar(value=0.0)
+
+        # ── Tkinter vars — advanced parameters (new in v2.1) ──────────────────
+        self.v_scroll_enabled  = tk.BooleanVar(value=True)
+        self.v_zoom            = tk.DoubleVar(value=1.0)
+        self.v_manual_x        = tk.IntVar   (value=0)
+        self.v_manual_y        = tk.IntVar   (value=0)
+        self.v_hue_shift       = tk.DoubleVar(value=0.0)
+        self.v_noise_reduction = tk.DoubleVar(value=0.0)
+        self.v_film_grain      = tk.IntVar   (value=0)
+        self.v_vignette        = tk.BooleanVar(value=False)
+
+        # ── Attach auto-refresh debounce to every param that affects DMD ──────
+        _watch = [
+            self.v_mode, self.v_scroll, self.v_bottom_crop, self.v_scroll_cycles,
+            self.v_fps_min, self.v_fps_max, self.v_contrast, self.v_saturation,
+            self.v_brightness, self.v_gamma, self.v_sharpen_lum, self.v_sharpen_chr,
+            self.v_dither, self.v_scroll_enabled, self.v_zoom,
+            self.v_manual_x, self.v_manual_y, self.v_hue_shift,
+            self.v_noise_reduction, self.v_film_grain, self.v_vignette,
+        ]
+        for var in _watch:
+            var.trace_add("write", self._schedule_dmd_refresh)
 
         self._build_ui()
 
@@ -182,7 +190,6 @@ class DMDConverterApp(ctk.CTk):
         lp.grid_rowconfigure(2, weight=1)
         lp.grid_columnconfigure(0, weight=1)
 
-        # Header row
         hdr = ctk.CTkFrame(lp, fg_color="transparent")
         hdr.grid(row=0, column=0, padx=10, pady=(12, 4), sticky="ew")
         hdr.grid_columnconfigure(0, weight=1)
@@ -195,7 +202,6 @@ class DMDConverterApp(ctk.CTk):
         )
         self._count_lbl.grid(row=0, column=1, sticky="e")
 
-        # Add buttons
         br = ctk.CTkFrame(lp, fg_color="transparent")
         br.grid(row=1, column=0, padx=8, pady=(0, 4), sticky="ew")
         br.grid_columnconfigure((0, 1, 2), weight=1)
@@ -207,7 +213,6 @@ class DMDConverterApp(ctk.CTk):
                       height=30, fg_color="#3a3a4a", hover_color="#7b241c").grid(
             row=0, column=2, padx=2, sticky="ew")
 
-        # ── Treeview (handles thousands of rows natively) ─────────────────────
         self._style_treeview()
         tree_host = tk.Frame(lp, bg="#12121f")
         tree_host.grid(row=2, column=0, padx=6, pady=4, sticky="nsew")
@@ -224,7 +229,6 @@ class DMDConverterApp(ctk.CTk):
         self._tree.grid(row=0, column=0, sticky="nsew")
         sb.grid(row=0, column=1, sticky="ns")
 
-        # Tag colours per status
         self._tree.tag_configure("idle",       foreground="#aaaacc")
         self._tree.tag_configure("converting", foreground="#f39c12")
         self._tree.tag_configure("done",       foreground="#2ecc71")
@@ -234,14 +238,12 @@ class DMDConverterApp(ctk.CTk):
         self._tree.bind("<Delete>",           lambda _e: self._remove_selected())
         self._tree.bind("<BackSpace>",        lambda _e: self._remove_selected())
 
-        # Selection hint
         ctk.CTkLabel(lp, text="👆 Click a row to select · Del to remove",
                      text_color="#444466", font=ctk.CTkFont(size=10)
                      ).grid(row=3, column=0, padx=8, pady=(0, 2), sticky="w")
 
-        # Bottom controls
         bot = ctk.CTkFrame(lp, fg_color="transparent")
-        bot.grid(row=3, column=0, padx=6, pady=6, sticky="ew")
+        bot.grid(row=4, column=0, padx=6, pady=6, sticky="ew")
         bot.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(bot, text="📤 Output folder", font=ctk.CTkFont(size=12)).grid(
@@ -264,7 +266,6 @@ class DMDConverterApp(ctk.CTk):
         ).grid(row=2, column=0, columnspan=2, padx=4, pady=(8, 2), sticky="ew")
 
     def _style_treeview(self):
-        """Apply dark theme to the ttk.Treeview."""
         s = ttk.Style()
         s.theme_use("default")
         s.configure("File.Treeview",
@@ -285,17 +286,16 @@ class DMDConverterApp(ctk.CTk):
             text=f"{n} file{'s' if n != 1 else ''}" if n else "empty"
         )
 
-    # ── Right panel : preview + params + actions ───────────────────────────────
+    # ── Right panel ───────────────────────────────────────────────────────────
     def _build_right_panel(self):
         rp = ctk.CTkFrame(self, fg_color="transparent")
         rp.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         rp.grid_rowconfigure(1, weight=1)
         rp.grid_columnconfigure(0, weight=1)
-
         self._build_preview_area(rp)
         self._build_bottom_area(rp)
 
-    # ── Preview ───────────────────────────────────────────────────────────────
+    # ── Dual Preview ──────────────────────────────────────────────────────────
     def _build_preview_area(self, parent):
         pf = ctk.CTkFrame(parent)
         pf.grid(row=0, column=0, padx=4, pady=(4, 2), sticky="ew")
@@ -306,42 +306,72 @@ class DMDConverterApp(ctk.CTk):
         tr.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
         tr.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            tr, text="🖥️  Preview",
+            tr, text="🖥️  Preview  —  live side-by-side",
             font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=0, column=0, sticky="w")
 
         pb = ctk.CTkFrame(tr, fg_color="transparent")
         pb.grid(row=0, column=1, sticky="e")
         self._btn_src = ctk.CTkButton(
-            pb, text="▶  Source", width=105, height=28,
+            pb, text="▶  Refresh Source", width=130, height=28,
             command=self.show_source_preview
         )
         self._btn_src.pack(side="left", padx=3)
         self._btn_dmd = ctk.CTkButton(
-            pb, text="🔬 DMD Preview", width=130, height=28,
+            pb, text="🔬 Refresh DMD", width=130, height=28,
             fg_color="#1e6a3c", hover_color="#155230",
             command=self.show_dmd_preview
         )
         self._btn_dmd.pack(side="left", padx=3)
 
-        # Canvas (128×32 × 5 = 640×160)
-        cf = ctk.CTkFrame(pf, fg_color=BG_CANVAS, corner_radius=6)
-        cf.grid(row=1, column=0, padx=10, pady=4)
-        self._canvas = tk.Canvas(
-            cf, width=PREVIEW_W, height=PREVIEW_H,
+        # Dual canvas row
+        dc = ctk.CTkFrame(pf, fg_color="transparent")
+        dc.grid(row=1, column=0, padx=6, pady=4)
+
+        # Source canvas (left)
+        src_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        src_wrap.pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(
+            src_wrap, text="SOURCE",
+            font=ctk.CTkFont(size=10, weight="bold"), text_color="#556677"
+        ).pack(pady=(4, 0))
+        self._src_canvas = tk.Canvas(
+            src_wrap, width=SRC_CANVAS_W, height=SRC_CANVAS_H,
             bg=BG_CANVAS, highlightthickness=0
         )
-        self._canvas.pack(padx=2, pady=2)
-        self._draw_canvas_idle()
-
-        self._preview_info = ctk.CTkLabel(
-            pf, text="", text_color="#888899", font=ctk.CTkFont(size=11)
+        self._src_canvas.pack(padx=2, pady=(2, 2))
+        self._src_info = ctk.CTkLabel(
+            src_wrap, text="", text_color="#888899", font=ctk.CTkFont(size=10)
         )
-        self._preview_info.grid(row=2, column=0, pady=(0, 2))
+        self._src_info.pack(pady=(0, 4))
 
-        # Trim controls (hidden until file selected)
+        # DMD canvas (right)
+        dmd_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        dmd_wrap.pack(side="left", padx=(4, 0))
+        ctk.CTkLabel(
+            dmd_wrap, text="DMD OUTPUT  128×32",
+            font=ctk.CTkFont(size=10, weight="bold"), text_color="#2e7a4a"
+        ).pack(pady=(4, 0))
+        self._dmd_canvas = tk.Canvas(
+            dmd_wrap, width=DMD_CANVAS_W, height=DMD_CANVAS_H,
+            bg=BG_CANVAS, highlightthickness=0
+        )
+        self._dmd_canvas.pack(padx=2, pady=(2, 2))
+        self._dmd_info = ctk.CTkLabel(
+            dmd_wrap, text="", text_color="#888899", font=ctk.CTkFont(size=10)
+        )
+        self._dmd_info.pack(pady=(0, 4))
+
+        # Backward-compat aliases
+        self._canvas       = self._src_canvas
+        self._preview_info = self._src_info
+
+        self._draw_canvas_idle()
+        self._draw_dmd_canvas_idle()
+
+        # Trim controls
         self._trim_frame = ctk.CTkFrame(pf, fg_color="#16213e")
-        self._trim_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 8))
+        self._trim_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
         self._trim_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
@@ -349,26 +379,26 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=11, weight="bold"), text_color="#7ec8e3"
         ).grid(row=0, column=0, columnspan=4, padx=10, pady=(8, 4), sticky="w")
 
-        ctk.CTkLabel(self._trim_frame, text="Start", width=44, font=ctk.CTkFont(size=11)).grid(
-            row=1, column=0, padx=(10, 4), pady=2
-        )
+        ctk.CTkLabel(self._trim_frame, text="Start", width=44,
+                     font=ctk.CTkFont(size=11)).grid(row=1, column=0, padx=(10, 4), pady=2)
         self._sl_start = ctk.CTkSlider(
             self._trim_frame, from_=0, to=1, variable=self.v_trim_start,
             command=self._on_start_drag
         )
         self._sl_start.grid(row=1, column=1, padx=4, sticky="ew")
-        self._lbl_start = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54, font=ctk.CTkFont(size=11))
+        self._lbl_start = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
+                                        font=ctk.CTkFont(size=11))
         self._lbl_start.grid(row=1, column=2, padx=4)
 
-        ctk.CTkLabel(self._trim_frame, text="End", width=44, font=ctk.CTkFont(size=11)).grid(
-            row=2, column=0, padx=(10, 4), pady=2
-        )
+        ctk.CTkLabel(self._trim_frame, text="End", width=44,
+                     font=ctk.CTkFont(size=11)).grid(row=2, column=0, padx=(10, 4), pady=2)
         self._sl_end = ctk.CTkSlider(
             self._trim_frame, from_=0, to=1, variable=self.v_trim_end,
             command=self._on_end_drag
         )
         self._sl_end.grid(row=2, column=1, padx=4, sticky="ew", pady=(2, 8))
-        self._lbl_end = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54, font=ctk.CTkFont(size=11))
+        self._lbl_end = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
+                                      font=ctk.CTkFont(size=11))
         self._lbl_end.grid(row=2, column=2, padx=4)
 
         ctk.CTkButton(
@@ -376,9 +406,9 @@ class DMDConverterApp(ctk.CTk):
             width=70, height=24, fg_color="transparent", border_width=1
         ).grid(row=1, column=3, rowspan=2, padx=(4, 10))
 
-        self._trim_frame.grid_remove()  # hidden by default
+        self._trim_frame.grid_remove()
 
-    # ── Bottom : params + actions/log ─────────────────────────────────────────
+    # ── Bottom : params + actions ─────────────────────────────────────────────
     def _build_bottom_area(self, parent):
         bot = ctk.CTkFrame(parent, fg_color="transparent")
         bot.grid(row=1, column=0, sticky="nsew", padx=4, pady=2)
@@ -386,13 +416,11 @@ class DMDConverterApp(ctk.CTk):
         bot.grid_columnconfigure(1, weight=0)
         bot.grid_rowconfigure(0, weight=1)
 
-        # Params (left, scrollable)
         self._params_scroll = ctk.CTkScrollableFrame(bot, label_text="⚙️  Parameters")
         self._params_scroll.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         self._params_scroll.grid_columnconfigure(0, weight=1)
         self._build_params_panel(self._params_scroll)
 
-        # Actions + log (right, fixed width)
         ar = ctk.CTkFrame(bot, width=310)
         ar.grid(row=0, column=1, sticky="nsew")
         ar.grid_propagate(False)
@@ -413,28 +441,26 @@ class DMDConverterApp(ctk.CTk):
             f = ctk.CTkFrame(parent, fg_color="transparent")
             f.pack(fill="x", padx=8, pady=2)
             f.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(f, text=label, width=135, anchor="w", font=ctk.CTkFont(size=12)).grid(
-                row=0, column=0, padx=(4, 6)
-            )
+            ctk.CTkLabel(f, text=label, width=135, anchor="w",
+                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
             kw = dict(from_=from_, to=to, variable=var)
             if steps is not None:
                 kw["number_of_steps"] = steps
             sl = ctk.CTkSlider(f, **kw)
             sl.grid(row=0, column=1, sticky="ew", padx=4)
-            lbl = ctk.CTkLabel(f, text=fmt.format(var.get()) + suffix, width=72, anchor="e",
-                               font=ctk.CTkFont(size=11))
+            lbl = ctk.CTkLabel(f, text=fmt.format(var.get()) + suffix,
+                               width=72, anchor="e", font=ctk.CTkFont(size=11))
             lbl.grid(row=0, column=2, padx=(4, 4))
             var.trace_add("write", lambda *_: lbl.configure(text=fmt.format(var.get()) + suffix))
             return sl
 
-        # ── Mode ──────────────────────────────────────────────────────────────
+        # Mode
         section("🎨  Content mode")
         mr = ctk.CTkFrame(parent, fg_color="transparent")
         mr.pack(fill="x", padx=8, pady=2)
         mr.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(mr, text="Mode", width=135, anchor="w", font=ctk.CTkFont(size=12)).grid(
-            row=0, column=0, padx=(4, 6)
-        )
+        ctk.CTkLabel(mr, text="Mode", width=135, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
         ctk.CTkOptionMenu(
             mr, variable=self.v_mode,
             values=["pixel_art", "anime", "cinema", "custom"],
@@ -447,22 +473,22 @@ class DMDConverterApp(ctk.CTk):
         )
         self._mode_desc_lbl.pack(padx=12, pady=(0, 4), anchor="w")
 
-        # ── Parallélisme ──────────────────────────────────────────────────────
+        # Parallelism
         section("⚡  Parallelism")
         slider_row("Workers (CPU)", self.v_workers, 1, 16, "{:.0f}", " workers", steps=15)
 
-        # ── Scroll ────────────────────────────────────────────────────────────
+        # Scroll
         section("📜  Scroll")
         slider_row("Scroll speed",    self.v_scroll,        4.0, 80.0, "{:.0f}", " px/s")
         slider_row("Bottom crop (%)", self.v_bottom_crop,   0.0,  0.5, "{:.0%}")
         slider_row("Scroll cycles",   self.v_scroll_cycles, 0.0,  5.0, "{:.2f}", " cyc")
 
-        # ── FPS ───────────────────────────────────────────────────────────────
+        # FPS
         section("🎬  Render FPS")
         slider_row("FPS minimum", self.v_fps_min, 5.0,  30.0, "{:.1f}", " fps")
         slider_row("FPS maximum", self.v_fps_max, 10.0, 60.0, "{:.1f}", " fps")
 
-        # ── Colorimétrie custom ───────────────────────────────────────────────
+        # Colorimetry (custom mode only)
         self._custom_header = ctk.CTkLabel(
             parent, text="🎛️  Colorimetry  (custom mode only)",
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
@@ -477,36 +503,180 @@ class DMDConverterApp(ctk.CTk):
             f = ctk.CTkFrame(self._custom_frame, fg_color="transparent")
             f.pack(fill="x", padx=8, pady=2)
             f.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(f, text=label, width=135, anchor="w", font=ctk.CTkFont(size=12)).grid(
-                row=0, column=0, padx=(4, 6)
-            )
+            ctk.CTkLabel(f, text=label, width=135, anchor="w",
+                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
             sl = ctk.CTkSlider(f, from_=from_, to=to, variable=var)
             sl.grid(row=0, column=1, sticky="ew", padx=4)
-            lbl = ctk.CTkLabel(f, text=fmt.format(var.get()) + suffix, width=72, anchor="e",
-                               font=ctk.CTkFont(size=11))
+            lbl = ctk.CTkLabel(f, text=fmt.format(var.get()) + suffix,
+                               width=72, anchor="e", font=ctk.CTkFont(size=11))
             lbl.grid(row=0, column=2, padx=(4, 4))
             var.trace_add("write", lambda *_: lbl.configure(text=fmt.format(var.get()) + suffix))
 
-        cslider("Contrast",     self.v_contrast,    0.5,  2.5)
-        cslider("Saturation",   self.v_saturation,  0.0,  4.0)
-        cslider("Brightness",   self.v_brightness, -0.5,  0.5, "{:.3f}")
-        cslider("Gamma",        self.v_gamma,       0.1,  2.5)
-        cslider("Sharpen Lum",  self.v_sharpen_lum, 0.0,  3.0)
-        cslider("Sharpen Chr",  self.v_sharpen_chr, 0.0,  2.0)
+        cslider("Contrast",    self.v_contrast,    0.5,  2.5)
+        cslider("Saturation",  self.v_saturation,  0.0,  4.0)
+        cslider("Brightness",  self.v_brightness, -0.5,  0.5, "{:.3f}")
+        cslider("Gamma",       self.v_gamma,       0.1,  2.5)
+        cslider("Sharpen Lum", self.v_sharpen_lum, 0.0,  3.0)
+        cslider("Sharpen Chr", self.v_sharpen_chr, 0.0,  2.0)
 
         dr = ctk.CTkFrame(self._custom_frame, fg_color="transparent")
         dr.pack(fill="x", padx=8, pady=2)
-        ctk.CTkLabel(dr, text="Dithering", width=135, anchor="w", font=ctk.CTkFont(size=12)).pack(
-            side="left", padx=(4, 6)
-        )
+        ctk.CTkLabel(dr, text="Dithering", width=135, anchor="w",
+                     font=ctk.CTkFont(size=12)).pack(side="left", padx=(4, 6))
         ctk.CTkOptionMenu(
             dr, variable=self.v_dither,
             values=["none", "bayer:bayer_scale=1", "bayer:bayer_scale=2", "sierra2_4a"],
             width=200
         ).pack(side="left")
 
-        # Initially sync visibility
         self._update_custom_visibility()
+
+        # Advanced panel (collapsible) — ALWAYS at the bottom
+        self._build_advanced_panel(parent)
+
+    # ── Advanced panel ────────────────────────────────────────────────────────
+    def _build_advanced_panel(self, parent):
+        self._adv_toggle_btn = ctk.CTkButton(
+            parent,
+            text="🔧  Advanced Settings  ▼",
+            command=self._toggle_advanced,
+            fg_color="#1a1a2e", hover_color="#2a2a3e",
+            anchor="w", height=34, border_width=1,
+            border_color="#3a3a5a",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#aaaadd",
+        )
+        self._adv_toggle_btn.pack(fill="x", padx=8, pady=(14, 0))
+
+        self._adv_frame = ctk.CTkFrame(parent, fg_color="#0f0f20", corner_radius=6)
+        # Not packed yet — shown only when expanded
+        self._build_advanced_content(self._adv_frame)
+
+    def _toggle_advanced(self):
+        self._adv_expanded = not self._adv_expanded
+        if self._adv_expanded:
+            self._adv_frame.pack(fill="x", padx=8, pady=(0, 8))
+            self._adv_toggle_btn.configure(text="🔧  Advanced Settings  ▲")
+        else:
+            self._adv_frame.pack_forget()
+            self._adv_toggle_btn.configure(text="🔧  Advanced Settings  ▼")
+
+    def _build_advanced_content(self, parent):
+        ctk.CTkLabel(
+            parent,
+            text="ℹ️  All settings here are hidden by default.\n"
+                 "    Default values reproduce the standard v2.0 output unchanged.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=12, pady=(8, 4), anchor="w")
+
+        # ── SECTION 1: POSITIONING ────────────────────────────────────────────
+        ctk.CTkLabel(
+            parent, text="━━  📍  Positioning",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).pack(fill="x", padx=10, pady=(10, 4), anchor="w")
+
+        scroll_row = ctk.CTkFrame(parent, fg_color="transparent")
+        scroll_row.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkCheckBox(
+            scroll_row,
+            text="Auto vertical scroll  (default — matches standard behaviour)",
+            variable=self.v_scroll_enabled,
+            command=self._on_scroll_enabled_change,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        ).pack(side="left")
+
+        # Manual positioning frame (hidden when scroll is on)
+        self._manual_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=6)
+
+        def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
+                       steps=None, is_int=False):
+            f = ctk.CTkFrame(par, fg_color="transparent")
+            f.pack(fill="x", padx=10, pady=2)
+            f.grid_columnconfigure(1, weight=1)
+            ctk.CTkLabel(f, text=label, width=145, anchor="w",
+                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+            kw = dict(from_=from_, to=to, variable=var)
+            if steps is not None:
+                kw["number_of_steps"] = steps
+            sl = ctk.CTkSlider(f, **kw)
+            sl.grid(row=0, column=1, sticky="ew", padx=4)
+            lbl_txt = (lambda: fmt.format(int(var.get())) + suffix) if is_int \
+                      else (lambda: fmt.format(var.get()) + suffix)
+            lbl = ctk.CTkLabel(f, text=lbl_txt(), width=80, anchor="e",
+                               font=ctk.CTkFont(size=11))
+            lbl.grid(row=0, column=2, padx=(4, 4))
+            var.trace_add("write", lambda *_: lbl.configure(text=lbl_txt()))
+            return sl
+
+        ctk.CTkLabel(
+            self._manual_frame,
+            text="✋  Manual frame — auto-scroll is OFF\n"
+                 "    Zoom first, then adjust X / Y to choose the visible 128×32 window.\n"
+                 "    DMD preview auto-refreshes ~2 s after you stop moving sliders.",
+            text_color="#7799aa", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=12, pady=(8, 6), anchor="w")
+
+        adv_slider(self._manual_frame, "Zoom",     self.v_zoom,     0.5, 4.0,
+                   "{:.2f}", "×", steps=70)
+        adv_slider(self._manual_frame, "X offset", self.v_manual_x, 0,  512,
+                   "{:.0f}", " px", steps=512, is_int=True)
+        adv_slider(self._manual_frame, "Y offset", self.v_manual_y, 0,  512,
+                   "{:.0f}", " px", steps=512, is_int=True)
+
+        self._on_scroll_enabled_change()   # set initial visibility
+
+        # ── SECTION 2: VISUAL EFFECTS ─────────────────────────────────────────
+        ctk.CTkLabel(
+            parent, text="━━  ✨  Visual Effects",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).pack(fill="x", padx=10, pady=(14, 4), anchor="w")
+
+        ctk.CTkLabel(
+            parent,
+            text="All effects are OFF by default (values = 0 / unchecked).\n"
+                 "Non-zero values add extra ffmpeg filter passes.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
+
+        adv_slider(parent, "Hue shift",       self.v_hue_shift,       -180.0, 180.0,
+                   "{:.0f}", "°", steps=360)
+        adv_slider(parent, "Noise reduction", self.v_noise_reduction,   0.0,   8.0,
+                   "{:.1f}", "")
+        adv_slider(parent, "Film grain",      self.v_film_grain,        0,    50,
+                   "{:.0f}", "", steps=50, is_int=True)
+
+        vig_row = ctk.CTkFrame(parent, fg_color="transparent")
+        vig_row.pack(fill="x", padx=14, pady=(4, 8))
+        ctk.CTkCheckBox(
+            vig_row,
+            text="Vignette  (darkens edges — default OFF)",
+            variable=self.v_vignette, font=ctk.CTkFont(size=12),
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            parent, text="↺  Reset all advanced to default",
+            command=self._reset_advanced,
+            height=28, fg_color="transparent", border_width=1,
+            border_color="#3a3a5a", text_color="#aaaacc",
+            font=ctk.CTkFont(size=11),
+        ).pack(padx=12, pady=(2, 10), anchor="w")
+
+    def _on_scroll_enabled_change(self):
+        if self.v_scroll_enabled.get():
+            self._manual_frame.pack_forget()
+        else:
+            self._manual_frame.pack(fill="x", padx=10, pady=(4, 4))
+
+    def _reset_advanced(self):
+        self.v_scroll_enabled.set(True)
+        self.v_zoom.set(1.0)
+        self.v_manual_x.set(0)
+        self.v_manual_y.set(0)
+        self.v_hue_shift.set(0.0)
+        self.v_noise_reduction.set(0.0)
+        self.v_film_grain.set(0)
+        self.v_vignette.set(False)
+        self._on_scroll_enabled_change()
 
     # ── Actions + log panel ───────────────────────────────────────────────────
     def _build_actions_panel(self, parent):
@@ -524,8 +694,7 @@ class DMDConverterApp(ctk.CTk):
             text="▶  Convert selected file\n    (click a file in the list first)",
             command=self.convert_selected,
             height=52, fg_color="#1a4f7a", hover_color="#1a618d",
-            font=ctk.CTkFont(size=13),
-            state="disabled"   # enabled when a file is selected
+            font=ctk.CTkFont(size=13), state="disabled"
         )
         self._btn_convert.grid(row=0, column=0, padx=4, pady=4, sticky="ew")
 
@@ -545,7 +714,6 @@ class DMDConverterApp(ctk.CTk):
         )
         self._btn_batch.grid(row=2, column=0, padx=4, pady=4, sticky="ew")
 
-        # Progress
         self._progress = ctk.CTkProgressBar(af, height=8)
         self._progress.set(0)
         self._progress.grid(row=3, column=0, padx=4, pady=(10, 2), sticky="ew")
@@ -555,7 +723,6 @@ class DMDConverterApp(ctk.CTk):
         )
         self._status_lbl.grid(row=4, column=0, padx=4, pady=2)
 
-        # Log
         ctk.CTkLabel(
             parent, text="📋  Conversion log",
             font=ctk.CTkFont(size=12, weight="bold")
@@ -584,7 +751,6 @@ class DMDConverterApp(ctk.CTk):
         folder = filedialog.askdirectory(title="Select source folder")
         if not folder:
             return
-        # Scan in a background thread so the dialog closes immediately
         threading.Thread(target=self._scan_folder, args=(folder,), daemon=True).start()
 
     def _scan_folder(self, folder):
@@ -599,23 +765,19 @@ class DMDConverterApp(ctk.CTk):
         self.after(0, lambda: self._batch_insert(paths, 0, folder))
 
     def _batch_insert(self, paths, start, source_folder=None, batch_size=150):
-        """Insert files into the treeview in batches — keeps the UI responsive."""
         batch = paths[start:start + batch_size]
         for p in batch:
             self._add_file_raw(p)
         self._update_count()
         remaining = start + batch_size
         if remaining < len(paths):
-            # Yield to the event loop, then continue
             self.after(0, lambda: self._batch_insert(paths, remaining, source_folder, batch_size))
         else:
             folder_name = Path(source_folder).name if source_folder else ""
-            added = sum(1 for p in paths if p in self._file_paths)
             if folder_name:
                 self._log(f"📂  {len(paths)} file(s) added from '{folder_name}'")
 
     def _add_file_raw(self, path):
-        """Insert one file into the treeview (no UI refresh — call _update_count after batch)."""
         if path in self._file_paths:
             return
         ext  = Path(path).suffix.lower()
@@ -634,7 +796,6 @@ class DMDConverterApp(ctk.CTk):
         if iid == self._selected_iid:
             return
         self._selected_iid = iid
-        # Enable single-file convert button now that something is selected
         if hasattr(self, "_btn_convert") and not self._busy:
             self._btn_convert.configure(state="normal")
         path = self._file_data.get(iid)
@@ -647,10 +808,12 @@ class DMDConverterApp(ctk.CTk):
             return
         iid = sel[0]
         if self._selected_iid == iid:
-            self._stop_preview()
+            self._stop_src_preview()
+            self._stop_dmd_preview()
             self._selected_iid = ""
             self._trim_frame.grid_remove()
             self._draw_canvas_idle()
+            self._draw_dmd_canvas_idle()
         path = self._file_data.pop(iid, None)
         if path:
             self._file_paths.discard(path)
@@ -658,20 +821,22 @@ class DMDConverterApp(ctk.CTk):
         self._update_count()
 
     def clear_files(self):
-        self._stop_preview()
+        self._stop_src_preview()
+        self._stop_dmd_preview()
         self._tree.delete(*self._tree.get_children())
         self._file_data.clear()
         self._file_paths.clear()
         self._selected_iid = ""
         self._trim_frame.grid_remove()
         self._draw_canvas_idle()
+        self._draw_dmd_canvas_idle()
         self._update_count()
 
     def _set_file_status(self, iid, status):
         try:
             self._tree.item(iid, tags=(status,))
         except tk.TclError:
-            pass  # row may have been deleted
+            pass
 
     def browse_output(self):
         folder = filedialog.askdirectory(title="Choose output folder")
@@ -679,42 +844,54 @@ class DMDConverterApp(ctk.CTk):
             self.v_output_dir.set(folder)
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  PREVIEW
+    #  SOURCE PREVIEW
     # ══════════════════════════════════════════════════════════════════════════
 
     def _draw_canvas_idle(self):
-        self._canvas.delete("all")
-        self._canvas.create_text(
-            PREVIEW_W // 2, PREVIEW_H // 2,
-            text="← Click a file in the list to preview it",
-            fill="#445566", font=("Helvetica", 13)
+        self._src_canvas.delete("all")
+        self._src_canvas.create_text(
+            SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+            text="← Select a file to preview",
+            fill="#445566", font=("Helvetica", 12)
         )
-        if hasattr(self, "_preview_info"):
-            self._preview_info.configure(text="")
-        # Disable convert button when nothing selected
+        if hasattr(self, "_src_info"):
+            self._src_info.configure(text="")
         if hasattr(self, "_btn_convert"):
             self._btn_convert.configure(state="disabled")
 
+    def _draw_dmd_canvas_idle(self):
+        self._dmd_canvas.delete("all")
+        self._dmd_canvas.create_text(
+            DMD_CANVAS_W // 2, DMD_CANVAS_H // 2,
+            text="← Select a file then\n  click 🔬 Refresh DMD",
+            fill="#334455", font=("Helvetica", 11), justify="center"
+        )
+        if hasattr(self, "_dmd_info"):
+            self._dmd_info.configure(text="")
+
+    def _stop_src_preview(self):
+        if self._src_job:
+            self.after_cancel(self._src_job)
+            self._src_job = None
+        self._src_frames.clear()
+        self._src_delays.clear()
+        self._src_idx = 0
+        if self._src_tmpdir and os.path.isdir(self._src_tmpdir):
+            shutil.rmtree(self._src_tmpdir, ignore_errors=True)
+            self._src_tmpdir = None
+
+    # Backward-compat alias
     def _stop_preview(self):
-        if self._preview_job:
-            self.after_cancel(self._preview_job)
-            self._preview_job = None
-        self._preview_frames.clear()
-        self._preview_delays.clear()
-        self._preview_idx = 0
-        if self._preview_tmpdir and os.path.isdir(self._preview_tmpdir):
-            shutil.rmtree(self._preview_tmpdir, ignore_errors=True)
-            self._preview_tmpdir = None
+        self._stop_src_preview()
 
     def _load_preview(self, file_path):
-        self._stop_preview()
-        self._canvas.delete("all")
-        self._canvas.create_text(
-            PREVIEW_W // 2, PREVIEW_H // 2,
+        self._stop_src_preview()
+        self._src_canvas.delete("all")
+        self._src_canvas.create_text(
+            SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
             text="⏳  Loading preview…",
-            fill="#7ec8e3", font=("Helvetica", 13)
+            fill="#7ec8e3", font=("Helvetica", 12)
         )
-        # Get metadata to update trim sliders
         w, h, fps, dur = get_metadata(file_path)
         self._source_duration = dur if dur and dur > 0 else 10.0
         self._update_trim_sliders()
@@ -726,24 +903,22 @@ class DMDConverterApp(ctk.CTk):
         ).start()
 
     def _extract_source_frames(self, file_path):
-        """Background: extract source frames via ffmpeg for preview."""
         tmpdir = tempfile.mkdtemp(prefix="dmd_src_")
         fps_prev = 12.5
         dur = min(self._source_duration, 10.0)
-
         cmd = [
             "ffmpeg", "-y", "-i", file_path,
             "-t", str(dur),
             "-vf", (
                 f"fps={fps_prev},"
-                f"scale={PREVIEW_W}:{PREVIEW_H}:"
+                f"scale={SRC_CANVAS_W}:{SRC_CANVAS_H}:"
                 f"force_original_aspect_ratio=decrease,"
-                f"pad={PREVIEW_W}:{PREVIEW_H}:(ow-iw)/2:(oh-ih)/2:color={BG_CANVAS[1:]}"
+                f"pad={SRC_CANVAS_W}:{SRC_CANVAS_H}:(ow-iw)/2:(oh-ih)/2"
+                f":color={BG_CANVAS[1:]}"
             ),
             "-f", "image2", os.path.join(tmpdir, "f%04d.png")
         ]
         subprocess.run(cmd, capture_output=True)
-
         paths = sorted(glob.glob(os.path.join(tmpdir, "f*.png")))
         frames, delays = [], []
         delay_ms = int(1000 / fps_prev)
@@ -754,42 +929,37 @@ class DMDConverterApp(ctk.CTk):
                 delays.append(delay_ms)
             except Exception:
                 pass
-
-        self.after(0, lambda: self._on_source_frames_ready(
-            frames, delays, tmpdir, file_path
-        ))
+        self.after(0, lambda: self._on_source_frames_ready(frames, delays, tmpdir, file_path))
 
     def _on_source_frames_ready(self, frames, delays, tmpdir, file_path):
         if not frames:
-            self._canvas.delete("all")
-            self._canvas.create_text(
-                PREVIEW_W // 2, PREVIEW_H // 2,
-                text="⚠️  Preview unavailable  (ffmpeg missing?)",
-                fill="#e74c3c", font=("Helvetica", 12)
+            self._src_canvas.delete("all")
+            self._src_canvas.create_text(
+                SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+                text="⚠️  Preview unavailable\n(ffmpeg missing?)",
+                fill="#e74c3c", font=("Helvetica", 11), justify="center"
             )
             shutil.rmtree(tmpdir, ignore_errors=True)
             return
-
-        self._preview_tmpdir = tmpdir
-        self._preview_frames = frames
-        self._preview_delays = delays
-        self._preview_idx    = 0
-
+        self._src_tmpdir = tmpdir
+        self._src_frames = frames
+        self._src_delays = delays
+        self._src_idx    = 0
         name = Path(file_path).name
-        self._preview_info.configure(
+        self._src_info.configure(
             text=f"{name}   ·   {len(frames)} frames   ·   {self._source_duration:.1f} s"
         )
-        self._animate_preview()
+        self._animate_src()
 
-    def _animate_preview(self):
-        if not self._preview_frames:
+    def _animate_src(self):
+        if not self._src_frames:
             return
-        idx = self._preview_idx % len(self._preview_frames)
-        self._canvas.delete("all")
-        self._canvas.create_image(0, 0, anchor="nw", image=self._preview_frames[idx])
-        self._preview_idx = idx + 1
-        delay = self._preview_delays[idx] if self._preview_delays else 80
-        self._preview_job = self.after(delay, self._animate_preview)
+        idx = self._src_idx % len(self._src_frames)
+        self._src_canvas.delete("all")
+        self._src_canvas.create_image(0, 0, anchor="nw", image=self._src_frames[idx])
+        self._src_idx = idx + 1
+        delay = self._src_delays[idx] if self._src_delays else 80
+        self._src_job = self.after(delay, self._animate_src)
 
     def show_source_preview(self):
         if self._selected_iid:
@@ -799,6 +969,21 @@ class DMDConverterApp(ctk.CTk):
         else:
             messagebox.showinfo("Info", "Select a file first.")
 
+    # ══════════════════════════════════════════════════════════════════════════
+    #  DMD PREVIEW  (independent canvas + animation loop)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _stop_dmd_preview(self):
+        if self._dmd_job:
+            self.after_cancel(self._dmd_job)
+            self._dmd_job = None
+        self._dmd_frames.clear()
+        self._dmd_delays.clear()
+        self._dmd_idx = 0
+        if self._dmd_tmpdir and os.path.isdir(self._dmd_tmpdir):
+            shutil.rmtree(self._dmd_tmpdir, ignore_errors=True)
+            self._dmd_tmpdir = None
+
     def show_dmd_preview(self):
         if not self._selected_iid:
             messagebox.showinfo("Info", "Select a file first.")
@@ -806,19 +991,22 @@ class DMDConverterApp(ctk.CTk):
         src = self._file_data.get(self._selected_iid)
         if not src:
             return
-        self._stop_preview()
-        self._canvas.delete("all")
-        self._canvas.create_text(
-            PREVIEW_W // 2, PREVIEW_H // 2,
-            text="⏳  Generating DMD render…\n    (a few seconds)",
-            fill="#f39c12", font=("Helvetica", 12)
+        self._start_dmd_generation(src)
+
+    def _start_dmd_generation(self, src):
+        if self._dmd_rendering:
+            return
+        self._dmd_rendering = True
+        self._stop_dmd_preview()
+        self._dmd_canvas.delete("all")
+        self._dmd_canvas.create_text(
+            DMD_CANVAS_W // 2, DMD_CANVAS_H // 2,
+            text="⏳  Generating DMD…\n  (a few seconds)",
+            fill="#f39c12", font=("Helvetica", 11), justify="center"
         )
         self._btn_dmd.configure(state="disabled", text="⏳  Rendering…")
-        self._btn_src.configure(state="disabled")
-
-        params = self._collect_params()
+        params  = self._collect_params()
         start_s, end_s = self._get_trim()
-
         threading.Thread(
             target=self._generate_dmd_preview,
             args=(src, params, start_s, end_s), daemon=True
@@ -833,13 +1021,12 @@ class DMDConverterApp(ctk.CTk):
             self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
             return
 
-        # Load and scale up the 128×32 output GIF
         frames, delays = [], []
         try:
             img = Image.open(out_gif)
             while True:
                 frame = img.copy().convert("RGB").resize(
-                    (PREVIEW_W, PREVIEW_H), Image.NEAREST
+                    (DMD_DISP_W, DMD_DISP_H), Image.NEAREST
                 )
                 frames.append(ImageTk.PhotoImage(frame))
                 delays.append(max(img.info.get("duration", 80), 20))
@@ -853,30 +1040,55 @@ class DMDConverterApp(ctk.CTk):
         self.after(0, lambda: self._on_dmd_ready(frames, delays, tmpdir, out_gif))
 
     def _on_dmd_ready(self, frames, delays, tmpdir, out_gif):
-        self._btn_dmd.configure(state="normal", text="🔬 DMD Preview")
-        self._btn_src.configure(state="normal")
-        if self._preview_tmpdir:
-            shutil.rmtree(self._preview_tmpdir, ignore_errors=True)
-        self._preview_tmpdir = tmpdir
-        self._preview_frames = frames
-        self._preview_delays = delays
-        self._preview_idx    = 0
-        self._preview_info.configure(
-            text=f"✅  DMD render  ·  128 × 32  ·  {len(frames)} frames  "
-                 f"·  {os.path.getsize(out_gif) // 1024} KB"
+        self._dmd_rendering = False
+        self._btn_dmd.configure(state="normal", text="🔬 Refresh DMD")
+        self._stop_dmd_preview()
+        self._dmd_tmpdir = tmpdir
+        self._dmd_frames = frames
+        self._dmd_delays = delays
+        self._dmd_idx    = 0
+        size_kb = os.path.getsize(out_gif) // 1024
+        self._dmd_info.configure(
+            text=f"✅  128×32  ·  {len(frames)} frames  ·  {size_kb} KB"
         )
-        self._animate_preview()
+        self._animate_dmd()
 
     def _on_dmd_fail(self, msg, tmpdir):
-        self._btn_dmd.configure(state="normal", text="🔬 DMD Preview")
-        self._btn_src.configure(state="normal")
+        self._dmd_rendering = False
+        self._btn_dmd.configure(state="normal", text="🔬 Refresh DMD")
         shutil.rmtree(tmpdir, ignore_errors=True)
-        self._canvas.delete("all")
-        self._canvas.create_text(
-            PREVIEW_W // 2, PREVIEW_H // 2,
-            text="❌  DMD render failed", fill="#e74c3c", font=("Helvetica", 13)
+        self._dmd_canvas.delete("all")
+        self._dmd_canvas.create_text(
+            DMD_CANVAS_W // 2, DMD_CANVAS_H // 2,
+            text="❌  DMD render failed", fill="#e74c3c", font=("Helvetica", 11)
         )
         self._log(f"❌  DMD preview: {msg}", "error")
+
+    def _animate_dmd(self):
+        if not self._dmd_frames:
+            return
+        idx = self._dmd_idx % len(self._dmd_frames)
+        self._dmd_canvas.delete("all")
+        x_off = (DMD_CANVAS_W - DMD_DISP_W) // 2
+        y_off = (DMD_CANVAS_H - DMD_DISP_H) // 2
+        self._dmd_canvas.create_image(x_off, y_off, anchor="nw",
+                                      image=self._dmd_frames[idx])
+        self._dmd_idx = idx + 1
+        delay = self._dmd_delays[idx] if self._dmd_delays else 80
+        self._dmd_job = self.after(delay, self._animate_dmd)
+
+    # ── Auto-refresh debounce ─────────────────────────────────────────────────
+    def _schedule_dmd_refresh(self, *_):
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
+        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_dmd)
+
+    def _auto_refresh_dmd(self):
+        self._adv_refresh_job = None
+        if self._selected_iid and not self._busy and not self._dmd_rendering:
+            src = self._file_data.get(self._selected_iid)
+            if src:
+                self._start_dmd_generation(src)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  TRIM
@@ -912,7 +1124,6 @@ class DMDConverterApp(ctk.CTk):
         self._lbl_end.configure(text=f"{self._source_duration:.1f} s")
 
     def _get_trim(self):
-        """Return (start_s, end_s) or (None, None) if full file."""
         s = self.v_trim_start.get()
         e = self.v_trim_end.get()
         if s <= 0.0 and e >= self._source_duration - 0.05:
@@ -938,20 +1149,30 @@ class DMDConverterApp(ctk.CTk):
 
     def _collect_params(self):
         return {
-            "mode":           self.v_mode.get(),
-            "max_workers":    self.v_workers.get(),
-            "scroll_speed":   self.v_scroll.get(),
+            # Standard parameters (identical to v2.0 defaults — no change)
+            "mode":            self.v_mode.get(),
+            "max_workers":     self.v_workers.get(),
+            "scroll_speed":    self.v_scroll.get(),
             "bottom_crop_pct": self.v_bottom_crop.get(),
-            "scroll_cycles":  self.v_scroll_cycles.get(),
-            "fps_min":        self.v_fps_min.get(),
-            "fps_max":        self.v_fps_max.get(),
-            "contrast":       self.v_contrast.get(),
-            "saturation":     self.v_saturation.get(),
-            "brightness":     self.v_brightness.get(),
-            "gamma":          self.v_gamma.get(),
-            "sharpen_lum":    self.v_sharpen_lum.get(),
-            "sharpen_chr":    self.v_sharpen_chr.get(),
-            "dither":         self.v_dither.get(),
+            "scroll_cycles":   self.v_scroll_cycles.get(),
+            "fps_min":         self.v_fps_min.get(),
+            "fps_max":         self.v_fps_max.get(),
+            "contrast":        self.v_contrast.get(),
+            "saturation":      self.v_saturation.get(),
+            "brightness":      self.v_brightness.get(),
+            "gamma":           self.v_gamma.get(),
+            "sharpen_lum":     self.v_sharpen_lum.get(),
+            "sharpen_chr":     self.v_sharpen_chr.get(),
+            "dither":          self.v_dither.get(),
+            # Advanced parameters (all default = no change vs v2.0)
+            "scroll_enabled":  self.v_scroll_enabled.get(),
+            "zoom":            self.v_zoom.get(),
+            "manual_x":        self.v_manual_x.get(),
+            "manual_y":        self.v_manual_y.get(),
+            "hue_shift":       self.v_hue_shift.get(),
+            "noise_reduction": self.v_noise_reduction.get(),
+            "film_grain":      int(self.v_film_grain.get()),
+            "vignette":        self.v_vignette.get(),
         }
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1007,7 +1228,6 @@ class DMDConverterApp(ctk.CTk):
         out_dir = self.v_output_dir.get().strip()
         if not out_dir:
             out_dir = str(Path(folder_in).parent / (Path(folder_in).name + "_DMD"))
-
         files = [
             f for f in os.listdir(folder_in)
             if Path(f).suffix.lower() in SUPPORTED_EXTENSIONS
@@ -1018,7 +1238,6 @@ class DMDConverterApp(ctk.CTk):
         if self._busy:
             messagebox.showwarning("Busy", "A conversion is already running.")
             return
-
         params = self._collect_params()
         self._log(f"📂  Batch: {len(files)} file(s)  →  {out_dir}")
         threading.Thread(
@@ -1037,7 +1256,6 @@ class DMDConverterApp(ctk.CTk):
             status = "done" if success else "error"
             self.after(0, lambda _iid=iid, s=status: self._set_file_status(_iid, s))
             self.after(0, lambda p=(i + 1) / total: self._progress.set(p))
-
         self.after(0, lambda: self._log(f"✅  {total} conversion(s) done."))
         self.after(0, lambda: self._set_busy(False))
 
@@ -1075,7 +1293,10 @@ class DMDConverterApp(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _on_close(self):
-        self._stop_preview()
+        self._stop_src_preview()
+        self._stop_dmd_preview()
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
         self.destroy()
 
 
@@ -1083,7 +1304,6 @@ class DMDConverterApp(ctk.CTk):
 #  Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
-    # Verify ffmpeg is available
     try:
         subprocess.run(
             ["ffmpeg", "-version"], capture_output=True, timeout=5, check=True
@@ -1095,7 +1315,6 @@ def main():
             "Windows: winget install Gyan.FFmpeg\n"
             "Linux :  sudo apt install ffmpeg"
         )
-        # Show as tk messagebox if possible
         try:
             root = tk.Tk()
             root.withdraw()
