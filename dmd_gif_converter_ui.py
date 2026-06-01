@@ -178,13 +178,16 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_detector     = tk.StringVar(value="person")
         self.v_action_strength     = tk.DoubleVar(value=0.65)
         self.v_action_smoothness   = tk.DoubleVar(value=0.85)
-        self.v_action_zoom_max     = tk.DoubleVar(value=1.8)
+        self.v_action_zoom_max     = tk.DoubleVar(value=2.0)
         self.v_action_padding      = tk.DoubleVar(value=0.20)
         self.v_action_intro        = tk.DoubleVar(value=1.5)
 
         # ── Tkinter vars — max duration cap ───────────────────────────────────
         self.v_max_dur_enabled = tk.BooleanVar(value=True)    # ON by default (2 min cap)
         self.v_max_duration    = tk.DoubleVar(value=120.0)    # 2 minutes
+
+        # ── Tkinter vars — auto-colorimetry ───────────────────────────────────
+        self.v_auto_color_enabled = tk.BooleanVar(value=False)
 
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
@@ -200,6 +203,7 @@ class DMDConverterApp(ctk.CTk):
             self.v_action_intro,
             self.v_trim_start, self.v_trim_end,
             self.v_max_dur_enabled, self.v_max_duration,
+            self.v_auto_color_enabled,
         ]
         for var in _watch:
             var.trace_add("write", self._schedule_pipeline_refresh)
@@ -524,17 +528,35 @@ class DMDConverterApp(ctk.CTk):
         mr.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(mr, text="Mode", width=135, anchor="w",
                      font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        ctk.CTkOptionMenu(
+        self._mode_menu = ctk.CTkOptionMenu(
             mr, variable=self.v_mode,
             values=["pixel_art", "anime", "cinema", "custom"],
             command=self._on_mode_change, width=180
-        ).grid(row=0, column=1, padx=4, sticky="w")
+        )
+        self._mode_menu.grid(row=0, column=1, padx=4, sticky="w")
 
         self._mode_desc_lbl = ctk.CTkLabel(
             parent, text=_MODE_DESC["pixel_art"],
             text_color="#888899", font=ctk.CTkFont(size=11)
         )
-        self._mode_desc_lbl.pack(padx=12, pady=(0, 4), anchor="w")
+        self._mode_desc_lbl.pack(padx=12, pady=(0, 2), anchor="w")
+
+        # ── Smart Color Boost (auto-colorimetry) ──────────────────────────────
+        ac_row = ctk.CTkFrame(parent, fg_color="#0f1a0f", corner_radius=6)
+        ac_row.pack(fill="x", padx=8, pady=(4, 6))
+        self._auto_color_cb = ctk.CTkCheckBox(
+            ac_row,
+            text="🎨  Smart Color Boost  —  IA auto-colorimetry",
+            variable=self.v_auto_color_enabled,
+            command=self._on_auto_color_toggle,
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#88dd88",
+        )
+        self._auto_color_cb.pack(side="left", padx=12, pady=8)
+        self._auto_color_info = ctk.CTkLabel(
+            ac_row, text="",
+            text_color="#557755", font=ctk.CTkFont(size=10)
+        )
+        self._auto_color_info.pack(side="left", padx=(0, 8))
 
         # Parallelism
         section("⚡  Parallelism")
@@ -611,6 +633,9 @@ class DMDConverterApp(ctk.CTk):
         self._custom_frame.pack(fill="x")
         self._custom_frame.grid_columnconfigure(0, weight=1)
 
+        # Collect slider references so _on_auto_color_toggle can disable them.
+        self._colorimetry_widgets: list = []
+
         def cslider(label, var, from_, to, fmt="{:.2f}", suffix=""):
             f = ctk.CTkFrame(self._custom_frame, fg_color="transparent")
             f.pack(fill="x", padx=8, pady=2)
@@ -623,6 +648,7 @@ class DMDConverterApp(ctk.CTk):
                                width=72, anchor="e", font=ctk.CTkFont(size=11))
             lbl.grid(row=0, column=2, padx=(4, 4))
             var.trace_add("write", lambda *_: lbl.configure(text=fmt.format(var.get()) + suffix))
+            self._colorimetry_widgets.append(sl)
 
         cslider("Contrast",    self.v_contrast,    0.5,  2.5)
         cslider("Saturation",  self.v_saturation,  0.0,  4.0)
@@ -635,11 +661,13 @@ class DMDConverterApp(ctk.CTk):
         dr.pack(fill="x", padx=8, pady=2)
         ctk.CTkLabel(dr, text="Dithering", width=135, anchor="w",
                      font=ctk.CTkFont(size=12)).pack(side="left", padx=(4, 6))
-        ctk.CTkOptionMenu(
+        self._dither_menu = ctk.CTkOptionMenu(
             dr, variable=self.v_dither,
             values=["none", "bayer:bayer_scale=1", "bayer:bayer_scale=2", "sierra2_4a"],
             width=200
-        ).pack(side="left")
+        )
+        self._dither_menu.pack(side="left")
+        self._colorimetry_widgets.append(self._dither_menu)
 
         self._update_custom_visibility()
 
@@ -836,7 +864,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_detector.set("person")
         self.v_action_strength.set(0.65)
         self.v_action_smoothness.set(0.85)
-        self.v_action_zoom_max.set(1.8)
+        self.v_action_zoom_max.set(2.0)
         self.v_action_padding.set(0.20)
         self.v_action_intro.set(1.5)
         self.v_scroll_enabled.set(True)
@@ -1507,6 +1535,25 @@ class DMDConverterApp(ctk.CTk):
         self._mode_desc_lbl.configure(text=_MODE_DESC.get(mode, ""))
         self._update_custom_visibility()
 
+    def _on_auto_color_toggle(self):
+        """Enable/disable manual colorimetry controls when Smart Color Boost is toggled."""
+        enabled = self.v_auto_color_enabled.get()
+        # Gray out / restore mode selector and all colorimetry widgets
+        col_state = "disabled" if enabled else "normal"
+        self._mode_menu.configure(state=col_state)
+        for w in self._colorimetry_widgets:
+            try:
+                w.configure(state=col_state)
+            except Exception:
+                pass
+        # Info label
+        if enabled:
+            self._auto_color_info.configure(
+                text="Values computed automatically at conversion · manual sliders overridden"
+            )
+        else:
+            self._auto_color_info.configure(text="")
+
     def _update_custom_visibility(self):
         is_custom = self.v_mode.get() == "custom"
         if is_custom:
@@ -1551,6 +1598,8 @@ class DMDConverterApp(ctk.CTk):
             "action_intro": self.v_action_intro.get(),
             # max_duration: 0 = no limit when checkbox is off
             "max_duration": self.v_max_duration.get() if self.v_max_dur_enabled.get() else 0.0,
+            # auto-colorimetry
+            "auto_color_enabled": self.v_auto_color_enabled.get(),
         }
 
     # ══════════════════════════════════════════════════════════════════════════

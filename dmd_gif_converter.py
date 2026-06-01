@@ -18,6 +18,11 @@ from pathlib import Path
 
 from dmd_auto_action import AutoActionConfig, preprocess_video_for_dmd
 
+try:
+    from dmd_auto_color import analyze_and_compensate as _analyze_and_compensate
+except Exception:
+    _analyze_and_compensate = None
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-7s] %(message)s",
@@ -88,7 +93,7 @@ DEFAULT_PARAMS = {
     "action_detector":     "person",   # person | motion | hybrid | center
     "action_strength":     0.65,       # 0..1 tighter framing around action
     "action_smoothness":   0.85,       # 0..0.98 camera smoothing
-    "action_zoom_max":     1.8,        # max dynamic zoom factor
+    "action_zoom_max":     2.0,        # max dynamic zoom factor (hard limit)
     "action_padding":      0.20,       # ROI padding before aspect crop
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
 }
@@ -161,6 +166,9 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     # Optional preprocessor temp dir (auto action mode).
     temp_pre_src = None
+    # Keep a reference to the original source for keyframe analysis (auto-color
+    # must analyse the original colours, not the auto-action crop).
+    original_src = src_path
 
     # ── Auto action preprocessor (outside ffmpeg pipeline) ───────────────────
     # Default is disabled, so this block has zero effect unless explicitly enabled.
@@ -186,6 +194,20 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         else:
             # Fall back to normal pipeline when dependency/tooling is unavailable.
             log(f"[ACTION ] {filename} — disabled fallback: {pre_msg}", "warning")
+
+    # ── Auto-colorimetry (heuristic keyframe analysis) ───────────────────────
+    # Analyses the original source at 50 % duration and injects computed
+    # contrast / saturation / gamma / brightness — overrides any preset/manual.
+    if bool(p.get("auto_color_enabled", False)):
+        if _analyze_and_compensate is not None:
+            ok_c, color_params, color_msg = _analyze_and_compensate(original_src)
+            if ok_c:
+                p = {**p, "mode": "custom", **color_params}
+                log(f"[COLOR  ] {filename} — {color_msg}")
+            else:
+                log(f"[COLOR  ] {filename} — fallback to defaults: {color_msg}", "warning")
+        else:
+            log(f"[COLOR  ] {filename} — OpenCV unavailable, skipping auto-colorimetry", "warning")
 
     src_w, src_h, fps_src, duration_full = get_metadata(src_path)
     if not src_w:
