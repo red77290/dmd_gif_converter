@@ -9,6 +9,8 @@ cinematic 4:1 intermediate video before the regular ffmpeg DMD conversion.
 from __future__ import annotations
 
 import os
+import platform
+import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -46,13 +48,35 @@ class _FrameDetector:
         self.cv2 = cv2
         self.prev_gray = None
 
+        # HOGDescriptor.detectMultiScale crashes on macOS ARM64 (Apple Silicon)
+        # with SIGBUS / KERN_PROTECTION_FAILURE in cv::HOGCache::getBlock.
+        #
+        # Root cause: OpenCV's internal cv::parallel_for_ uses Apple Grand
+        # Central Dispatch (GCD) on macOS, which always dispatches multiple
+        # worker threads regardless of cv2.setNumThreads().  The NEON-optimised
+        # HOG code then hits a buffer-overflow past a MALLOC_SMALL heap boundary,
+        # producing a hard crash that Python cannot catch.
+        #
+        # Fix: disable HOG entirely on macOS ARM64.  The motion detector is used
+        # as sole fallback on that platform.
+        self._hog_enabled = not (
+            sys.platform == "darwin" and platform.machine() == "arm64"
+        )
+
         # Lightweight person detector (OpenCV HOG + SVM), no extra model files.
-        self.hog = cv2.HOGDescriptor()
-        self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+        if self._hog_enabled:
+            self.hog = cv2.HOGDescriptor()
+            self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+        else:
+            self.hog = None
 
         self.bg_sub = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=36)
 
     def detect_person(self, frame) -> Optional[Tuple[int, int, int, int]]:
+        # HOG disabled on macOS ARM64 — caller falls back to motion detection.
+        if not self._hog_enabled:
+            return None
+
         cv2 = self.cv2
         h, w = frame.shape[:2]
         scale = 0.5 if max(w, h) > 960 else 1.0
@@ -67,6 +91,7 @@ class _FrameDetector:
             padding=(8, 8),
             scale=1.05,
         )
+
         if len(boxes) == 0:
             return None
 
