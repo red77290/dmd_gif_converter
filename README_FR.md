@@ -85,6 +85,68 @@ Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée e
 
 ---
 
+## 🎨 Smart Color Boost — colorimétrie heuristique par IA
+
+> **En bref — une case à cocher, des couleurs parfaites sur toutes les sources.**  
+> Dans le panneau **⚙️ Parameters** → section **🎨 Content mode → Smart Color Boost** · désactivé par défaut.
+
+Les dalles LED matricielles ont des caractéristiques d'affichage très différentes des écrans : lumière diffusée, profondeur de bits limitée, luminosité perçue élevée. Un contenu parfait sur écran peut apparaître délavé, trop sombre ou sur-saturé sur un panel HUB75 128×32.
+
+**Smart Color Boost** résout ça automatiquement. Il analyse une keyframe représentative de chaque vidéo source et calcule le profil colorimétrique optimal pour ce contenu spécifique, sans aucune intervention manuelle.
+
+```
+Vidéo source  ──[keyframe @ 50%]──▶  analyse heuristique  ──▶  paramètres optimaux  ──▶  ffmpeg
+                                              ↑
+                                  Luminance (niveau de gris moyen)
+                                  Dynamique (écart-type)
+                                  Saturation couleur (canal S HSV)
+```
+
+### Ce qu'il analyse et corrige
+
+| Mesure | Ce qui est détecté | Correction appliquée |
+|---|---|---|
+| **Luminance moyenne** | Sous-exposé (sombre) · sur-exposé (clair) | Boost/réduction du **Gamma** |
+| **Écart-type** | Image terne / délavée (faible dynamique) | Multiplicateur de **Contraste** |
+| **Saturation HSV** | Désaturé · quasi-niveaux de gris | Boost de **Saturation** |
+| Décalage résiduel | Fine correction de luminosité | **Brightness** fine-tune |
+
+### Exemples de compensation
+
+| Type de source | lum | std | → contraste | saturation | gamma |
+|---|---|---|---|---|---|
+| Scène nocturne / donjon | 31 | 22 | **2.50** ↑↑ | 2.45 | **1.40** ↑↑ |
+| Brumeux / délavé | 55 | 18 | **2.50** ↑↑ | **3.00** ↑↑ | **1.40** ↑↑ |
+| Sprite arcade normal | 116 | 62 | 1.20 | 1.90 | 0.93 |
+| Surexposé / trop lumineux | 190 | 20 | **2.50** ↑↑ | **3.46** ↑↑ | **0.55** ↓↓ |
+| Déjà contrasté et vivid | 120 | 75 | 1.20 | 1.50 | 0.89 |
+| Quasi N&B | 129 | 54 | 1.20 | **3.00** ↑↑ | 0.81 |
+
+### Pourquoi c'est désactivé par défaut
+
+Smart Color Boost **remplace les curseurs de colorimétrie manuelle** (contraste, saturation, gamma, luminosité) et les grise dans l'UI pour éviter les conflits. Les utilisateurs qui préfèrent régler leurs propres presets, ou qui utilisent les modes `pixel_art` / `anime` / `cinema` déjà calibrés à la main, doivent le laisser désactivé.
+
+**Activez-le pour :**
+- Des bibliothèques hétérogènes avec des expositions très différentes d'un fichier à l'autre
+- Des vidéos live ou cinéma dont l'exposition source est inconnue
+- Tout contenu qui ne rend pas bien avec les presets standards
+
+### Comment l'activer
+
+1. Lancez l'interface avec `./launch_ui.sh`
+2. Dans le panneau **⚙️ Parameters** → section **🎨 Content mode**
+3. Cochez **"🎨 Smart Color Boost — IA auto-colorimetry"**
+4. Les curseurs de colorimétrie manuelle se grisent automatiquement
+5. Lancez la conversion — le log affiche les valeurs calculées : `[COLOR ] lum=XX std=XX → contrast=X.XX …`
+
+### Prérequis
+
+Smart Color Boost utilise le même **OpenCV + NumPy** qu'Auto Action — aucune dépendance supplémentaire. L'analyse est rapide (<0,5 s par fichier) et négligeable par rapport au temps de conversion ffmpeg.
+
+En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas de perte de données**.
+
+---
+
 ## ✨ Ce que fait le script
 
 | Situation | Comportement |
@@ -93,12 +155,14 @@ Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée e
 | GIF / vidéo **plus large que haut** (logo, bannière) | Centrage statique, durée naturelle respectée |
 
 **Pipeline de traitement :**
-1. Fond noir composite (élimine la transparence → plus d'horloge qui transparaît)
-2. Mise à l'échelle proportionnelle à 128 px de large, `bottom_crop_pct` % du bas ignorés
-3. Colorimétrie boostée pour dalle LED (contraste, saturation, gamma, sharpening)
-4. Crop 128×32 avec scroll intelligent (nombre de cycles + position d'arrêt)
-5. Génération de palette sur les pixels réellement affichés (256 couleurs)
-6. Encodage GIF sans transparence ni delta encoding
+1. *(optionnel)* **🤖 Auto Action** — crop cinématique IA à résolution native (pré-ffmpeg)
+2. *(optionnel)* **🎨 Smart Color Boost** — analyse heuristique de keyframe, injecte la colorimétrie optimale
+3. Fond noir composite (élimine la transparence → plus d'horloge qui transparaît)
+4. Mise à l'échelle proportionnelle à 128 px de large, `bottom_crop_pct` % du bas ignorés
+5. Colorimétrie boostée pour dalle LED (contraste, saturation, gamma, sharpening)
+6. Crop 128×32 avec scroll intelligent (nombre de cycles + position d'arrêt)
+7. Génération de palette sur les pixels réellement affichés (256 couleurs)
+8. Encodage GIF sans transparence ni delta encoding
 
 ---
 
@@ -116,6 +180,8 @@ Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée e
 | **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
+| **⏱ Max Duration** | Limite la durée et place la fenêtre n'importe où dans la source |
+| **🎨 Smart Color Boost** | Colorimétrie IA en un clic — ajuste automatiquement contraste, saturation et gamma |
 | **Tous les paramètres standards** | Curseurs et menus pour le mode, le scroll, les FPS, la colorimétrie |
 | **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, valeurs par défaut = sortie identique à v2.0 |
 | **Batch dossier** | Convertit un dossier entier en un clic |
@@ -127,6 +193,16 @@ Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée e
 
 Cliquer sur le bouton **🔧 Advanced Settings ▼** en bas du panneau Paramètres.  
 Toutes les valeurs par défaut = « aucun effet » — la sortie standard est identique à v2.0.
+
+#### 🎨 Smart Color Boost — colorimétrie heuristique IA
+
+> Voir la section dédiée en tête de ce README pour le guide complet.
+
+- Accessible directement dans le bloc **🎨 Content mode** du panneau Paramètres (pas dans Advanced)
+- Analyse une **keyframe à 50 %** de la source et calcule automatiquement contraste / saturation / gamma / luminosité
+- **Grise les curseurs de colorimétrie manuelle** quand activé pour éviter les conflits
+- Coût négligeable (<0,5 s par fichier) — utilise OpenCV + NumPy
+- Fallback silencieux sur le preset standard si OpenCV n'est pas installé
 
 #### 🎯 Auto Action Framing — caméra IA
 
@@ -363,6 +439,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `film_grain` | `0` | Quantité de bruit additif |
 | `vignette` | `False` | Assombrissement des bords |
 | `max_duration` | `0.0` | Durée maximale du clip en secondes (`0` = pas de limite) |
+| `auto_color_enabled` | `False` | 🎨 Smart Color Boost — colorimétrie heuristique IA |
 | `auto_action_enabled` | `False` | 🤖 Caméra IA cinématique — voir section dédiée |
 | `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
 | `action_intro` | `1.5` | Durée du plan large d'introduction en secondes |
@@ -439,6 +516,8 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Auto Action : « OpenCV not installed » | Lancer `pip install opencv-python` ou re-lancer `./launch_ui.sh` (installe automatiquement) |
 | Aperçu Auto Action lent à apparaître | Normal — l'analyse IA prend quelques secondes par vidéo ; progression affichée dans le canvas AUTO ACTION |
 | Résultat Auto Action incorrect | Essayer un autre **mode de détection** (`motion` ou `hybrid`) — le mode `person` fonctionne mieux avec des silhouettes humaines visibles |
+| Smart Color Boost donne de mauvaises couleurs | Désactivez-le et réglez manuellement — fonctionne mieux sur du contenu mal exposé ou hétérogène |
+| Smart Color Boost log affiche `fallback` | OpenCV non disponible — lancer `pip install opencv-python` |
 
 ---
 

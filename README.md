@@ -85,6 +85,68 @@ If OpenCV is not installed, the feature is silently skipped and the standard pip
 
 ---
 
+## 🎨 Smart Color Boost — AI heuristic colorimetry
+
+> **TL;DR — one checkbox, perfect colours on any source.**  
+> Located in the **⚙️ Parameters** panel → **🎨 Content mode → Smart Color Boost** checkbox · disabled by default.
+
+LED matrix panels have very different rendering characteristics compared to screens: diffused light, limited bit depth, and high perceived brightness. Content that looks perfect on a monitor can appear washed-out, too dark, or over-saturated on a 128×32 HUB75 panel.
+
+**Smart Color Boost** solves this automatically. It analyses a representative keyframe from each source video and computes the optimal colorimetry profile for that specific piece of content, without any manual intervention.
+
+```
+Source video  ──[keyframe @ 50%]──▶  heuristic analysis  ──▶  optimal params  ──▶  ffmpeg
+                                           ↑
+                               Luminance (mean grey level)
+                               Dynamic range (standard deviation)
+                               Colour saturation (HSV S-channel)
+```
+
+### What it analyses and adjusts
+
+| Measurement | What is detected | Correction applied |
+|---|---|---|
+| **Mean luminance** | Under-exposed (dark) · over-exposed (bright) | **Gamma** boost/reduction |
+| **Std deviation** | Flat / dull image (low dynamic range) | **Contrast** multiplier |
+| **HSV saturation** | Desaturated · near-greyscale content | **Saturation** boost |
+| Residual offset | Fine brightness mismatch | **Brightness** fine-tune |
+
+### Compensation examples
+
+| Source type | lum | std | → contrast | saturation | gamma |
+|---|---|---|---|---|---|
+| Night scene / dungeon | 31 | 22 | **2.50** ↑↑ | 2.45 | **1.40** ↑↑ |
+| Foggy / washed-out | 55 | 18 | **2.50** ↑↑ | **3.00** ↑↑ | **1.40** ↑↑ |
+| Normal arcade sprite | 116 | 62 | 1.20 | 1.90 | 0.93 |
+| Over-exposed bright | 190 | 20 | **2.50** ↑↑ | **3.46** ↑↑ | **0.55** ↓↓ |
+| High-contrast vivid | 120 | 75 | 1.20 | 1.50 | 0.89 |
+| Near-greyscale / B&W | 129 | 54 | 1.20 | **3.00** ↑↑ | 0.81 |
+
+### Why it is disabled by default
+
+Smart Color Boost **overrides the manual colorimetry sliders** (contrast, saturation, gamma, brightness) and disables them in the UI to prevent conflicts. Users who prefer to tune their own presets, or who use the `pixel_art` / `anime` / `cinema` modes that already ship with carefully hand-tuned values, should leave it off.
+
+**Enable it for:**
+- Heterogeneous batch libraries with wildly different brightness levels
+- Live footage or cinema clips where the source exposure is unknown
+- Any content that looks wrong with the standard presets
+
+### How to enable it
+
+1. Open the UI with `./launch_ui.sh`
+2. In the **⚙️ Parameters** panel → **🎨 Content mode** section
+3. Check **"🎨 Smart Color Boost — IA auto-colorimetry"**
+4. The manual colorimetry sliders are automatically grayed out
+5. Convert — the log will show the computed values: `[COLOR ] lum=XX std=XX → contrast=X.XX saturation=X.XX …`
+
+### Requirements
+
+Smart Color Boost uses the same **OpenCV + NumPy** that Auto Action requires — no extra dependency. The analysis is fast (<0.5 s per file) and negligible compared to the ffmpeg conversion time.
+
+If OpenCV is unavailable, the feature falls back silently to the standard preset — **no crash, no data loss**.
+
+---
+
 ## ✨ What it does
 
 | Source | Output behaviour |
@@ -93,12 +155,14 @@ If OpenCV is not installed, the feature is silently skipped and the standard pip
 | **Wider than tall** (logo, banner) | Vertical centring, natural GIF duration preserved |
 
 **Processing pipeline:**
-1. Black background composite → eliminates source transparency (no clock bleed-through)
-2. Proportional scale to 128 px wide, `bottom_crop_pct` % of bottom ignored (feet/floor)
-3. Colorimetry boost for LED panels (contrast, saturation, gamma, sharpening)
-4. 128×32 crop with smart scroll (cycle count + hold position)
-5. Palette generation on actually-displayed pixels only (256 colours)
-6. GIF encoding with transparency compression disabled
+1. *(optional)* **🤖 Auto Action** — AI cinematic crop at native resolution (pre-ffmpeg)
+2. *(optional)* **🎨 Smart Color Boost** — heuristic keyframe analysis, injects optimal colorimetry
+3. Black background composite → eliminates source transparency (no clock bleed-through)
+4. Proportional scale to 128 px wide, `bottom_crop_pct` % of bottom ignored (feet/floor)
+5. Colorimetry boost for LED panels (contrast, saturation, gamma, sharpening)
+6. 128×32 crop with smart scroll (cycle count + hold position)
+7. Palette generation on actually-displayed pixels only (256 colours)
+8. GIF encoding with transparency compression disabled
 
 ---
 
@@ -116,6 +180,8 @@ If OpenCV is not installed, the feature is silently skipped and the standard pip
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
+| **⏱ Max Duration** | Cap clip length + place the window anywhere in the source |
+| **🎨 Smart Color Boost** | One-click AI colorimetry — auto-adjusts contrast, saturation and gamma per source |
 | **All standard parameters** | Sliders and drop-downs for mode, scroll, FPS, colorimetry |
 | **🔧 Advanced Settings** | Collapsible panel — all extras hidden by default, default values never alter the output |
 | **Batch folder** | Convert an entire folder in one click |
@@ -127,6 +193,16 @@ If OpenCV is not installed, the feature is silently skipped and the standard pip
 
 Expand the **🔧 Advanced Settings ▼** button at the bottom of the Parameters panel.  
 All values default to "no effect" — standard output is 100% identical to v2.0.
+
+#### 🎨 Smart Color Boost — AI heuristic colorimetry
+
+> See the full dedicated section earlier in this README for the complete guide.
+
+- Located directly in the **🎨 Content mode** block of the Parameters panel (not in Advanced)
+- Analyses a **keyframe at 50 %** of the source and computes contrast / saturation / gamma / brightness automatically
+- **Disables the manual colorimetry sliders** when active to prevent conflicts
+- Negligible performance cost (<0.5 s per file) — uses OpenCV + NumPy
+- Falls back silently to standard preset if OpenCV is unavailable
 
 #### 🎯 Auto Action Framing — AI cinematic camera
 
@@ -354,6 +430,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `film_grain` | `0` | Additive noise amount |
 | `vignette` | `False` | Edge darkening vignette |
 | `max_duration` | `0.0` | Hard cap on clip length in seconds (`0` = no limit) |
+| `auto_color_enabled` | `False` | 🎨 Smart Color Boost — AI heuristic colorimetry |
 | `auto_action_enabled` | `False` | 🤖 AI cinematic camera — see dedicated section |
 | `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
 | `action_intro` | `1.5` | Establishing shot duration in seconds |
@@ -430,6 +507,8 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Auto Action says "OpenCV not installed" | Run `pip install opencv-python` or re-run `./launch_ui.sh` (installs automatically) |
 | Auto Action preview is slow to appear | Normal — AI analysis takes a few seconds per video; progress shown in the AUTO ACTION canvas |
 | Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
+| Smart Color Boost makes colours look wrong | Disable it and tune manually — it works best on heterogeneous or poorly-exposed footage |
+| Smart Color Boost log shows `fallback` | OpenCV unavailable — run `pip install opencv-python` |
 
 ---
 
