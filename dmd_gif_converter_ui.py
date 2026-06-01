@@ -62,6 +62,11 @@ except ImportError:
     AutoActionConfig = None
     preprocess_video_for_dmd = None
 
+try:
+    from dmd_auto_color import analyze_and_compensate as _ui_analyze_color
+except ImportError:
+    _ui_analyze_color = None
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 # Three preview canvases
 SRC_CANVAS_W  = 300
@@ -188,6 +193,10 @@ class DMDConverterApp(ctk.CTk):
 
         # ── Tkinter vars — auto-colorimetry ───────────────────────────────────
         self.v_auto_color_enabled = tk.BooleanVar(value=False)
+
+        # Smart Color Boost — save/restore state when toggling
+        self._auto_color_analyzing: bool = False
+        self._pre_auto_color_values: dict = {}  # saved custom-mode slider values
 
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
@@ -1000,6 +1009,9 @@ class DMDConverterApp(ctk.CTk):
         path = self._file_data.get(iid)
         if path:
             self._load_preview(path)
+            # If Smart Color Boost is active, refresh computed values for this file
+            if self.v_auto_color_enabled.get():
+                self._refresh_auto_color_values(path)
 
     def _remove_selected(self):
         sel = self._tree.selection()
@@ -1536,23 +1548,122 @@ class DMDConverterApp(ctk.CTk):
         self._update_custom_visibility()
 
     def _on_auto_color_toggle(self):
-        """Enable/disable manual colorimetry controls when Smart Color Boost is toggled."""
+        """Enable/disable Smart Color Boost.
+
+        When enabled:
+          • Greys out the mode selector and all colorimetry sliders so the user
+            cannot accidentally override the computed values.
+          • Saves colorimetry slider values in case mode is "custom" (so we can
+            restore them when disabling).
+          • Launches a background analysis and writes computed values + deltas
+            into the info label.  If mode is already "custom", also fills the
+            greyed sliders for visual feedback.
+          NOTE: the mode is intentionally NOT changed — switching it would
+          re-pack the colorimetry frame and push the Advanced Settings panel
+          out of position.
+
+        When disabled:
+          • Restores the mode selector and colorimetry sliders.
+          • If mode is "custom", restores the slider values to what they were
+            before Smart Color Boost took over.
+          • Clears the info label.
+        """
         enabled = self.v_auto_color_enabled.get()
-        # Gray out / restore mode selector and all colorimetry widgets
-        col_state = "disabled" if enabled else "normal"
-        self._mode_menu.configure(state=col_state)
-        for w in self._colorimetry_widgets:
-            try:
-                w.configure(state=col_state)
-            except Exception:
-                pass
-        # Info label
+
         if enabled:
-            self._auto_color_info.configure(
-                text="Values computed automatically at conversion · manual sliders overridden"
-            )
+            # ── Save colorimetry values (only used if mode == "custom") ────────
+            self._pre_auto_color_values = {
+                "contrast":    self.v_contrast.get(),
+                "saturation":  self.v_saturation.get(),
+                "brightness":  self.v_brightness.get(),
+                "gamma":       self.v_gamma.get(),
+                "sharpen_lum": self.v_sharpen_lum.get(),
+                "sharpen_chr": self.v_sharpen_chr.get(),
+            }
+            # ── Grey out mode selector + colorimetry widgets ───────────────────
+            self._mode_menu.configure(state="disabled")
+            for w in self._colorimetry_widgets:
+                try:
+                    w.configure(state="disabled")
+                except Exception:
+                    pass
+            # ── Trigger background analysis ────────────────────────────────────
+            self._auto_color_info.configure(text="⏳  Analysing…")
+            if self._selected_iid:
+                path = self._file_data.get(self._selected_iid)
+                if path:
+                    self._refresh_auto_color_values(path)
         else:
+            # ── Restore colorimetry slider values (custom mode only) ───────────
+            if self.v_mode.get() == "custom" and self._pre_auto_color_values:
+                self.v_contrast.set(self._pre_auto_color_values["contrast"])
+                self.v_saturation.set(self._pre_auto_color_values["saturation"])
+                self.v_brightness.set(self._pre_auto_color_values["brightness"])
+                self.v_gamma.set(self._pre_auto_color_values["gamma"])
+                self.v_sharpen_lum.set(self._pre_auto_color_values["sharpen_lum"])
+                self.v_sharpen_chr.set(self._pre_auto_color_values["sharpen_chr"])
+            # ── Re-enable controls ─────────────────────────────────────────────
+            self._mode_menu.configure(state="normal")
+            for w in self._colorimetry_widgets:
+                try:
+                    w.configure(state="normal")
+                except Exception:
+                    pass
             self._auto_color_info.configure(text="")
+
+    def _refresh_auto_color_values(self, path: str):
+        """Run colorimetry analysis in background; update info label + sliders.
+
+        The info label always shows the computed values + delta vs pixel_art.
+        Slider vars are updated only when mode is already "custom" — we never
+        force a mode switch here to avoid disrupting the pack layout.
+        """
+        if _ui_analyze_color is None:
+            self._auto_color_info.configure(
+                text="⚠️  OpenCV unavailable — install opencv-python"
+            )
+            return
+        if self._auto_color_analyzing:
+            return
+
+        self._auto_color_analyzing = True
+        self._auto_color_info.configure(text="⏳  Analysing keyframes…")
+
+        def _run():
+            try:
+                ok, params, msg = _ui_analyze_color(path)
+            except Exception as exc:
+                ok, params, msg = False, {}, str(exc)
+
+            def _apply():
+                self._auto_color_analyzing = False
+                if not self.v_auto_color_enabled.get():
+                    return
+                if ok and params:
+                    # Update sliders only if already in custom mode
+                    # (avoids re-packing layout and blocking Advanced Settings)
+                    if self.v_mode.get() == "custom":
+                        self.v_contrast.set(params["contrast"])
+                        self.v_saturation.set(params["saturation"])
+                        self.v_brightness.set(params["brightness"])
+                        self.v_gamma.set(params["gamma"])
+                        self.v_sharpen_lum.set(params.get("sharpen_lum", 1.8))
+                        self.v_sharpen_chr.set(params.get("sharpen_chr", 0.5))
+                    dc = params["contrast"]   - 1.60
+                    ds = params["saturation"] - 2.20
+                    self._auto_color_info.configure(
+                        text=(
+                            f"c={params['contrast']} ({dc:+.2f})  "
+                            f"s={params['saturation']} ({ds:+.2f})  "
+                            f"γ={params['gamma']}  bri={params['brightness']:+.3f}"
+                        )
+                    )
+                else:
+                    self._auto_color_info.configure(text=f"⚠️  {msg[:70]}")
+
+            self.after(0, _apply)
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _update_custom_visibility(self):
         is_custom = self.v_mode.get() == "custom"
