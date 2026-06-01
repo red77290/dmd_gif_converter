@@ -51,7 +51,7 @@ if not exist "%VENV%\Scripts\python.exe" (
 
     echo =^> Installing dependencies...
     "%VENV%\Scripts\pip" install --quiet --upgrade pip
-    "%VENV%\Scripts\pip" install --quiet customtkinter Pillow "darkdetect==0.7.1"
+    "%VENV%\Scripts\pip" install --quiet -r "%SCRIPT_DIR%requirements_ui.txt"
     if errorlevel 1 (
         echo ERROR: pip install failed.
         pause
