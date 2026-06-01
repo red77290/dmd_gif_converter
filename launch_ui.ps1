@@ -58,7 +58,7 @@ if (-not (Test-Path $VenvPy)) {
 
     Write-Host "==> Installing dependencies..." -ForegroundColor Cyan
     & $VenvPip install --quiet --upgrade pip
-    & $VenvPip install --quiet customtkinter Pillow "darkdetect==0.7.1"
+    & $VenvPip install --quiet -r (Join-Path $ScriptDir "requirements_ui.txt")
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: pip install failed." -ForegroundColor Red
         Read-Host "Press Enter to exit"
