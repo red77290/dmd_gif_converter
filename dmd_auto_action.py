@@ -24,7 +24,7 @@ class AutoActionConfig:
     detector: str = "person"          # person | motion | hybrid | center
     strength: float = 0.65             # 0..1, larger = tighter framing
     smoothness: float = 0.85           # 0..0.98, larger = smoother / slower
-    zoom_max: float = 1.8              # max dynamic zoom factor
+    zoom_max: float = 2.0              # max dynamic zoom factor (hard limit)
     padding: float = 0.20              # extra padding around ROI
     intro_duration: float = 1.5        # seconds of full-frame overview before focusing
     # out_w / out_h are no longer used for the actual output resolution.
@@ -184,9 +184,15 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig):
     crop_w = roi_w / zoom
     crop_h = roi_h / zoom
 
-    # Keep inside frame bounds.
-    crop_w = _clamp(crop_w, 32.0, float(frame_w))
-    crop_h = _clamp(crop_h, 8.0, float(frame_h))
+    # Keep inside frame bounds — and enforce zoom_max as a hard minimum crop
+    # size so the camera never zooms in beyond zoom_max times regardless of
+    # how small the detected ROI is (e.g. distant face, tiny sprite).
+    # min_crop_h is derived from min_crop_w at 4:1 to keep the constraints
+    # coherent and avoid the aspect-ratio fixup widening the crop back out.
+    min_crop_w = max(32.0, float(frame_w) / max(1.0, cfg.zoom_max))
+    min_crop_h = max(8.0,  min_crop_w / target_ratio)
+    crop_w = _clamp(crop_w, min_crop_w, float(frame_w))
+    crop_h = _clamp(crop_h, min_crop_h, float(frame_h))
 
     if crop_w / crop_h < target_ratio:
         crop_w = min(frame_w, crop_h * target_ratio)
@@ -292,31 +298,34 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # Full-frame overview rect: widest 4:1 crop centred on the source.
     cam_full_view = _build_camera_rect(frame_w, frame_h, None, cfg)
 
-    # Number of intro frames to prepend.
+    # ── Intro frame count — capped relative to source length ─────────────────
+    # A fixed intro_duration can dominate very short sources (e.g. a 0.5 s GIF
+    # would get a 1.5 s frozen intro = 3× the source length).
+    # Cap intro to at most 40 % of total source frames so the action-tracking
+    # phase always has the majority of the output.
+    total_frames_src = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     intro_frames = max(0, int(round(cfg.intro_duration * fps)))
+    if total_frames_src > 0:
+        max_intro = max(1, int(total_frames_src * 0.40))
+        intro_frames = min(intro_frames, max_intro)
 
     last_frame = None
     frame_idx  = 0
     extra      = 0
 
-    # ── Phase 1: Intro panoramic pan (frozen first frame, top → centre) ──────────
+    # ── Phase 1: Intro panoramic pan (frozen first frame, top → centre) ──────
     # The first source frame is held for intro_frames while the camera pans
-    # from the TOP of the frame down to the CENTRE (using smoothstep easing).
-    # This ensures the top of the scene is always visible at the start, and
-    # the pan ends at cam_full_view (centre) so Phase 2 transitions smoothly.
-    # The source video is then rewound so Phase 2 replays ALL frames — no
-    # source content is sacrificed to the intro.
+    # from the TOP of the frame down to the CENTRE (smoothstep easing).
+    # After writing the intro the capture is REOPENED (not seeked) to guarantee
+    # Phase 2 starts at frame 0 — CAP_PROP_POS_FRAMES seeking is unreliable
+    # for GIFs and some other containers.
     if intro_frames > 0:
         ok_first, first_frame = cap.read()
         if ok_first:
-            # Decompose the full-view rect to get crop dimensions and centre cy.
             cx, cy_center, crop_w_full, crop_h_src = cam_full_view
-
-            # Top of frame: smallest cy that keeps the crop fully inside.
             cy_top = crop_h_src / 2.0
 
             for i in range(intro_frames):
-                # Smoothstep: t goes 0 → 1 over the intro duration.
                 t_linear = i / max(1, intro_frames - 1)
                 t = t_linear * t_linear * (3.0 - 2.0 * t_linear)
                 cy = cy_top + t * (cy_center - cy_top)
@@ -327,12 +336,13 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
                 writer.write(out_frame)
                 frame_idx += 1
 
-            # Rewind to the trim start so the action phase replays all frames.
-            if start_s > 0:
-                cap.set(cv2.CAP_PROP_POS_MSEC, float(start_s) * 1000.0)
-            else:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             last_frame = first_frame
+
+        # Reopen the capture so Phase 2 reliably starts from the beginning.
+        cap.release()
+        cap = cv2.VideoCapture(src_path)
+        if start_s > 0:
+            cap.set(cv2.CAP_PROP_POS_MSEC, float(start_s) * 1000.0)
 
     # ── Phase 2: Action tracking (full source from frame 0) ───────────────────
     # Camera starts at cam_full_view so the transition from the intro is smooth.
