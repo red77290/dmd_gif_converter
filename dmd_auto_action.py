@@ -299,19 +299,34 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     frame_idx  = 0
     extra      = 0
 
-    # ── Phase 1: Intro panoramic (frozen first frame) ─────────────────────────
-    # The first source frame is written intro_frames times at the full-view
-    # camera position.  The source video is then rewound so that Phase 2
-    # processes the ENTIRE source — no content is sacrificed to the intro.
+    # ── Phase 1: Intro panoramic pan (frozen first frame, top → centre) ──────────
+    # The first source frame is held for intro_frames while the camera pans
+    # from the TOP of the frame down to the CENTRE (using smoothstep easing).
+    # This ensures the top of the scene is always visible at the start, and
+    # the pan ends at cam_full_view (centre) so Phase 2 transitions smoothly.
+    # The source video is then rewound so Phase 2 replays ALL frames — no
+    # source content is sacrificed to the intro.
     if intro_frames > 0:
         ok_first, first_frame = cap.read()
         if ok_first:
-            for _ in range(intro_frames):
-                crop = _crop_frame(first_frame, cam_full_view)
+            # Decompose the full-view rect to get crop dimensions and centre cy.
+            cx, cy_center, crop_w_full, crop_h_src = cam_full_view
+
+            # Top of frame: smallest cy that keeps the crop fully inside.
+            cy_top = crop_h_src / 2.0
+
+            for i in range(intro_frames):
+                # Smoothstep: t goes 0 → 1 over the intro duration.
+                t_linear = i / max(1, intro_frames - 1)
+                t = t_linear * t_linear * (3.0 - 2.0 * t_linear)
+                cy = cy_top + t * (cy_center - cy_top)
+                cam_intro = (cx, cy, crop_w_full, crop_h_src)
+                crop = _crop_frame(first_frame, cam_intro)
                 out_frame = cv2.resize(crop, (out_w, out_h),
                                        interpolation=cv2.INTER_LANCZOS4)
                 writer.write(out_frame)
                 frame_idx += 1
+
             # Rewind to the trim start so the action phase replays all frames.
             if start_s > 0:
                 cap.set(cv2.CAP_PROP_POS_MSEC, float(start_s) * 1000.0)
