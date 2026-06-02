@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DMD GIF Converter — Graphical Interface  v2.1
+DMD GIF Converter — Graphical Interface  v2.4.0
 Cross-platform UI (macOS · Windows · Linux) to convert any video/GIF
 to 128×32 LED DMD format.
 
@@ -12,6 +12,15 @@ New in v2.1:
       – Manual positioning: disable auto-scroll, set zoom / X / Y manually
       – Visual effects: hue shift, noise reduction, film grain, vignette
 
+New in v2.4.0:
+  • 💬 Text Overlay — burn pixel-font text on the 128×32 output GIF
+      – 4 rendering styles: outline (default), bold, shadow, none
+      – Optional semi-transparent background box
+      – Dual backend: ffmpeg drawtext when available, Pillow fallback otherwise
+  • 🖼️ Multi-Dalle / Tiling — configurable output resolution presets
+  • 🎨 Background subtraction warmup fix (no more black-flash artefacts)
+  • Structured logging — no more print() in production code
+
 Usage:
     python dmd_gif_converter_ui.py
 """
@@ -20,6 +29,7 @@ import os
 import sys
 import platform
 import glob
+import logging
 import shutil
 import threading
 import tempfile
@@ -28,6 +38,15 @@ from pathlib import Path
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
+
+# ── Module-level logger ───────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-7s] [UI] %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 _missing = []
@@ -41,8 +60,10 @@ except ImportError:
     _missing.append("Pillow")
 
 if _missing:
-    print(f"\n❌  Missing dependencies: {', '.join(_missing)}")
-    print(f"    Install them with:\n\n    pip install {' '.join(_missing)}\n")
+    logger.critical(
+        "Missing dependencies: %s — install with:  pip install %s",
+        ", ".join(_missing), " ".join(_missing),
+    )
     sys.exit(1)
 
 # ── Import converter engine ───────────────────────────────────────────────────
@@ -53,7 +74,7 @@ try:
         DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
     )
 except ImportError as exc:
-    print(f"❌  Could not import dmd_gif_converter: {exc}")
+    logger.critical("Could not import dmd_gif_converter: %s", exc)
     sys.exit(1)
 
 try:
@@ -73,15 +94,12 @@ SRC_CANVAS_W  = 300
 SRC_CANVAS_H  = 170
 AUTO_CANVAS_W = 300
 AUTO_CANVAS_H = 170
-DMD_CANVAS_W  = 300
-DMD_CANVAS_H  = 170
 
 # DMD output is still displayed at 128×32 scaled ×2.34
-DMD_DISP_W    = 300
-DMD_DISP_H    = 75
+DMD_DISPLAY_SCALE_FACTOR = 2.34375 # 300/128 = 75/32
 
 BG_CANVAS     = "#0d0d1a"
-APP_VERSION   = "2.1"
+APP_VERSION   = "2.4.0"
 
 # Auto-refresh debounce: ms to wait after last param change before rebuilding DMD
 DMD_REFRESH_DELAY_MS = 1800
@@ -186,6 +204,23 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_zoom_max     = tk.DoubleVar(value=2.0)
         self.v_action_padding      = tk.DoubleVar(value=0.20)
         self.v_action_intro        = tk.DoubleVar(value=1.5)
+        self.v_bg_sub_enable       = tk.BooleanVar(value=False) # New background subtraction checkbox
+
+        # ── Tkinter vars — Multi-dalle / Tiling ───────────────────────────────
+        self.v_target_width  = tk.IntVar(value=DEFAULT_PARAMS["target_width"])
+        self.v_target_height = tk.IntVar(value=DEFAULT_PARAMS["target_height"])
+        self.v_target_preset = tk.StringVar(value="128x32 (1x1)")
+
+        # ── Tkinter vars — Text Overlay ───────────────────────────────────────
+        self.v_text_overlay_enabled = tk.BooleanVar(value=False)
+        self.v_text_content         = tk.StringVar(value="")
+        self.v_text_font_size       = tk.IntVar(value=8)
+        self.v_text_color           = tk.StringVar(value="white")
+        self.v_text_position        = tk.StringVar(value="bottom_center")
+        self.v_text_font_file       = tk.StringVar(value="HelvetiPixel.ttf")
+        self.v_text_style           = tk.StringVar(value="outline")
+        self.v_text_bg              = tk.BooleanVar(value=False)
+        self.v_text_bg_opacity      = tk.IntVar(value=60)
 
         # ── Tkinter vars — max duration cap ───────────────────────────────────
         self.v_max_dur_enabled = tk.BooleanVar(value=True)    # ON by default (2 min cap)
@@ -209,7 +244,12 @@ class DMDConverterApp(ctk.CTk):
             self.v_auto_action_enabled, self.v_action_detector,
             self.v_action_strength, self.v_action_smoothness,
             self.v_action_zoom_max, self.v_action_padding,
-            self.v_action_intro,
+            self.v_action_intro, self.v_bg_sub_enable,
+            self.v_target_width, self.v_target_height, self.v_target_preset,
+            self.v_text_overlay_enabled, self.v_text_content, # Added text overlay vars
+            self.v_text_font_size, self.v_text_color, self.v_text_position, # Added text overlay vars
+            self.v_text_font_file,  # font selector
+            self.v_text_style, self.v_text_bg, self.v_text_bg_opacity,  # style / bg
             self.v_trim_start, self.v_trim_end,
             self.v_max_dur_enabled, self.v_max_duration,
             self.v_auto_color_enabled,
@@ -427,8 +467,10 @@ class DMDConverterApp(ctk.CTk):
             dmd_wrap, text="DMD OUTPUT 128×32",
             font=ctk.CTkFont(size=10, weight="bold"), text_color="#2e7a4a"
         ).pack(pady=(4, 0))
+        # Initialize with default dimensions, will be updated dynamically
         self._dmd_canvas = tk.Canvas(
-            dmd_wrap, width=DMD_CANVAS_W, height=DMD_CANVAS_H,
+            dmd_wrap, width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR),
+            height=int(DEFAULT_PARAMS["target_height"] * DMD_DISPLAY_SCALE_FACTOR),
             bg=BG_CANVAS, highlightthickness=0
         )
         self._dmd_canvas.pack(padx=2, pady=(2, 2))
@@ -789,7 +831,204 @@ class DMDConverterApp(ctk.CTk):
             text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
         ).pack(padx=14, pady=(0, 6), anchor="w")
 
-        # ── SECTION 1: POSITIONING ────────────────────────────────────────────
+        # New: Background Subtraction Checkbox
+        bg_sub_row = ctk.CTkFrame(parent, fg_color="transparent")
+        bg_sub_row.pack(fill="x", padx=14, pady=(0, 4))
+        ctk.CTkCheckBox(
+            bg_sub_row,
+            text="Enable Background Subtraction (replaces background with black)",
+            variable=self.v_bg_sub_enable,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        ).pack(side="left")
+        ctk.CTkLabel(
+            parent,
+            text="    This will replace the detected background with black (0,0,0).\n"
+                 "    Maximizes contrast and reduces LED power consumption.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
+
+        # ── SECTION 1: MULTI-DALLE / TILING ───────────────────────────────────
+        ctk.CTkLabel(
+            parent, text="━━  🖼️  Multi-Dalle / Tiling",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).pack(fill="x", padx=10, pady=(10, 4), anchor="w")
+
+        tiling_preset_row = ctk.CTkFrame(parent, fg_color="transparent")
+        tiling_preset_row.pack(fill="x", padx=10, pady=2)
+        tiling_preset_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(tiling_preset_row, text="Dimensions Preset", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._target_preset_menu = ctk.CTkOptionMenu(
+            tiling_preset_row,
+            variable=self.v_target_preset,
+            values=["128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "Custom"],
+            command=self._on_target_preset_change,
+            width=200,
+        )
+        self._target_preset_menu.grid(row=0, column=1, sticky="w", padx=4)
+
+        self._custom_tiling_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self._custom_tiling_frame.pack(fill="x", padx=10, pady=2)
+        self._custom_tiling_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self._custom_tiling_frame, text="Custom Width", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._custom_width_entry = ctk.CTkEntry(
+            self._custom_tiling_frame, textvariable=self.v_target_width, width=100
+        )
+        self._custom_width_entry.grid(row=0, column=1, sticky="w", padx=4)
+
+        ctk.CTkLabel(self._custom_tiling_frame, text="Custom Height", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=1, column=0, padx=(4, 6))
+        self._custom_height_entry = ctk.CTkEntry(
+            self._custom_tiling_frame, textvariable=self.v_target_height, width=100
+        )
+        self._custom_height_entry.grid(row=1, column=1, sticky="w", padx=4)
+
+        self._on_target_preset_change(self.v_target_preset.get()) # Set initial state
+
+        # ── SECTION 2: TEXT OVERLAY ───────────────────────────────────────────
+        ctk.CTkLabel(
+            parent, text="━━  💬  Text Overlay",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).pack(fill="x", padx=10, pady=(10, 4), anchor="w")
+
+        text_overlay_row = ctk.CTkFrame(parent, fg_color="transparent")
+        text_overlay_row.pack(fill="x", padx=14, pady=(0, 4))
+        self._text_overlay_checkbox = ctk.CTkCheckBox(
+            text_overlay_row,
+            text="Enable Text Overlay",
+            variable=self.v_text_overlay_enabled,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+            command=self._on_text_overlay_toggle
+        )
+        self._text_overlay_checkbox.pack(side="left")
+
+        self._text_overlay_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=6)
+        # This frame will be packed/unpacked based on v_text_overlay_enabled
+
+        text_content_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        text_content_row.pack(fill="x", padx=10, pady=2)
+        text_content_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(text_content_row, text="Text Content", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._text_content_entry = ctk.CTkEntry(
+            text_content_row, textvariable=self.v_text_content, width=200
+        )
+        self._text_content_entry.grid(row=0, column=1, sticky="ew", padx=4)
+
+        adv_slider(self._text_overlay_frame, "Font Size", self.v_text_font_size, 4, 32,
+                   "{:.0f}", " px", steps=28, is_int=True)
+
+        text_color_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        text_color_row.pack(fill="x", padx=10, pady=2)
+        text_color_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(text_color_row, text="Text Color", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._text_color_menu = ctk.CTkOptionMenu(
+            text_color_row,
+            variable=self.v_text_color,
+            values=["white", "yellow", "red", "green", "blue"],
+            width=200,
+        )
+        self._text_color_menu.grid(row=0, column=1, sticky="w", padx=4)
+
+        text_position_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        text_position_row.pack(fill="x", padx=10, pady=2)
+        text_position_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(text_position_row, text="Text Position", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._text_position_menu = ctk.CTkOptionMenu(
+            text_position_row,
+            variable=self.v_text_position,
+            values=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"],
+            width=200,
+        )
+        self._text_position_menu.grid(row=0, column=1, sticky="w", padx=4)
+
+        text_font_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        text_font_row.pack(fill="x", padx=10, pady=2)
+        text_font_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(text_font_row, text="Font", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        _available_fonts = [
+            "HelvetiPixel.ttf", "PixelMordred.ttf", "BitCasual.ttf",
+            "CursivePixel.ttf", "justabit.ttf", "KarenBook.ttf",
+            "OldWizard.ttf", "OrdinaryBasis.ttf", "Quintet.ttf", "TimesNewPixel.ttf",
+        ]
+        self._text_font_menu = ctk.CTkOptionMenu(
+            text_font_row,
+            variable=self.v_text_font_file,
+            values=_available_fonts,
+            width=200,
+        )
+        self._text_font_menu.grid(row=0, column=1, sticky="w", padx=4)
+        ctk.CTkLabel(
+            self._text_overlay_frame,
+            text="    Fonts stored in media/fonts/ — pixel fonts optimised for 128×32 DMD panels.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
+
+        # ── Text Style ────────────────────────────────────────────────────────
+        text_style_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        text_style_row.pack(fill="x", padx=10, pady=2)
+        text_style_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(text_style_row, text="Text Style", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._text_style_menu = ctk.CTkOptionMenu(
+            text_style_row,
+            variable=self.v_text_style,
+            values=["outline", "bold", "shadow", "none"],
+            width=200,
+        )
+        self._text_style_menu.grid(row=0, column=1, sticky="w", padx=4)
+        ctk.CTkLabel(
+            self._text_overlay_frame,
+            text="    outline = black border (best on 128×32)  ·  bold = thicker glyph  ·  shadow = drop shadow",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 4), anchor="w")
+
+        # ── Background box ────────────────────────────────────────────────────
+        bg_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        bg_row.pack(fill="x", padx=10, pady=(4, 2))
+        self._text_bg_cb = ctk.CTkCheckBox(
+            bg_row,
+            text="Background box  (dark box behind text)",
+            variable=self.v_text_bg,
+            command=self._on_text_bg_toggle,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        self._text_bg_cb.pack(side="left")
+
+        # Opacity slider — shown only when bg is on
+        self._text_bg_opacity_frame = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+        self._text_bg_opacity_frame.pack(fill="x", padx=10, pady=2)
+        self._text_bg_opacity_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(self._text_bg_opacity_frame, text="Box opacity", width=145, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        self._text_bg_opacity_slider = ctk.CTkSlider(
+            self._text_bg_opacity_frame,
+            from_=10, to=100, number_of_steps=90,
+            variable=self.v_text_bg_opacity,
+        )
+        self._text_bg_opacity_slider.grid(row=0, column=1, sticky="ew", padx=4)
+        self._text_bg_opacity_lbl = ctk.CTkLabel(
+            self._text_bg_opacity_frame,
+            text="%d %%" % self.v_text_bg_opacity.get(),
+            width=60, anchor="e", font=ctk.CTkFont(size=11),
+        )
+        self._text_bg_opacity_lbl.grid(row=0, column=2, padx=(4, 4))
+        self.v_text_bg_opacity.trace_add(
+            "write",
+            lambda *_: self._text_bg_opacity_lbl.configure(
+                text="%d %%" % self.v_text_bg_opacity.get()
+            ),
+        )
+        self._on_text_bg_toggle()  # set initial visibility
+
+        self._on_text_overlay_toggle() # Set initial state
+
+        # ── SECTION 3: POSITIONING ────────────────────────────────────────────
         ctk.CTkLabel(
             parent, text="━━  📍  Positioning",
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
@@ -826,7 +1065,7 @@ class DMDConverterApp(ctk.CTk):
 
         self._on_scroll_enabled_change()   # set initial visibility
 
-        # ── SECTION 2: VISUAL EFFECTS ─────────────────────────────────────────
+        # ── SECTION 4: VISUAL EFFECTS ─────────────────────────────────────────
         ctk.CTkLabel(
             parent, text="━━  ✨  Visual Effects",
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
@@ -868,6 +1107,40 @@ class DMDConverterApp(ctk.CTk):
         else:
             self._manual_frame.pack(fill="x", padx=10, pady=(4, 4))
 
+    def _on_target_preset_change(self, preset):
+        if preset == "Custom":
+            self._custom_width_entry.configure(state="normal")
+            self._custom_height_entry.configure(state="normal")
+        else:
+            width, height = map(int, preset.split(" ")[0].split("x"))
+            self.v_target_width.set(width)
+            self.v_target_height.set(height)
+            self._custom_width_entry.configure(state="disabled")
+            self._custom_height_entry.configure(state="disabled")
+        # Update DMD canvas size immediately
+        self._update_dmd_canvas_size()
+
+    def _on_text_overlay_toggle(self):
+        if self.v_text_overlay_enabled.get():
+            self._text_overlay_frame.pack(fill="x", padx=10, pady=(4, 4))
+        else:
+            self._text_overlay_frame.pack_forget()
+
+    def _on_text_bg_toggle(self):
+        if self.v_text_bg.get():
+            self._text_bg_opacity_frame.pack(fill="x", padx=10, pady=2)
+        else:
+            self._text_bg_opacity_frame.pack_forget()
+
+    def _update_dmd_canvas_size(self):
+        new_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
+        new_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+        self._dmd_canvas.configure(width=new_width, height=new_height)
+        # Re-center the idle text if it's showing
+        if not self._dmd_frames and not self._dmd_rendering:
+            self._draw_dmd_canvas_idle()
+
+
     def _reset_advanced(self):
         self.v_auto_action_enabled.set(False)
         self.v_action_detector.set("person")
@@ -876,6 +1149,21 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_zoom_max.set(2.0)
         self.v_action_padding.set(0.20)
         self.v_action_intro.set(1.5)
+        self.v_bg_sub_enable.set(False) # Reset background subtraction
+        self.v_target_preset.set("128x32 (1x1)") # Reset tiling preset
+        self.v_target_width.set(DEFAULT_PARAMS["target_width"])
+        self.v_target_height.set(DEFAULT_PARAMS["target_height"])
+        self._on_target_preset_change(self.v_target_preset.get()) # Apply preset reset
+        self.v_text_overlay_enabled.set(False) # Reset text overlay
+        self.v_text_content.set("")
+        self.v_text_font_size.set(8)
+        self.v_text_color.set("white")
+        self.v_text_position.set("bottom_center")
+        self.v_text_font_file.set("HelvetiPixel.ttf")
+        self.v_text_style.set("outline")
+        self.v_text_bg.set(False)
+        self.v_text_bg_opacity.set(60)
+        self._on_text_overlay_toggle() # Apply text overlay reset
         self.v_scroll_enabled.set(True)
         self.v_zoom.set(1.0)
         self.v_manual_x.set(0)
@@ -1076,8 +1364,11 @@ class DMDConverterApp(ctk.CTk):
 
     def _draw_dmd_canvas_idle(self):
         self._dmd_canvas.delete("all")
+        # Use current target dimensions for idle text positioning
+        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
+        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(
-            DMD_CANVAS_W // 2, DMD_CANVAS_H // 2,
+            current_dmd_width // 2, current_dmd_height // 2,
             text="← Select a file then\n  click 🔬 Refresh DMD",
             fill="#334455", font=("Helvetica", 11), justify="center"
         )
@@ -1260,8 +1551,11 @@ class DMDConverterApp(ctk.CTk):
             zoom_max=float(self.v_action_zoom_max.get()),
             padding=float(self.v_action_padding.get()),
             intro_duration=float(self.v_action_intro.get()),
+            bg_sub_enable=self.v_bg_sub_enable.get(),
             start_s=start_s,
             end_s=end_s,
+            target_width=self.v_target_width.get(), # Pass target dimensions
+            target_height=self.v_target_height.get(), # Pass target dimensions
         )
         threading.Thread(
             target=self._generate_auto_preview,
@@ -1320,6 +1614,10 @@ class DMDConverterApp(ctk.CTk):
     def _on_auto_fail(self, msg):
         self._auto_rendering = False
         self._btn_auto.configure(state="normal", text="🎯 Auto")
+        # Ensure tmpdir is defined before trying to remove it
+        if hasattr(self, '_auto_tmpdir') and self._auto_tmpdir and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
         self._auto_canvas.delete("all")
         self._auto_canvas.create_text(
             AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
@@ -1367,8 +1665,11 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_rendering = True
         self._stop_dmd_preview()
         self._dmd_canvas.delete("all")
+        # Use current target dimensions for idle text positioning
+        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
+        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(
-            DMD_CANVAS_W // 2, DMD_CANVAS_H // 2,
+            current_dmd_width // 2, current_dmd_height // 2,
             text="⏳  Generating DMD…\n  (a few seconds)",
             fill="#f39c12", font=("Helvetica", 11), justify="center"
         )
@@ -1394,7 +1695,9 @@ class DMDConverterApp(ctk.CTk):
             img = Image.open(out_gif)
             while True:
                 frame = img.copy().convert("RGB").resize(
-                    (DMD_DISP_W, DMD_DISP_H), Image.NEAREST
+                    (int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR),
+                     int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)),
+                    Image.NEAREST
                 )
                 frames.append(ImageTk.PhotoImage(frame))
                 delays.append(max(img.info.get("duration", 80), 20))
@@ -1417,7 +1720,7 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_idx    = 0
         size_kb = os.path.getsize(out_gif) // 1024
         self._dmd_info.configure(
-            text=f"✅  128×32  ·  {len(frames)} frames  ·  {size_kb} KB"
+            text=f"✅  {self.v_target_width.get()}×{self.v_target_height.get()}  ·  {len(frames)} frames  ·  {size_kb} KB"
         )
         self._animate_dmd()
 
@@ -1426,8 +1729,11 @@ class DMDConverterApp(ctk.CTk):
         self._btn_dmd.configure(state="normal", text="🔬 DMD")
         shutil.rmtree(tmpdir, ignore_errors=True)
         self._dmd_canvas.delete("all")
+        # Use current target dimensions for idle text positioning
+        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
+        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(
-            DMD_CANVAS_W // 2, DMD_CANVAS_H // 2,
+            current_dmd_width // 2, current_dmd_height // 2,
             text="❌  DMD render failed", fill="#e74c3c", font=("Helvetica", 11)
         )
         self._log(f"❌  DMD preview: {msg}", "error")
@@ -1437,8 +1743,10 @@ class DMDConverterApp(ctk.CTk):
             return
         idx = self._dmd_idx % len(self._dmd_frames)
         self._dmd_canvas.delete("all")
-        x_off = (DMD_CANVAS_W - DMD_DISP_W) // 2
-        y_off = (DMD_CANVAS_H - DMD_DISP_H) // 2
+        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
+        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+        x_off = (current_dmd_width - current_dmd_width) // 2 # Always 0
+        y_off = (current_dmd_height - current_dmd_height) // 2 # Always 0
         self._dmd_canvas.create_image(x_off, y_off, anchor="nw",
                                       image=self._dmd_frames[idx])
         self._dmd_idx = idx + 1
@@ -1707,6 +2015,18 @@ class DMDConverterApp(ctk.CTk):
             "action_zoom_max": self.v_action_zoom_max.get(),
             "action_padding": self.v_action_padding.get(),
             "action_intro": self.v_action_intro.get(),
+            "bg_sub_enable": self.v_bg_sub_enable.get(),
+            "target_width": self.v_target_width.get(),
+            "target_height": self.v_target_height.get(),
+            "text_overlay_enabled": self.v_text_overlay_enabled.get(), # Collect text overlay params
+            "text_content": self.v_text_content.get(),
+            "text_font_size": self.v_text_font_size.get(),
+            "text_color": self.v_text_color.get(),
+            "text_position": self.v_text_position.get(),
+            "text_font_file": self.v_text_font_file.get(),
+            "text_style": self.v_text_style.get(),
+            "text_bg": self.v_text_bg.get(),
+            "text_bg_opacity": self.v_text_bg_opacity.get(),
             # max_duration: 0 = no limit when checkbox is off
             "max_duration": self.v_max_duration.get() if self.v_max_dur_enabled.get() else 0.0,
             # auto-colorimetry
@@ -1858,14 +2178,12 @@ def main():
             and tk_ver > 0.0
             and tk_ver < 8.6
         ):
-            print(
-                "\n❌  Incompatible Python/Tk detected:\n"
-                f"    Python: {sys.executable}\n"
-                f"    Tk: {tk_ver}\n\n"
-                "This macOS Python build uses Tk 8.5 and crashes with this UI.\n"
-                "Use the launcher script (recommended) or Homebrew Python.\n\n"
-                "  ./launch_ui.sh\n"
-                "  brew install python@3.13\n"
+            logger.critical(
+                "Incompatible Python/Tk detected: Python=%s  Tk=%.1f\n"
+                "This macOS build uses Tk 8.5 and crashes with this UI.\n"
+                "Use the launcher script:  ./launch_ui.sh\n"
+                "Or install Homebrew Python:  brew install python@3.13",
+                sys.executable, tk_ver,
             )
             sys.exit(1)
 
@@ -1875,7 +2193,8 @@ def main():
         )
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         msg = (
-            "ffmpeg not found or not responding.\n\n"
+            "ffmpeg not found or not responding.\n"
+            "Please install ffmpeg from your system's package manager or official website.\n\n"
             "macOS :  brew install ffmpeg\n"
             "Windows: winget install Gyan.FFmpeg\n"
             "Linux :  sudo apt install ffmpeg"
@@ -1886,7 +2205,7 @@ def main():
             messagebox.showerror("ffmpeg missing", msg)
             root.destroy()
         except Exception:
-            print(f"\n❌  {msg}\n")
+            logger.critical("ffmpeg not found or not responding:\n%s", msg)
         sys.exit(1)
 
     app = DMDConverterApp()
@@ -1895,4 +2214,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

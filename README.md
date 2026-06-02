@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v2.1
+# 🎞️ DMD GIF Converter — v2.4.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -243,6 +243,74 @@ Set to `0` or uncheck to disable.
 > choose exactly which 128×32 window to crop from the scaled frame.
 > The DMD preview updates automatically ~2 s after you stop dragging.
 
+#### 🖼️ Multi-Dalle / Tiling
+
+Configure the output resolution for multi-panel setups.
+
+| Control | Default | Description |
+|---|---|---|
+| **Dimensions Preset** | `128×32 (1×1)` | Quick presets: `128×32`, `256×32`, `128×64` or Custom |
+| **Custom Width** | `128` | Target width in pixels (only editable when preset = Custom) |
+| **Custom Height** | `32` | Target height in pixels (only editable when preset = Custom) |
+
+> The Auto Action framing engine always uses the correct target aspect ratio.
+
+#### 💬 Text Overlay
+
+Burn a text label directly into the output GIF. Text is **always applied on the final 128×32 output** (after all scaling / cropping), so even a small font remains as sharp as possible.
+
+> **Two rendering backends** — used transparently:
+> - **ffmpeg `drawtext`** when ffmpeg is compiled with `libfreetype` (Linux typical build)
+> - **Pillow post-processing** fallback when drawtext is unavailable (Homebrew macOS default)  
+>   Both produce identical results; the log shows which backend was used.
+
+| Control | Default | Description |
+|---|---|---|
+| **Enable Text Overlay** | ☐ off | Master switch |
+| **Text Content** | `""` | Text to render on every frame |
+| **Font Size** | `8 px` | Font size in pixels (4–32 px) |
+| **Text Color** | `white` | `white` / `yellow` / `red` / `green` / `blue` |
+| **Text Position** | `bottom_center` | 9 anchor positions (top/middle/bottom × left/center/right) |
+| **Font** | `HelvetiPixel.ttf` | Pixel font from `media/fonts/` |
+| **Text Style** | `outline` | Rendering style — see table below |
+| **Background box** | ☐ off | Dark semi-transparent box behind text |
+| **Box opacity** | `60 %` | 10–100 % (visible only when Background box is on) |
+
+**Text styles** (tuned for 128×32 visibility):
+
+| Style | Effect | Best use |
+|---|---|---|
+| `outline` ★ default | 1 px black stroke around the glyph | Maximum readability on any background |
+| `bold` | 1 px same-colour stroke → thicker glyph | Bright text on dark content |
+| `shadow` | 1 px dark drop-shadow offset | Depth effect, slight readability gain |
+| `none` | Plain text, no effect | Dark-on-light content only |
+
+**Available fonts** (all optimised for 128×32 pixel DMD panels):
+
+| Font file | Style |
+|---|---|
+| `HelvetiPixel.ttf` | Clean pixel sans-serif ★ default |
+| `PixelMordred.ttf` | Bold pixel gothic |
+| `BitCasual.ttf` | Casual retro pixel |
+| `CursivePixel.ttf` | Pixel cursive |
+| `justabit.ttf` | Minimal 1-bit style |
+| `KarenBook.ttf` | Book / readable pixel |
+| `OldWizard.ttf` | Fantasy / medieval pixel |
+| `OrdinaryBasis.ttf` | Plain pixel |
+| `Quintet.ttf` | Compact pixel |
+| `TimesNewPixel.ttf` | Pixel serif |
+
+> Font files must exist in `media/fonts/`. If the selected font is not found, text overlay is automatically disabled with a warning in the log.
+
+**CLI flags:**
+
+```bash
+./dmd_gif_converter.py --text-overlay --text-content "PLAYER 1" \
+  --text-font-size 10 --text-color yellow --text-position top_center \
+  --text-font-file HelvetiPixel.ttf --text-style outline \
+  --text-bg --text-bg-opacity 60
+```
+
 #### ✨ Visual Effects
 
 | Effect | Filter | Default |
@@ -438,6 +506,15 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_smoothness` | `0.85` | Camera exponential smoothing factor |
 | `action_zoom_max` | `1.8` | Maximum AI zoom factor |
 | `action_padding` | `0.20` | Padding around detected ROI |
+| `bg_sub_enable` | `False` | Replace background with black (maximises subject contrast) |
+| `target_width` | `128` | Output width in pixels (multi-panel tiling) |
+| `target_height` | `32` | Output height in pixels (multi-panel tiling) |
+| `text_overlay_enabled` | `False` | 💬 Burn a text label into the output GIF |
+| `text_content` | `""` | Text string to render |
+| `text_font_size` | `8` | Font size in pixels |
+| `text_color` | `white` | Text colour (`white` / `yellow` / `red` / `green` / `blue` / hex) |
+| `text_position` | `bottom_center` | One of 9 anchor positions |
+| `text_font_file` | `HelvetiPixel.ttf` | Font file from `media/fonts/` |
 
 ### `scroll_cycles` explained
 
@@ -509,6 +586,9 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
 | Smart Color Boost makes colours look wrong | Disable it and tune manually — it works best on heterogeneous or poorly-exposed footage |
 | Smart Color Boost log shows `fallback` | OpenCV unavailable — run `pip install opencv-python` |
+| Text overlay not appearing | Make sure **Text Content** is not empty and the font file exists in `media/fonts/` |
+| `[ERROR] Font file '…' not found` | The selected font is missing from `media/fonts/` — choose a different font in the dropdown |
+| `[TEXT  ] … ffmpeg drawtext unavailable` | Normal on macOS Homebrew ffmpeg (compiled without `--enable-libfreetype`) — **Pillow fallback is used automatically**, no action required |
 
 ---
 
@@ -522,7 +602,8 @@ MIT — free to use, modify and distribute.
 
 - **[FFmpeg](https://ffmpeg.org/)** — video processing engine
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** — modern cross-platform UI framework
-- **[Pillow](https://python-pillow.org/)** — image handling for the UI preview
+- **[Pillow](https://python-pillow.org/)** — image handling for the UI preview and text overlay fallback
 - **[Bitbank2](https://github.com/bitbank2/AnimatedGIF)** — AnimatedGIF library for ESP32
 - **[Mrfaptastic](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA)** — high-performance DMA HUB75 driver for ESP32
 - **[Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite)** — the project this tool was built for
+- **[Pixel Fonts Pack by ovate](https://github.com/ovate/Pixel-Fonts-Pack)** — pixel-perfect TTF fonts bundled in `media/fonts/`

@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v2.1
+# 🎞️ DMD GIF Converter — v2.4.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
@@ -243,6 +243,74 @@ Mettre à `0` ou décocher pour désactiver.
 > puis régler X/Y pour choisir exactement quelle fenêtre 128×32 extraire.
 > L'aperçu DMD se met à jour automatiquement ~2 s après l'arrêt du glissement.
 
+#### 🖼️ Multi-Dalle / Tiling
+
+Configurer la résolution de sortie pour les configurations multi-dalles.
+
+| Contrôle | Défaut | Description |
+|---|---|---|
+| **Dimensions Preset** | `128×32 (1×1)` | Presets rapides : `128×32`, `256×32`, `128×64` ou Custom |
+| **Custom Width** | `128` | Largeur en pixels (éditable uniquement avec preset = Custom) |
+| **Custom Height** | `32` | Hauteur en pixels (éditable uniquement avec preset = Custom) |
+
+> Le moteur Auto Action utilise toujours le bon ratio cible.
+
+#### 💬 Text Overlay — texte incrusté
+
+Graver un texte directement dans le GIF de sortie. Le texte est **toujours appliqué sur le GIF 128×32 final** (après toute mise à l'échelle / recadrage), ce qui maximise la lisibilité.
+
+> **Deux moteurs de rendu** — utilisés de façon transparente :
+> - **ffmpeg `drawtext`** quand ffmpeg est compilé avec `libfreetype` (Linux typique)
+> - **Pillow post-traitement** fallback automatique sans libfreetype (ffmpeg Homebrew macOS)  
+>   Les deux produisent des résultats identiques ; le log indique le moteur utilisé.
+
+| Contrôle | Défaut | Description |
+|---|---|---|
+| **Enable Text Overlay** | ☐ off | Interrupteur principal |
+| **Text Content** | `""` | Texte à afficher sur chaque frame |
+| **Font Size** | `8 px` | Taille en pixels (4–32 px) |
+| **Text Color** | `white` | `white` / `yellow` / `red` / `green` / `blue` |
+| **Text Position** | `bottom_center` | 9 positions (top/middle/bottom × left/center/right) |
+| **Font** | `HelvetiPixel.ttf` | Police pixel depuis `media/fonts/` |
+| **Text Style** | `outline` | Style de rendu — voir tableau ci-dessous |
+| **Background box** | ☐ off | Boîte sombre semi-transparente derrière le texte |
+| **Box opacity** | `60 %` | 10–100 % (visible uniquement quand Background box est actif) |
+
+**Styles de texte** (optimisés pour la lisibilité sur 128×32) :
+
+| Style | Effet | Meilleure utilisation |
+|---|---|---|
+| `outline` ★ défaut | Contour noir 1 px autour du glyphe | Lisibilité maximale sur n'importe quel fond |
+| `bold` | Contour couleur 1 px → glyphe plus épais | Texte clair sur contenu sombre |
+| `shadow` | Ombre portée décalée 1 px | Effet de profondeur |
+| `none` | Texte brut, sans effet | Contenu clair uniquement |
+
+**Polices disponibles** (toutes optimisées pour les dalles DMD 128×32) :
+
+| Fichier | Style |
+|---|---|
+| `HelvetiPixel.ttf` | Sans-serif pixel lisible ★ défaut |
+| `PixelMordred.ttf` | Gothique pixel gras |
+| `BitCasual.ttf` | Rétro décontracté |
+| `CursivePixel.ttf` | Cursive pixel |
+| `justabit.ttf` | Style 1-bit minimaliste |
+| `KarenBook.ttf` | Pixel lisible book |
+| `OldWizard.ttf` | Fantaisie médiévale |
+| `OrdinaryBasis.ttf` | Pixel neutre |
+| `Quintet.ttf` | Pixel compact |
+| `TimesNewPixel.ttf` | Serif pixel |
+
+> Les polices doivent être dans `media/fonts/`. Si la police choisie est introuvable, l'overlay est désactivé avec un avertissement dans le log.
+
+**Flags CLI :**
+
+```bash
+./dmd_gif_converter.py --text-overlay --text-content "JOUEUR 1" \
+  --text-font-size 10 --text-color yellow --text-position top_center \
+  --text-font-file HelvetiPixel.ttf --text-style outline \
+  --text-bg --text-bg-opacity 60
+```
+
 #### ✨ Effets visuels
 
 | Effet | Filtre | Défaut |
@@ -447,6 +515,15 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `action_smoothness` | `0.85` | Facteur de lissage exponentiel de la caméra |
 | `action_zoom_max` | `1.8` | Zoom IA maximum |
 | `action_padding` | `0.20` | Marge autour du ROI détecté |
+| `bg_sub_enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
+| `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
+| `target_height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
+| `text_overlay_enabled` | `False` | 💬 Graver un texte dans le GIF de sortie |
+| `text_content` | `""` | Chaîne de texte à afficher |
+| `text_font_size` | `8` | Taille de la police en pixels |
+| `text_color` | `white` | Couleur du texte (`white` / `yellow` / `red` / `green` / `blue` / hex) |
+| `text_position` | `bottom_center` | Une des 9 positions d'ancrage |
+| `text_font_file` | `HelvetiPixel.ttf` | Fichier de police dans `media/fonts/` |
 
 ### `scroll_cycles` expliqué
 
@@ -518,6 +595,9 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Résultat Auto Action incorrect | Essayer un autre **mode de détection** (`motion` ou `hybrid`) — le mode `person` fonctionne mieux avec des silhouettes humaines visibles |
 | Smart Color Boost donne de mauvaises couleurs | Désactivez-le et réglez manuellement — fonctionne mieux sur du contenu mal exposé ou hétérogène |
 | Smart Color Boost log affiche `fallback` | OpenCV non disponible — lancer `pip install opencv-python` |
+| Le texte overlay n'apparaît pas | Vérifiez que **Text Content** n'est pas vide et que le fichier de police existe dans `media/fonts/` |
+| `[ERROR] Font file '…' not found` | La police sélectionnée est absente de `media/fonts/` — choisir une autre police dans la liste |
+| `[TEXT  ] … ffmpeg drawtext unavailable` | Normal sur macOS avec le ffmpeg Homebrew (compilé sans `--enable-libfreetype`) — **le fallback Pillow est utilisé automatiquement**, aucune action requise |
 
 ---
 
@@ -531,7 +611,8 @@ MIT — libre d'utilisation, modification et distribution.
 
 - **[FFmpeg](https://ffmpeg.org/)** — moteur de traitement vidéo
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** — interface graphique moderne multi-plateforme
-- **[Pillow](https://python-pillow.org/)** — gestion des images pour l'aperçu
+- **[Pillow](https://python-pillow.org/)** — gestion des images pour l'aperçu et le fallback text overlay
 - **[Bitbank2](https://github.com/bitbank2/AnimatedGIF)** — bibliothèque AnimatedGIF pour ESP32
 - **[Mrfaptastic](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA)** — moteur DMA HUB75 pour ESP32
 - Projet **[Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite)**
+- **[Pixel Fonts Pack par ovate](https://github.com/ovate/Pixel-Fonts-Pack)** — polices TTF pixel-perfect incluses dans `media/fonts/`
