@@ -14,7 +14,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
+import numpy as np # Import numpy
 
 def available_detectors() -> list[str]:
     """Return supported detector mode names."""
@@ -29,6 +29,7 @@ class AutoActionConfig:
     zoom_max: float = 2.0              # max dynamic zoom factor (hard limit)
     padding: float = 0.20              # extra padding around ROI
     intro_duration: float = 1.5        # seconds of full-frame overview before focusing
+    bg_sub_enable: bool = False       # enable background subtraction (replaces background with black)
     # out_w / out_h are no longer used for the actual output resolution.
     # The preprocessor always outputs at the source native width with a 4:1
     # crop ratio (= DMD ratio 128:32) so that ffmpeg receives full-quality input.
@@ -37,6 +38,8 @@ class AutoActionConfig:
     out_h: int = 0
     start_s: Optional[float] = None
     end_s: Optional[float] = None
+    target_width: int = 128           # Target output width for DMD
+    target_height: int = 32          # Target output height for DMD
 
 
 class _FrameDetector:
@@ -70,6 +73,7 @@ class _FrameDetector:
         else:
             self.hog = None
 
+        # MOG2 background subtractor for motion detection and background removal
         self.bg_sub = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=36)
 
     def detect_person(self, frame) -> Optional[Tuple[int, int, int, int]]:
@@ -175,13 +179,13 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig):
     """Compute target camera rect at 4:1 ratio based on ROI + user strength."""
-    target_ratio = 4.0  # DMD is always 128×32 = 4:1
+    target_ratio = float(cfg.target_width) / cfg.target_height
 
     if roi is None:
         # Keep source center when no ROI is available.
         cx = frame_w / 2.0
         cy = frame_h / 2.0
-        # Fit widest 4:1 crop possible.
+        # Fit widest target_ratio crop possible.
         crop_h = min(frame_h, frame_w / target_ratio)
         crop_w = crop_h * target_ratio
         return cx, cy, crop_w, crop_h
@@ -212,10 +216,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig):
     # Keep inside frame bounds — and enforce zoom_max as a hard minimum crop
     # size so the camera never zooms in beyond zoom_max times regardless of
     # how small the detected ROI is (e.g. distant face, tiny sprite).
-    # min_crop_h is derived from min_crop_w at 4:1 to keep the constraints
+    # min_crop_h is derived from min_crop_w at target_ratio to keep the constraints
     # coherent and avoid the aspect-ratio fixup widening the crop back out.
-    min_crop_w = max(32.0, float(frame_w) / max(1.0, cfg.zoom_max))
-    min_crop_h = max(8.0,  min_crop_w / target_ratio)
+    min_crop_w = max(float(cfg.target_width) / 4, float(frame_w) / max(1.0, cfg.zoom_max))
+    min_crop_h = max(float(cfg.target_height) / 4,  min_crop_w / target_ratio)
     crop_w = _clamp(crop_w, min_crop_w, float(frame_w))
     crop_h = _clamp(crop_h, min_crop_h, float(frame_h))
 
@@ -294,16 +298,17 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         cap.release()
         return False, None, "Invalid source dimensions for action preprocessing."
 
-    # Output at native source resolution with 4:1 crop ratio (= DMD ratio 128:32).
+    # Output at native source resolution with target_width:target_height crop ratio.
     # Keeping the native resolution here means ffmpeg receives full-quality input
-    # and performs the final downscale to 128×32 with all its colour filters.
+    # and performs the final downscale to target_width x target_height with all its colour filters.
     out_w = frame_w
-    out_h = max(8, (frame_w // 4 // 2) * 2)   # even number, 4:1
+    # Calculate out_h based on the desired target aspect ratio
+    target_aspect_ratio = float(cfg.target_width) / cfg.target_height
+    out_h = max(8, (frame_w // int(target_aspect_ratio) // 2) * 2) # even number, matching target aspect ratio
 
-    start_s = cfg.start_s if cfg.start_s is not None else 0.0
-    end_s = cfg.end_s
-    if start_s > 0:
-        cap.set(cv2.CAP_PROP_POS_MSEC, float(start_s) * 1000.0)
+    initial_start_s = cfg.start_s if cfg.start_s is not None else 0.0
+    if initial_start_s > 0:
+        cap.set(cv2.CAP_PROP_POS_MSEC, float(initial_start_s) * 1000.0)
 
     tmpdir = tempfile.mkdtemp(prefix="dmd_action_")
     out_path = os.path.join(tmpdir, "action_pre.mp4")
@@ -320,7 +325,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
 
     detector = _FrameDetector()
 
-    # Full-frame overview rect: widest 4:1 crop centred on the source.
+    # Full-frame overview rect: widest target_width:target_height crop centred on the source.
     cam_full_view = _build_camera_rect(frame_w, frame_h, None, cfg)
 
     # ── Intro frame count — capped relative to source length ─────────────────
@@ -338,42 +343,69 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     frame_idx  = 0
     extra      = 0
 
+    # Read the very first frame of the segment for intro (if any).
+    # This advances the cap pointer by one frame.
+    ok_first, first_frame_for_intro = cap.read()
+    if not ok_first:
+        cap.release()
+        return False, None, "Could not read first frame for intro."
+
+    # ── Background subtractor warm-up ─────────────────────────────────────────
+    # MOG2 starts with no background model: the very first frames it processes
+    # either return an all-foreground mask (everything visible) or an all-zero
+    # mask (black flash), depending on the internal state of the Gaussian mixture.
+    #
+    # Fix: before outputting a single frame, prime the model by replaying the
+    # first frame 30× at a high learning-rate (0.5).  After this the model has
+    # a solid estimate of the static background and produces clean masks from
+    # frame 1 of the actual output.
+    if cfg.bg_sub_enable:
+        _wf = first_frame_for_intro
+        if max(_wf.shape[0], _wf.shape[1]) > 512:
+            _sf = 512 / max(_wf.shape[0], _wf.shape[1])
+            _wf = cv2.resize(
+                _wf,
+                (int(_wf.shape[1] * _sf), int(_wf.shape[0] * _sf)),
+                interpolation=cv2.INTER_AREA,
+            )
+        _BG_WARMUP_ITERS = 30
+        for _ in range(_BG_WARMUP_ITERS):
+            detector.bg_sub.apply(_wf, learningRate=0.5)
+
     # ── Phase 1: Intro panoramic pan (frozen first frame, top → centre) ──────
     # The first source frame is held for intro_frames while the camera pans
     # from the TOP of the frame down to the CENTRE (smoothstep easing).
-    # After writing the intro the capture is REOPENED (not seeked) to guarantee
-    # Phase 2 starts at frame 0 — CAP_PROP_POS_FRAMES seeking is unreliable
-    # for GIFs and some other containers.
+    # NOTE: background subtraction is intentionally skipped here — the intro
+    # is a static frozen frame, so MOG2 would just darken it progressively as
+    # the model learns the content as "background".  Full frame shown instead.
     if intro_frames > 0:
-        ok_first, first_frame = cap.read()
-        if ok_first:
-            cx, cy_center, crop_w_full, crop_h_src = cam_full_view
-            cy_top = crop_h_src / 2.0
+        cx, cy_center, crop_w_full, crop_h_src = cam_full_view
+        cy_top = crop_h_src / 2.0
 
-            for i in range(intro_frames):
-                t_linear = i / max(1, intro_frames - 1)
-                t = t_linear * t_linear * (3.0 - 2.0 * t_linear)
-                cy = cy_top + t * (cy_center - cy_top)
-                cam_intro = (cx, cy, crop_w_full, crop_h_src)
-                crop = _crop_frame(first_frame, cam_intro)
-                out_frame = cv2.resize(crop, (out_w, out_h),
-                                       interpolation=cv2.INTER_LANCZOS4)
-                writer.write(out_frame)
-                frame_idx += 1
+        for i in range(intro_frames):
+            t_linear = i / max(1, intro_frames - 1)
+            t = t_linear * t_linear * (3.0 - 2.0 * t_linear)
+            cy = cy_top + t * (cy_center - cy_top)
+            cam_intro = (cx, cy, crop_w_full, crop_h_src)
+            cropped_frame = _crop_frame(first_frame_for_intro, cam_intro)
 
-            last_frame = first_frame
+            out_frame = cv2.resize(cropped_frame, (out_w, out_h),
+                                   interpolation=cv2.INTER_LANCZOS4)
+            writer.write(out_frame)
+            frame_idx += 1
 
-        # Reopen the capture so Phase 2 reliably starts from the beginning.
-        cap.release()
-        cap = cv2.VideoCapture(src_path)
-        if start_s > 0:
-            cap.set(cv2.CAP_PROP_POS_MSEC, float(start_s) * 1000.0)
+        last_frame = first_frame_for_intro  # last_frame for tail extension
+
+    # Ensure the capture is at the correct start_s for the main tracking phase.
+    # This is crucial to ensure the main loop starts from the correct frame, regardless of intro being played or not.
+    cap.set(cv2.CAP_PROP_POS_MSEC, float(initial_start_s) * 1000.0)
 
     # ── Phase 2: Action tracking (full source from frame 0) ───────────────────
     # Camera starts at cam_full_view so the transition from the intro is smooth.
     cam_prev = cam_full_view
     cam_now  = cam_full_view
     src_idx  = 0     # independent counter for end_s trimming
+    # No need to adjust src_idx here, as cap.set() above resets the pointer.
 
     while True:
         ok, frame = cap.read()
@@ -381,17 +413,34 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             break
 
         t = src_idx / fps
-        if end_s is not None and (start_s + t) >= float(end_s):
+        if cfg.end_s is not None and (initial_start_s + t) >= float(cfg.end_s):
             break
 
+        # Detect ROI on the original frame
         roi = detector.detect(frame, cfg.detector)
         cam_now = _build_camera_rect(frame_w, frame_h, roi, cfg)
         cam = _smooth(cam_prev, cam_now, cfg.smoothness)
         cam_prev = cam
         last_frame = frame
 
-        crop = _crop_frame(frame, cam)
-        out_frame = cv2.resize(crop, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+        cropped_frame = _crop_frame(frame, cam) # Crop original frame
+
+        # Apply background subtraction if enabled
+        if cfg.bg_sub_enable:
+            # Scale cropped_frame for MOG2 analysis if needed
+            bs_frame = cropped_frame
+            if max(cropped_frame.shape[0], cropped_frame.shape[1]) > 512:
+                scale_factor_bs = 512 / max(cropped_frame.shape[0], cropped_frame.shape[1])
+                bs_frame = cv2.resize(cropped_frame, (int(cropped_frame.shape[1] * scale_factor_bs), int(cropped_frame.shape[0] * scale_factor_bs)), interpolation=cv2.INTER_AREA)
+
+            fg_mask = detector.bg_sub.apply(bs_frame)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
+            fg_mask = cv2.resize(fg_mask, (cropped_frame.shape[1], cropped_frame.shape[0]), interpolation=cv2.INTER_LINEAR)
+            cropped_frame = cv2.bitwise_and(cropped_frame, cropped_frame, mask=fg_mask)
+
+        out_frame = cv2.resize(cropped_frame, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
         writer.write(out_frame)
         frame_idx += 1
         src_idx   += 1
@@ -401,6 +450,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # movement toward the final target position.  We keep writing the frozen
     # last frame while advancing the exponential smoothing until the per-frame
     # displacement drops below 0.5 px, capped at 3 seconds of extra content.
+    # NOTE: background subtraction is also skipped here for the same reason as
+    # the intro — applying MOG2 to a repeated static frame would progressively
+    # darken the output as the model reclassifies the content as background.
     if last_frame is not None and cam_prev is not None and cam_now is not None:
         max_extra = int(fps * 3)          # hard cap: 3 s worth of frames
         settle_px = 0.5                   # stop when camera moves < 0.5 px/frame
@@ -410,8 +462,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             # Max displacement across the four camera parameters (cx, cy, cw, ch)
             displacement = max(abs(cam_next[i] - cam_prev[i]) for i in range(4))
             cam_prev = cam_next
-            crop = _crop_frame(last_frame, cam_next)
-            out_frame = cv2.resize(crop, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
+            cropped_frame = _crop_frame(last_frame, cam_next)
+
+            out_frame = cv2.resize(cropped_frame, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
             writer.write(out_frame)
             frame_idx += 1
             extra += 1
@@ -430,4 +483,3 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         f"Auto action OK ({frame_idx} frames{intro_info}{tail_info}, "
         f"{out_w}×{out_h}, detector={cfg.detector})."
     )
-
