@@ -23,6 +23,163 @@ try:
 except Exception:
     _analyze_and_compensate = None
 
+# ── drawtext availability (cached at first use) ────────────────────────────────
+_drawtext_available = None  # bool or None (None = not yet checked)
+
+def _check_drawtext() -> bool:
+    """Return True if the installed ffmpeg has the drawtext filter (requires libfreetype)."""
+    global _drawtext_available
+    if _drawtext_available is None:
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-filters"],
+                capture_output=True, text=True, timeout=10
+            )
+            _drawtext_available = "drawtext" in (r.stdout + r.stderr)
+        except Exception:
+            _drawtext_available = False
+    return _drawtext_available
+
+
+# ── Pillow text overlay fallback ───────────────────────────────────────────────
+_TEXT_COLOR_MAP = {
+    "white":  (255, 255, 255, 255),
+    "yellow": (255, 255,   0, 255),
+    "red":    (255,   0,   0, 255),
+    "green":  (  0, 255,   0, 255),
+    "blue":   (  0,   0, 255, 255),
+}
+
+def _apply_text_overlay_pillow(
+    gif_path: str,
+    text: str,
+    font_path_str: str,
+    font_size: int,
+    color_name: str,
+    position: str,
+    style: str = "outline",
+    bg: bool = False,
+    bg_opacity: int = 60,
+) -> tuple[bool, str]:
+    """Burn text onto every frame of an existing GIF using Pillow.
+
+    Used as a fallback when ffmpeg is built without libfreetype (no drawtext filter).
+
+    Supported styles:
+        none    – plain text
+        bold    – 1 px same-colour stroke (fatter text, good contrast on dark backgrounds)
+        outline – 1 px black stroke (maximum readability on any background)
+        shadow  – offset drop-shadow (depth effect)
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return False, "Pillow not available"
+
+    try:
+        img = Image.open(gif_path)
+    except Exception as e:
+        return False, "Cannot open GIF: %s" % e
+
+    # ── Collect all frames as RGBA ─────────────────────────────────────────────
+    frames_rgba: list = []
+    durations:   list = []
+    try:
+        while True:
+            durations.append(int(img.info.get("duration", 80)))
+            frames_rgba.append(img.copy().convert("RGBA"))
+            img.seek(img.tell() + 1)
+    except EOFError:
+        pass
+    if not frames_rgba:
+        return False, "GIF has no frames"
+
+    # ── Load font (fall back to Pillow default) ────────────────────────────────
+    try:
+        font = ImageFont.truetype(font_path_str, font_size)
+    except Exception:
+        font = ImageFont.load_default()
+
+    rgba_color  = _TEXT_COLOR_MAP.get(color_name.lower(), (255, 255, 255, 255))
+    black_opaque = (0, 0, 0, 255)
+    shadow_color = (0, 0, 0, 200)
+    margin = 2
+
+    # Stroke width used for bounding-box calculation (so text does not get clipped)
+    stroke_w = 1 if style in ("bold", "outline") else 0
+
+    # ── Draw text on every frame ───────────────────────────────────────────────
+    out_frames: list = []
+    for frame in frames_rgba:
+        draw = ImageDraw.Draw(frame)
+        w, h = frame.size
+
+        # Bounding box including optional stroke so position maths is correct
+        bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_w)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+
+        if   position == "top_left":      x, y = margin,            margin
+        elif position == "top_center":    x, y = (w - tw) // 2,     margin
+        elif position == "top_right":     x, y = w - tw - margin,   margin
+        elif position == "middle_left":   x, y = margin,            (h - th) // 2
+        elif position == "middle_center": x, y = (w - tw) // 2,     (h - th) // 2
+        elif position == "middle_right":  x, y = w - tw - margin,   (h - th) // 2
+        elif position == "bottom_left":   x, y = margin,            h - th - margin
+        elif position == "bottom_right":  x, y = w - tw - margin,   h - th - margin
+        else:                             x, y = (w - tw) // 2,     h - th - margin  # bottom_center
+
+        # ── Optional background box ────────────────────────────────────────────
+        if bg:
+            text_bbox = draw.textbbox((x, y), text, font=font, stroke_width=stroke_w)
+            pad = 2
+            box_coords = (
+                text_bbox[0] - pad, text_bbox[1] - pad,
+                text_bbox[2] + pad, text_bbox[3] + pad,
+            )
+            alpha_val = max(0, min(255, int(bg_opacity * 255 / 100)))
+            overlay = Image.new("RGBA", frame.size, (0, 0, 0, 0))
+            ImageDraw.Draw(overlay).rectangle(box_coords, fill=(0, 0, 0, alpha_val))
+            frame = Image.alpha_composite(frame, overlay)
+            draw = ImageDraw.Draw(frame)
+
+        # ── Text rendering (style-dependent) ──────────────────────────────────
+        if style == "bold":
+            # Stroke in the same colour → fatter glyph without a visible border
+            draw.text((x, y), text, font=font, fill=rgba_color,
+                      stroke_width=1, stroke_fill=rgba_color)
+        elif style == "outline":
+            # Black stroke → readable on any background
+            draw.text((x, y), text, font=font, fill=rgba_color,
+                      stroke_width=1, stroke_fill=black_opaque)
+        elif style == "shadow":
+            # Drop shadow 1 px down-right, then main text on top
+            draw.text((x + 1, y + 1), text, font=font, fill=shadow_color)
+            draw.text((x, y),         text, font=font, fill=rgba_color)
+        else:
+            # style == "none"
+            draw.text((x, y), text, font=font, fill=rgba_color)
+
+        out_frames.append(frame.convert("RGB"))
+
+    # ── Re-encode as GIF ──────────────────────────────────────────────────────
+    # Save directly from RGB: Pillow auto-quantises for GIF output.
+    # Using a single save_all call preserves all frames and their durations.
+    try:
+        out_frames[0].save(
+            gif_path,
+            format="GIF",
+            save_all=True,
+            append_images=out_frames[1:],
+            loop=0,
+            duration=durations,
+            optimize=False,
+        )
+    except Exception as e:
+        return False, "Failed to save GIF with text: %s" % e
+
+    return True, "text overlay (%s) applied via Pillow (ffmpeg drawtext unavailable)" % style
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-7s] %(message)s",
@@ -53,7 +210,7 @@ DEFAULT_PARAMS = {
     #   Examples (scroll_dist = 64 px):
     #     1.0  → 1 full round-trip, holds at top     (y = 0)
     #     1.5  → 1 full round-trip, holds at centre  (y = 32 px)
-    #     1.75 → 1 full round-trip, holds at ¾       (y = 48 px)
+    #     1.75 → 1 full round-trips, holds at ¾       (y = 48 px)
     #     2.0  → 2 full round-trips, holds at top    (y = 0)
     #     0.5  → no round-trip, holds at centre      (y = 32 px)
     #
@@ -73,7 +230,6 @@ DEFAULT_PARAMS = {
     "dither": "none",
     # ── Advanced: Positioning ──────────────────────────────────────────────────
     # scroll_enabled=True  → default vertical auto-scroll behaviour (unchanged)
-    # scroll_enabled=False → manual crop at (manual_x, manual_y) with zoom
     "scroll_enabled": True,
     "zoom":           1.0,   # scale multiplier (1.0 = fit to 128 px width)
     "manual_x":       0,     # horizontal crop offset in pixels (manual mode)
@@ -96,6 +252,20 @@ DEFAULT_PARAMS = {
     "action_zoom_max":     2.0,        # max dynamic zoom factor (hard limit)
     "action_padding":      0.20,       # ROI padding before aspect crop
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
+    "bg_sub_enable":       False,      # enable background subtraction (replaces background with black)
+    # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
+    "target_width":  128,
+    "target_height": 32,
+    # ── Text Overlay ─────────────────────────────────────────────────────────
+    "text_overlay_enabled": False,
+    "text_content":         "",
+    "text_font_size":       8,
+    "text_color":           "white",
+    "text_position":        "bottom_center", # top_left, top_center, top_right, middle_left, middle_center, middle_right, bottom_left, bottom_center, bottom_right
+    "text_font_file":       "HelvetiPixel.ttf",  # Default font file (see media/fonts/)
+    "text_style":           "outline",  # none | bold | outline | shadow
+    "text_bg":              False,      # draw a dark background box behind text
+    "text_bg_opacity":      60,         # background box opacity 0-100
 }
 
 _PRESETS = {
@@ -170,9 +340,14 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     # must analyse the original colours, not the auto-action crop).
     original_src = src_path
 
+    # Get target dimensions
+    target_width = p["target_width"]
+    target_height = p["target_height"]
+
     # ── Auto action preprocessor (outside ffmpeg pipeline) ───────────────────
     # Default is disabled, so this block has zero effect unless explicitly enabled.
-    if bool(p.get("auto_action_enabled", False)):
+    auto_action_enabled = bool(p.get("auto_action_enabled", False))
+    if auto_action_enabled:
         cfg = AutoActionConfig(
             detector=str(p.get("action_detector", "person") or "person"),
             strength=float(p.get("action_strength", 0.65)),
@@ -180,8 +355,11 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             zoom_max=float(p.get("action_zoom_max", 1.8)),
             padding=float(p.get("action_padding", 0.20)),
             intro_duration=float(p.get("action_intro", 1.5)),
+            bg_sub_enable=bool(p.get("bg_sub_enable", False)),
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None,
+            target_width=target_width, # Pass target dimensions to auto_action
+            target_height=target_height, # Pass target dimensions to auto_action
         )
         ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg)
         if ok_pre and pre_src:
@@ -250,18 +428,53 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     film_grain      = int(p.get("film_grain", 0))
     vignette_on     = bool(p.get("vignette", False))
 
+    # ── Text Overlay parameters ───────────────────────────────────────────────
+    text_overlay_enabled = bool(p.get("text_overlay_enabled", False))
+    text_content_raw     = str(p.get("text_content", ""))           # original (for Pillow)
+    text_content         = text_content_raw.replace(":", "\\:")     # escaped (for ffmpeg)
+    text_font_size       = int(p.get("text_font_size", 8))
+    text_color           = str(p.get("text_color", "white"))
+    text_position        = str(p.get("text_position", "bottom_center"))
+    text_font_file       = str(p.get("text_font_file", "HelvetiPixel.ttf"))
+    text_style           = str(p.get("text_style", "outline"))         # none | bold | outline | shadow
+    text_bg              = bool(p.get("text_bg", False))
+    text_bg_opacity      = int(p.get("text_bg_opacity", 60))
+
+    # Resolve font path
+    script_dir = Path(__file__).parent
+    font_path = script_dir / "media" / "fonts" / text_font_file
+    if not font_path.exists():
+        font_path = script_dir / "media" / text_font_file
+        if not font_path.exists():
+            font_path = script_dir / text_font_file
+            if not font_path.exists():
+                log(f"[TEXT  ] Font file '{text_font_file}' not found. Text overlay disabled.", "error")
+                text_overlay_enabled = False
+
+    font_path_str = str(font_path).replace("\\", "/")  # FFmpeg prefers forward slashes
+
+    # Decide which text-overlay backend to use:
+    #   • ffmpeg drawtext  — requires libfreetype in the ffmpeg build
+    #   • Pillow fallback  — always available, applied as a post-processing step
+    _text_active      = text_overlay_enabled and bool(text_content_raw) and font_path.exists()
+    _use_ffmpeg_text  = _text_active and _check_drawtext()
+    _use_pillow_text  = _text_active and not _use_ffmpeg_text
+    if _text_active and not _use_ffmpeg_text:
+        log(f"[TEXT  ] {filename} — ffmpeg drawtext unavailable (no libfreetype); "
+            "using Pillow fallback", "warning")
+
     # ── Scale (zoom-aware) ────────────────────────────────────────────────────
     # When zoom=1.0 (default), target_w=128 — identical to previous behaviour.
-    target_w = max(128, round(128.0 * zoom / 2) * 2)   # even, ≥ 128
-    scaled_h = math.ceil(((target_w / src_w) * src_h) / 2.0) * 2
+    target_w_scaled = max(target_width, round(target_width * zoom / 2) * 2)   # even, ≥ target_width
+    scaled_h = math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2
 
     if scroll_enabled:
         # ── Auto-scroll (default behaviour, unchanged) ────────────────────────
         effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
-        effective_h = max(effective_h, 32)
-        scroll_dist = effective_h - 32
+        effective_h = max(effective_h, target_height)
+        scroll_dist = effective_h - target_height
         # Horizontal: centered when zoomed (= "0" for default zoom=1.0)
-        crop_x = str((target_w - 128) // 2) if target_w > 128 else "0"
+        crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
 
         if scroll_dist > 0:
             step = max(1, round(p["scroll_speed"] / fps_render))
@@ -313,7 +526,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
                     crop_y = "0"
 
             log(
-                f"[SCROLL ] {filename} | src {src_w}x{src_h} → {target_w}x{effective_h} "
+                f"[SCROLL ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} "
                 f"| scroll_dist={scroll_dist}px | cycles={cycles} "
                 f"(full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
                 f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
@@ -322,20 +535,20 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             duration_out = str(max(duration_src, 1.0))
             crop_y       = "(in_h-out_h)/2"
             log(
-                f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w}x{effective_h} (centered) "
+                f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} (centered) "
                 f"| fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
             )
     else:
         # ── Manual positioning mode ───────────────────────────────────────────
-        max_x      = max(0, target_w - 128)
-        max_y      = max(0, scaled_h - 32)
+        max_x      = max(0, target_w_scaled - target_width)
+        max_y      = max(0, scaled_h - target_height)
         crop_x_val = max(0, min(manual_x, max_x))
         crop_y_val = max(0, min(manual_y, max_y))
         crop_x       = str(crop_x_val)
         crop_y       = str(crop_y_val)
         duration_out = str(max(duration_src, 1.0))
         log(
-            f"[MANUAL ] {filename} | src {src_w}x{src_h} → {target_w}x{scaled_h} "
+            f"[MANUAL ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{scaled_h} "
             f"| zoom={zoom:.2f} | pos=({crop_x_val},{crop_y_val}px) "
             f"| fps={fps_render} | dur={float(duration_out):.2f}s"
         )
@@ -361,13 +574,70 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     if extras:
         mid_filters += "," + ",".join(extras)
 
-    filter_graph = (
-        f"color=black:s={target_w}x{scaled_h}:r={fps_render}[bg];"
-        f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},scale={target_w}:-2:flags=lanczos[fg];"
-        f"[bg][fg]overlay=0:0:shortest=1,format=rgb24,"
-        f"{mid_filters},"
-        f"crop=128:32:{crop_x}:'{crop_y}'[v_crop];"
-        "[v_crop]split[v1][v2];"
+    # Conditionally apply scale and crop based on auto_action_enabled
+    if auto_action_enabled:
+        # If auto_action is enabled, dmd_auto_action.py has already handled scaling and cropping
+        # The input `src_path` is already a 4:1 aspect ratio video with the correct framing.
+        # We just need to scale it down to target_width x target_height and apply colorimetry.
+        filter_graph_base = (
+            f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},scale={target_width}:{target_height}:flags=lanczos,format=rgb24,"
+            f"{mid_filters}"
+        )
+    else:
+        # Original filter graph with scaling and cropping
+        filter_graph_base = (
+            f"color=black:s={target_w_scaled}x{scaled_h}:r={fps_render}[bg];"
+            f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},scale={target_w_scaled}:-2:flags=lanczos[fg];"
+            f"[bg][fg]overlay=0:0:shortest=1,format=rgb24,"
+            f"{mid_filters},"
+            f"crop={target_width}:{target_height}:{crop_x}:'{crop_y}'"
+        )
+
+    # ── Build filter graph (text via ffmpeg drawtext when available) ──────────
+    if _use_ffmpeg_text:
+        # Map position name → ffmpeg x/y expressions
+        _pos_map = {
+            "top_left":      ("2",              "2"),
+            "top_center":    ("(w-text_w)/2",   "2"),
+            "top_right":     ("w-text_w-2",     "2"),
+            "middle_left":   ("2",              "(h-text_h)/2"),
+            "middle_center": ("(w-text_w)/2",   "(h-text_h)/2"),
+            "middle_right":  ("w-text_w-2",     "(h-text_h)/2"),
+            "bottom_left":   ("2",              "h-text_h-2"),
+            "bottom_center": ("(w-text_w)/2",   "h-text_h-2"),
+            "bottom_right":  ("w-text_w-2",     "h-text_h-2"),
+        }
+        x_pos, y_pos = _pos_map.get(text_position, ("(w-text_w)/2", "h-text_h-2"))
+
+        # Style modifiers (border = stroke, shadow = offset)
+        if text_style == "bold":
+            style_extra = f":borderw=1:bordercolor={text_color}"
+        elif text_style == "outline":
+            style_extra = ":borderw=1:bordercolor=black"
+        elif text_style == "shadow":
+            style_extra = ":shadowx=1:shadowy=1:shadowcolor=black@0.8"
+        else:
+            style_extra = ""
+
+        # Background box
+        if text_bg:
+            bg_alpha = max(0.0, min(1.0, text_bg_opacity / 100.0))
+            bg_extra = f":box=1:boxcolor=black@{bg_alpha:.2f}:boxborderw=2"
+        else:
+            bg_extra = ""
+
+        drawtext_filter = (
+            f"drawtext=fontfile='{font_path_str}':text='{text_content}':"
+            f"fontsize={text_font_size}:fontcolor={text_color}:"
+            f"x={x_pos}:y={y_pos}:fix_bounds=1"
+            f"{style_extra}{bg_extra}"
+        )
+        filter_graph = f"{filter_graph_base},{drawtext_filter}[v_final];"
+    else:
+        filter_graph = f"{filter_graph_base}[v_final];"
+
+    filter_graph += (
+        "[v_final]split[v1][v2];"
         "[v1]palettegen=max_colors=256:reserve_transparent=0[pal];"
         f"[v2][pal]paletteuse=dither={dither}"
     )
@@ -391,14 +661,26 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         import shutil
         shutil.rmtree(temp_pre_src, ignore_errors=True)
 
-    if result.returncode == 0:
-        log(f"[OK    ] {filename}")
-        return True, f"[OK] {filename}"
-    else:
+    if result.returncode != 0:
         err = result.stderr.decode(errors="replace").strip().splitlines()
         last_line = err[-1] if err else "unknown error"
         log(f"[ERROR ] {filename} — ffmpeg: {last_line}", "error")
         return False, f"[ERROR] {filename} — {last_line}"
+
+    # ── Pillow text overlay (post-processing fallback) ────────────────────────
+    if _use_pillow_text:
+        ok_txt, txt_msg = _apply_text_overlay_pillow(
+            out_path, text_content_raw, font_path_str,
+            text_font_size, text_color, text_position,
+            style=text_style, bg=text_bg, bg_opacity=text_bg_opacity,
+        )
+        if ok_txt:
+            log(f"[TEXT  ] {filename} — {txt_msg}")
+        else:
+            log(f"[TEXT  ] {filename} — Pillow text overlay failed: {txt_msg}", "warning")
+
+    log(f"[OK    ] {filename}")
+    return True, f"[OK] {filename}"
 
 
 def process_folder(folder_in, folder_out, params=None, callback=None):
@@ -456,6 +738,9 @@ def process_folder(folder_in, folder_out, params=None, callback=None):
         zoom_max=float(p.get("action_zoom_max", 1.8)),
         padding=float(p.get("action_padding", 0.20)),
         intro_duration=float(p.get("action_intro", 1.5)),
+        bg_sub_enable=bool(p.get("bg_sub_enable", False)),
+        target_width=p["target_width"], # Pass target dimensions to auto_action
+        target_height=p["target_height"], # Pass target dimensions to auto_action
     )
 
     def _preprocess(filename):
@@ -467,6 +752,9 @@ def process_folder(folder_in, folder_out, params=None, callback=None):
             zoom_max=action_cfg.zoom_max,
             padding=action_cfg.padding,
             intro_duration=action_cfg.intro_duration,
+            bg_sub_enable=action_cfg.bg_sub_enable,
+            target_width=action_cfg.target_width, # Pass target dimensions to auto_action
+            target_height=action_cfg.target_height, # Pass target dimensions to auto_action
         )
         ok, pre_src, msg = preprocess_video_for_dmd(src, cfg)
         if ok and pre_src:
@@ -613,6 +901,64 @@ def _build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--action-smoothness", type=float, default=DEFAULT_PARAMS["action_smoothness"], metavar="F")
     ag.add_argument("--action-zoom-max", type=float, default=DEFAULT_PARAMS["action_zoom_max"], metavar="F")
     ag.add_argument("--action-padding", type=float, default=DEFAULT_PARAMS["action_padding"], metavar="F")
+    ag.add_argument(
+        "--bg-sub-enable", action="store_true", default=DEFAULT_PARAMS["bg_sub_enable"],
+        help="Enable background subtraction (replaces background with black) (default: disabled).",
+    )
+
+    # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
+    mg = p.add_argument_group("Multi-dalle / Tiling")
+    mg.add_argument(
+        "--target-width", type=int, default=DEFAULT_PARAMS["target_width"], metavar="PX",
+        help=f"Target output width in pixels (default: {DEFAULT_PARAMS['target_width']}).",
+    )
+    mg.add_argument(
+        "--target-height", type=int, default=DEFAULT_PARAMS["target_height"], metavar="PX",
+        help=f"Target output height in pixels (default: {DEFAULT_PARAMS['target_height']}).",
+    )
+
+    # ── Text Overlay ─────────────────────────────────────────────────────────
+    tg = p.add_argument_group("Text Overlay")
+    tg.add_argument(
+        "--text-overlay", action="store_true", default=DEFAULT_PARAMS["text_overlay_enabled"],
+        help="Enable text overlay on the output GIF (default: disabled).",
+    )
+    tg.add_argument(
+        "--text-content", type=str, default=DEFAULT_PARAMS["text_content"], metavar="STR",
+        help="Text content to overlay.",
+    )
+    tg.add_argument(
+        "--text-font-size", type=int, default=DEFAULT_PARAMS["text_font_size"], metavar="PX",
+        help="Font size for the text overlay (default: 8).",
+    )
+    tg.add_argument(
+        "--text-color", type=str, default=DEFAULT_PARAMS["text_color"], metavar="COLOR",
+        help="Color of the text (e.g., 'white', 'yellow', '#RRGGBB') (default: white).",
+    )
+    tg.add_argument(
+        "--text-position", type=str, default=DEFAULT_PARAMS["text_position"], metavar="POS",
+        choices=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"],
+        help="Position of the text overlay (default: bottom_center).",
+    )
+    tg.add_argument(
+        "--text-font-file", type=str, default=DEFAULT_PARAMS["text_font_file"], metavar="FILE",
+        help=f"Font file to use for text overlay (default: '{DEFAULT_PARAMS['text_font_file']}'). "
+             "Looks in media/fonts/ then media/ then script_dir.",
+    )
+    tg.add_argument(
+        "--text-style", type=str, default=DEFAULT_PARAMS["text_style"],
+        choices=["none", "bold", "outline", "shadow"], metavar="STYLE",
+        help="Text rendering style: none | bold | outline (default) | shadow. "
+             "'outline' adds a black border — best readability on 128×32.",
+    )
+    tg.add_argument(
+        "--text-bg", action="store_true", default=DEFAULT_PARAMS["text_bg"],
+        help="Draw a dark semi-transparent background box behind the text.",
+    )
+    tg.add_argument(
+        "--text-bg-opacity", type=int, default=DEFAULT_PARAMS["text_bg_opacity"], metavar="N",
+        help=f"Background box opacity 0-100 (default: {DEFAULT_PARAMS['text_bg_opacity']}).",
+    )
 
     return p
 
@@ -642,7 +988,19 @@ if __name__ == "__main__":
         "action_smoothness": args.action_smoothness,
         "action_zoom_max": args.action_zoom_max,
         "action_padding": args.action_padding,
+        "bg_sub_enable": args.bg_sub_enable,
         "max_duration": args.max_duration,
+        "target_width": args.target_width,
+        "target_height": args.target_height,
+        "text_overlay_enabled": args.text_overlay,
+        "text_content": args.text_content,
+        "text_font_size": args.text_font_size,
+        "text_color": args.text_color,
+        "text_position": args.text_position,
+        "text_font_file": args.text_font_file,
+        "text_style": args.text_style,
+        "text_bg": args.text_bg,
+        "text_bg_opacity": args.text_bg_opacity,
     }
     prefix = args.prefix
 
