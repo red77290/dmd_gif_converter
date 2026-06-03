@@ -5,4 +5,8 @@ Pillow>=10.0.0
 # pinned à 0.7.1 pour éviter le crash "macOS XX or later required"
 darkdetect==0.7.1
 opencv-python>=4.9.0
+# GIF Search (v3.0.0)
+# 'duckduckgo_search' a été renommé en 'ddgs' — on installe les deux pour compatibilité
+ddgs>=7.0.0
+requests>=2.31.0
 

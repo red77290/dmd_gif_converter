@@ -4,6 +4,7 @@
 #
 # First run : creates a Python venv and installs all dependencies.
 # Next runs  : activates the venv and starts the UI directly.
+#              If requirements_ui.txt changed since last install, re-runs pip.
 #
 # Usage:
 #   Right-click → "Run with PowerShell"
@@ -13,11 +14,38 @@
 #   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 # =============================================================================
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Venv      = Join-Path $ScriptDir ".venv"
-$UI        = Join-Path $ScriptDir "dmd_gif_converter_ui.py"
-$VenvPy    = Join-Path $Venv "Scripts\python.exe"
-$VenvPip   = Join-Path $Venv "Scripts\pip.exe"
+$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Venv         = Join-Path $ScriptDir ".venv"
+$UI           = Join-Path $ScriptDir "dmd_gif_converter_ui.py"
+$Req          = Join-Path $ScriptDir "requirements_ui.txt"
+$ReqHashFile  = Join-Path $Venv ".requirements_hash"
+$VenvPy       = Join-Path $Venv "Scripts\python.exe"
+$VenvPip      = Join-Path $Venv "Scripts\pip.exe"
+
+# ── Compute MD5 hash of requirements_ui.txt ──────────────────────────────────
+function Get-ReqHash {
+    try {
+        return (Get-FileHash $Req -Algorithm MD5).Hash
+    } catch {
+        return (Get-Item $Req).LastWriteTimeUtc.Ticks.ToString()
+    }
+}
+
+# ── Install / upgrade dependencies ───────────────────────────────────────────
+function Install-Deps {
+    Write-Host "==> Installing / updating dependencies..." -ForegroundColor Cyan
+    & $VenvPip install --quiet --upgrade pip
+    & $VenvPip install --quiet -r $Req
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: pip install failed." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+    # Save current hash so we skip next time
+    Get-ReqHash | Set-Content $ReqHashFile -NoNewline
+    Write-Host "==> Dependencies up to date." -ForegroundColor Green
+    Write-Host ""
+}
 
 # ── Check / create venv ───────────────────────────────────────────────────────
 if (-not (Test-Path $VenvPy)) {
@@ -56,17 +84,19 @@ if (-not (Test-Path $VenvPy)) {
         exit 1
     }
 
-    Write-Host "==> Installing dependencies..." -ForegroundColor Cyan
-    & $VenvPip install --quiet --upgrade pip
-    & $VenvPip install --quiet -r (Join-Path $ScriptDir "requirements_ui.txt")
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: pip install failed." -ForegroundColor Red
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
+    Install-Deps
 
     Write-Host "==> Environment ready." -ForegroundColor Green
     Write-Host ""
+} else {
+    # Venv exists — check if requirements_ui.txt changed since last install
+    $currentHash = Get-ReqHash
+    $savedHash   = if (Test-Path $ReqHashFile) { (Get-Content $ReqHashFile -Raw).Trim() } else { "" }
+
+    if ($currentHash -ne $savedHash) {
+        Write-Host "==> requirements_ui.txt changed — updating dependencies..." -ForegroundColor Cyan
+        Install-Deps
+    }
 }
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
@@ -77,4 +107,3 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: The application exited with an error. See output above." -ForegroundColor Red
     Read-Host "Press Enter to exit"
 }
-

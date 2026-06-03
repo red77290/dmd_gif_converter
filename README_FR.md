@@ -1,8 +1,50 @@
-# 🎞️ DMD GIF Converter — v2.4.0
+# 🎞️ DMD GIF Converter — v3.0.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
+
+---
+
+## 🔍 Recherche de GIFs — téléchargez des GIFs directement depuis l'UI  *(nouveau en v3.0.0)*
+
+> **En bref — tapez un mot-clé, choisissez une quantité, appuyez sur ⬇ DL, et les GIFs apparaissent dans la liste prêts à convertir.**  
+> Disponible dans le panneau **📁 Fichiers source** à gauche, entre les boutons de fichiers et la liste.
+
+Le panneau de recherche GIF permet de rechercher des GIFs animés sur DuckDuckGo et de les télécharger directement dans un dossier temporaire géré. Chaque GIF téléchargé est immédiatement ajouté à la liste — sans navigation manuelle dans les dossiers.
+
+```
+Mot-clé + quantité  ──[recherche images DuckDuckGo]──▶  dossier temp  ──▶  liste  ──▶  Convertir
+```
+
+### Fonctionnalités
+
+| Fonctionnalité | Détails |
+|---|---|
+| **Recherche par mot-clé** | N'importe quel texte — supporte la touche `Entrée` pour lancer la recherche |
+| **Quantité configurable** | 1 à 50 GIFs par recherche (défaut : 10) |
+| **Progression en temps réel** | La barre de progression principale se met à jour à chaque fichier téléchargé |
+| **Alimentation fichier par fichier** | Chaque GIF téléchargé apparaît dans la liste immédiatement |
+| **Bouton Annuler** | Apparaît pendant le téléchargement — s'arrête après le fichier en cours |
+| **Gestion des erreurs** | Timeouts, URLs invalides et mauvais types MIME sont ignorés avec des entrées dans le log |
+| **Gestion du dossier temp** | Tous les GIFs téléchargés vont dans un dossier temporaire géré, nettoyé à la fermeture |
+| **Repli gracieux** | Si `duckduckgo-search` ou `requests` sont absents, le panneau affiche un avertissement et le bouton est désactivé — pas de crash |
+
+### Comment l'utiliser
+
+1. Dans le panneau **📁 Fichiers source** → trouvez la section **🔍 GIF Search**
+2. Tapez un mot-clé (ex. `pac-man`, `pixel art fire`, `retro arcade`)
+3. Définissez la quantité (défaut : 10, max : 50)
+4. Appuyez sur **⬇ DL** ou Entrée
+5. Les GIFs se téléchargent un par un et apparaissent dans la liste
+6. Sélectionnez-en un, ajustez les paramètres, et convertissez !
+
+### Prérequis
+
+```bash
+pip install duckduckgo-search requests
+# déjà inclus dans requirements_ui.txt — installé automatiquement par ./launch_ui.sh
+```
 
 ---
 
@@ -177,6 +219,7 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 | Fonctionnalité | Détails |
 |---|---|
 | **Import par fichier ou dossier** | ➕ fichiers individuels, 📂 dossier entier — tous les formats vidéo acceptés |
+| **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité, alimente la liste automatiquement |
 | **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
@@ -388,7 +431,7 @@ pip install -r requirements_ui.txt
 
 Ou directement :
 ```bash
-pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python
+pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python duckduckgo-search requests
 ```
 
 > `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.  
@@ -598,6 +641,10 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Le texte overlay n'apparaît pas | Vérifiez que **Text Content** n'est pas vide et que le fichier de police existe dans `media/fonts/` |
 | `[ERROR] Font file '…' not found` | La police sélectionnée est absente de `media/fonts/` — choisir une autre police dans la liste |
 | `[TEXT  ] … ffmpeg drawtext unavailable` | Normal sur macOS avec le ffmpeg Homebrew (compilé sans `--enable-libfreetype`) — **le fallback Pillow est utilisé automatiquement**, aucune action requise |
+| Le bouton Recherche GIF est désactivé | Installez les dépendances manquantes : `pip install duckduckgo-search requests` (ou relancez `./launch_ui.sh`) |
+| Recherche GIF : 0 résultat | DuckDuckGo peut limiter les requêtes rapides — patientez quelques secondes et réessayez |
+| GIFs téléchargés très volumineux | Normal pour les GIFs web — le convertisseur les redimensionne automatiquement en 128×32 |
+| Erreurs de timeout pendant le téléchargement | Certains hébergeurs d'images sont lents — augmentez la quantité pour compenser les URLs ignorées |
 
 ---
 
