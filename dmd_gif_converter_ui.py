@@ -182,6 +182,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_workers       = tk.IntVar   (value=2)
         self.v_scroll        = tk.DoubleVar(value=24.0)
         self.v_bottom_crop   = tk.DoubleVar(value=0.15)
+        self.v_top_crop      = tk.DoubleVar(value=0.0)
         self.v_scroll_cycles = tk.DoubleVar(value=1.5)
         self.v_fps_min       = tk.DoubleVar(value=10.0)
         self.v_fps_max       = tk.DoubleVar(value=25.0)
@@ -242,7 +243,7 @@ class DMDConverterApp(ctk.CTk):
 
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
-            self.v_mode, self.v_scroll, self.v_bottom_crop, self.v_scroll_cycles,
+            self.v_mode, self.v_scroll, self.v_bottom_crop, self.v_top_crop, self.v_scroll_cycles,
             self.v_fps_min, self.v_fps_max, self.v_contrast, self.v_saturation,
             self.v_brightness, self.v_gamma, self.v_sharpen_lum, self.v_sharpen_chr,
             self.v_dither, self.v_scroll_enabled, self.v_zoom,
@@ -629,6 +630,7 @@ class DMDConverterApp(ctk.CTk):
         # Scroll
         section("📜  Scroll")
         slider_row("Scroll speed",    self.v_scroll,        4.0, 80.0, "{:.0f}", " px/s")
+        slider_row("Top crop (%)",    self.v_top_crop,      0.0,  0.5, "{:.0%}")
         slider_row("Bottom crop (%)", self.v_bottom_crop,   0.0,  0.5, "{:.0%}")
         slider_row("Scroll cycles",   self.v_scroll_cycles, 0.0,  5.0, "{:.2f}", " cyc")
 
@@ -2066,6 +2068,7 @@ class DMDConverterApp(ctk.CTk):
             "max_workers":     self.v_workers.get(),
             "scroll_speed":    self.v_scroll.get(),
             "bottom_crop_pct": self.v_bottom_crop.get(),
+            "top_crop_pct":    self.v_top_crop.get(),
             "scroll_cycles":   self.v_scroll_cycles.get(),
             "fps_min":         self.v_fps_min.get(),
             "fps_max":         self.v_fps_max.get(),
