@@ -18,11 +18,22 @@ set "UI=%SCRIPT_DIR%dmd_gif_converter_ui.py"
 set "REQ=%SCRIPT_DIR%requirements_ui.txt"
 set "REQ_HASH_FILE=%VENV%\.requirements_hash"
 
-:: ── Helper: compute MD5 of requirements_ui.txt via CertUtil ──────────────────
+:: ── Jump to main logic — subroutines are defined below :main ─────────────────
+goto :main
+
+:: =============================================================================
+::  S U B R O U T I N E S
+::  (only reached via  call :name — never executed during normal flow)
+:: =============================================================================
+
+:: ── Compute MD5 of requirements_ui.txt via CertUtil ──────────────────────────
 :compute_hash
+    set "_hash="
     for /f "skip=1 tokens=* delims=" %%H in ('certutil -hashfile "%REQ%" MD5 2^>nul') do (
         if "!_hash!"=="" set "_hash=%%H"
     )
+    :: Strip spaces that certutil sometimes adds
+    set "_hash=!_hash: =!"
     goto :eof
 
 :: ── Install / upgrade dependencies ───────────────────────────────────────────
@@ -31,17 +42,23 @@ set "REQ_HASH_FILE=%VENV%\.requirements_hash"
     "%VENV%\Scripts\pip" install --quiet --upgrade pip
     "%VENV%\Scripts\pip" install --quiet -r "%REQ%"
     if errorlevel 1 (
-        echo ERROR: pip install failed.
+        echo.
+        echo ERROR: pip install failed. Check your internet connection and try again.
         pause
         exit /b 1
     )
-    :: Save current hash
+    :: Save current hash so we skip next time
     set "_hash="
     call :compute_hash
     echo !_hash!> "%REQ_HASH_FILE%"
     echo =^> Dependencies up to date.
     echo.
     goto :eof
+
+:: =============================================================================
+::  M A I N
+:: =============================================================================
+:main
 
 :: ── Check / create venv ──────────────────────────────────────────────────────
 if not exist "%VENV%\Scripts\python.exe" (
@@ -74,6 +91,7 @@ if not exist "%VENV%\Scripts\python.exe" (
     !PYTHON! -m venv "%VENV%"
     if errorlevel 1 (
         echo ERROR: Could not create virtual environment.
+        echo   Try:  !PYTHON! -m pip install --upgrade pip
         pause
         exit /b 1
     )
@@ -83,11 +101,13 @@ if not exist "%VENV%\Scripts\python.exe" (
     echo =^> Environment ready.
     echo.
 ) else (
-    :: Venv exists — check if requirements_ui.txt changed
+    :: Venv exists — check if requirements_ui.txt changed since last install
     set "_hash="
     call :compute_hash
     set "CURRENT_HASH=!_hash!"
-    set /p SAVED_HASH=<"%REQ_HASH_FILE%" 2>nul || set "SAVED_HASH="
+
+    set "SAVED_HASH="
+    if exist "%REQ_HASH_FILE%" set /p SAVED_HASH=<"%REQ_HASH_FILE%"
 
     if not "!CURRENT_HASH!"=="!SAVED_HASH!" (
         echo =^> requirements_ui.txt changed — updating dependencies...
@@ -96,6 +116,7 @@ if not exist "%VENV%\Scripts\python.exe" (
 )
 
 :: ── Launch the UI ─────────────────────────────────────────────────────────────
+echo =^> Starting DMD GIF Converter...
 "%VENV%\Scripts\python.exe" "%UI%"
 
 if errorlevel 1 (
