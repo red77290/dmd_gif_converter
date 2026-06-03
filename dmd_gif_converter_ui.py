@@ -1274,7 +1274,8 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
         ).pack(fill="x", padx=10, pady=(10, 4), anchor="w")
 
-        tiling_preset_row = ctk.CTkFrame(parent, fg_color="transparent")
+        self._tiling_preset_row = ctk.CTkFrame(parent, fg_color="transparent")
+        tiling_preset_row = self._tiling_preset_row
         tiling_preset_row.pack(fill="x", padx=10, pady=2)
         tiling_preset_row.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(tiling_preset_row, text="Dimensions Preset", width=145, anchor="w",
@@ -1530,7 +1531,10 @@ class DMDConverterApp(ctk.CTk):
 
     def _on_target_preset_change(self, preset):
         if preset == "Custom":
-            self._custom_tiling_frame.pack(fill="x", padx=10, pady=2)
+            # Insert right after the preset dropdown row, not at the end
+            self._custom_tiling_frame.pack(
+                fill="x", padx=10, pady=2, after=self._tiling_preset_row
+            )
         else:
             width, height = map(int, preset.split(" ")[0].split("x"))
             self.v_target_width.set(width)
