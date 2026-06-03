@@ -141,14 +141,16 @@ class DMDConverterApp(ctk.CTk):
         self._source_duration       = 0.0
 
         # Source preview state
-        self._src_frames: list  = []
+        self._src_pil_frames: list = []  # raw PIL Images (thread-safe storage)
+        self._src_frames: list  = []     # cached ImageTk.PhotoImage (lazy, main thread only)
         self._src_delays: list  = []
         self._src_idx           = 0
         self._src_job           = None
         self._src_tmpdir        = None
 
         # DMD preview state (independent animation loop)
-        self._dmd_frames: list  = []
+        self._dmd_pil_frames: list = []   # raw PIL Images (thread-safe storage)
+        self._dmd_frames: list  = []      # cached ImageTk.PhotoImage (lazy, main thread only)
         self._dmd_delays: list  = []
         self._dmd_idx           = 0
         self._dmd_job           = None
@@ -156,7 +158,8 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_rendering     = False
 
         # Auto-action preview state (intermediate pre-ffmpeg stage)
-        self._auto_frames: list = []
+        self._auto_pil_frames: list = []  # raw PIL Images (thread-safe storage)
+        self._auto_frames: list = []      # cached ImageTk.PhotoImage (lazy, main thread only)
         self._auto_delays: list = []
         self._auto_idx          = 0
         self._auto_job          = None
@@ -165,6 +168,10 @@ class DMDConverterApp(ctk.CTk):
 
         # Auto-refresh debounce job
         self._adv_refresh_job   = None
+
+        # Pending preview requests (queued while a render is in-flight)
+        self._dmd_pending_src  = None   # src to render after current DMD render finishes
+        self._auto_pending_src = None   # src to render after current Auto render finishes
 
         # Advanced panel expansion state
         self._adv_expanded      = False
@@ -1400,6 +1407,7 @@ class DMDConverterApp(ctk.CTk):
         if self._src_job:
             self.after_cancel(self._src_job)
             self._src_job = None
+        self._src_pil_frames.clear()
         self._src_frames.clear()
         self._src_delays.clear()
         self._src_idx = 0
@@ -1411,6 +1419,7 @@ class DMDConverterApp(ctk.CTk):
         if self._auto_job:
             self.after_cancel(self._auto_job)
             self._auto_job = None
+        self._auto_pil_frames.clear()
         self._auto_frames.clear()
         self._auto_delays.clear()
         self._auto_idx = 0
@@ -1462,19 +1471,19 @@ class DMDConverterApp(ctk.CTk):
         ]
         subprocess.run(cmd, capture_output=True)
         paths = sorted(glob.glob(os.path.join(tmpdir, "f*.png")))
-        frames, delays = [], []
+        # Decode as plain PIL Images — PhotoImage must be created on the main thread
+        pil_frames, delays = [], []
         delay_ms = int(1000 / fps_prev)
         for fp in paths:
             try:
-                img = Image.open(fp).convert("RGB")
-                frames.append(ImageTk.PhotoImage(img))
+                pil_frames.append(Image.open(fp).convert("RGB").copy())
                 delays.append(delay_ms)
             except Exception:
                 pass
-        self.after(0, lambda: self._on_source_frames_ready(frames, delays, tmpdir, file_path))
+        self.after(0, lambda: self._on_source_frames_ready(pil_frames, delays, tmpdir, file_path))
 
-    def _on_source_frames_ready(self, frames, delays, tmpdir, file_path):
-        if not frames:
+    def _on_source_frames_ready(self, pil_frames, delays, tmpdir, file_path):
+        if not pil_frames:
             self._src_canvas.delete("all")
             self._src_canvas.create_text(
                 SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
@@ -1484,19 +1493,23 @@ class DMDConverterApp(ctk.CTk):
             shutil.rmtree(tmpdir, ignore_errors=True)
             return
         self._src_tmpdir = tmpdir
-        self._src_frames = frames
+        self._src_pil_frames = pil_frames
+        self._src_frames = [None] * len(pil_frames)   # lazy PhotoImage cache
         self._src_delays = delays
         self._src_idx    = 0
         name = Path(file_path).name
         self._src_info.configure(
-            text=f"{name}   ·   {len(frames)} frames   ·   {self._source_duration:.1f} s"
+            text=f"{name}   ·   {len(pil_frames)} frames   ·   {self._source_duration:.1f} s"
         )
         self._animate_src()
 
     def _animate_src(self):
-        if not self._src_frames:
+        if not self._src_pil_frames:
             return
-        idx = self._src_idx % len(self._src_frames)
+        idx = self._src_idx % len(self._src_pil_frames)
+        # Lazy PhotoImage creation — one frame at a time on the main thread
+        if self._src_frames[idx] is None:
+            self._src_frames[idx] = ImageTk.PhotoImage(self._src_pil_frames[idx])
         self._src_canvas.delete("all")
         self._src_canvas.create_image(0, 0, anchor="nw", image=self._src_frames[idx])
         self._src_idx = idx + 1
@@ -1533,6 +1546,8 @@ class DMDConverterApp(ctk.CTk):
 
     def _start_auto_generation(self, src):
         if self._auto_rendering:
+            # Queue the latest request — will start once the current render finishes
+            self._auto_pending_src = src
             return
         if not self.v_auto_action_enabled.get():
             self._stop_auto_preview()
@@ -1544,6 +1559,7 @@ class DMDConverterApp(ctk.CTk):
             self._auto_info.configure(text="Auto action unavailable (module missing)")
             return
 
+        self._auto_pending_src = None
         self._auto_rendering = True
         self._stop_auto_preview()
         self._auto_canvas.delete("all")
@@ -1565,8 +1581,8 @@ class DMDConverterApp(ctk.CTk):
             bg_sub_enable=self.v_bg_sub_enable.get(),
             start_s=start_s,
             end_s=end_s,
-            target_width=self.v_target_width.get(), # Pass target dimensions
-            target_height=self.v_target_height.get(), # Pass target dimensions
+            target_width=self.v_target_width.get(),
+            target_height=self.v_target_height.get(),
         )
         threading.Thread(
             target=self._generate_auto_preview,
@@ -1574,53 +1590,63 @@ class DMDConverterApp(ctk.CTk):
         ).start()
 
     def _generate_auto_preview(self, src, cfg):
-        ok, out_mp4, msg = preprocess_video_for_dmd(src, cfg)
-        if not ok or not out_mp4:
-            self.after(0, lambda: self._on_auto_fail(msg))
-            return
+        """Run in a background thread. Returns PIL images (NOT PhotoImage) to the main thread."""
+        try:
+            ok, out_mp4, msg = preprocess_video_for_dmd(src, cfg)
+            if not ok or not out_mp4:
+                self.after(0, lambda: self._on_auto_fail(msg))
+                return
 
-        tmpdir = os.path.dirname(out_mp4)
-        fps_prev = 12.5
-        cmd = [
-            "ffmpeg", "-y", "-i", out_mp4,
-            "-vf", (
-                f"fps={fps_prev},"
-                f"scale={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:"
-                f"force_original_aspect_ratio=decrease,"
-                f"pad={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:(ow-iw)/2:(oh-ih)/2"
-                f":color={BG_CANVAS[1:]}"
-            ),
-            "-f", "image2", os.path.join(tmpdir, "a%04d.png"),
-        ]
-        subprocess.run(cmd, capture_output=True)
+            tmpdir = os.path.dirname(out_mp4)
+            fps_prev = 12.5
+            cmd = [
+                "ffmpeg", "-y", "-i", out_mp4,
+                "-vf", (
+                    f"fps={fps_prev},"
+                    f"scale={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:"
+                    f"force_original_aspect_ratio=decrease,"
+                    f"pad={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:(ow-iw)/2:(oh-ih)/2"
+                    f":color={BG_CANVAS[1:]}"
+                ),
+                "-f", "image2", os.path.join(tmpdir, "a%04d.png"),
+            ]
+            subprocess.run(cmd, capture_output=True)
 
-        paths = sorted(glob.glob(os.path.join(tmpdir, "a*.png")))
-        frames, delays = [], []
-        delay_ms = int(1000 / fps_prev)
-        for fp in paths:
-            try:
-                img = Image.open(fp).convert("RGB")
-                frames.append(ImageTk.PhotoImage(img))
-                delays.append(delay_ms)
-            except Exception:
-                pass
+            paths = sorted(glob.glob(os.path.join(tmpdir, "a*.png")))
+            # Decode as plain PIL Images — PhotoImage must be created on the main thread
+            pil_frames, delays = [], []
+            delay_ms = int(1000 / fps_prev)
+            for fp in paths:
+                try:
+                    pil_frames.append(Image.open(fp).convert("RGB").copy())
+                    delays.append(delay_ms)
+                except Exception:
+                    pass
 
-        self.after(0, lambda: self._on_auto_ready(frames, delays, tmpdir, msg))
+            self.after(0, lambda: self._on_auto_ready(pil_frames, delays, tmpdir, msg))
 
-    def _on_auto_ready(self, frames, delays, tmpdir, msg):
+        except Exception as exc:
+            # Safety net: always unblock the rendering flag even on unexpected errors
+            self.after(0, lambda: self._on_auto_fail(f"Unexpected error: {exc}"))
+
+    def _on_auto_ready(self, pil_frames, delays, tmpdir, msg):
         self._auto_rendering = False
         self._btn_auto.configure(state="normal", text="🎯 Auto")
-        if not frames:
+        if not pil_frames:
             self._on_auto_fail("No frames produced for auto-action preview")
             shutil.rmtree(tmpdir, ignore_errors=True)
             return
         self._stop_auto_preview()
         self._auto_tmpdir = tmpdir
-        self._auto_frames = frames
+        # Store PIL Images; PhotoImages are created lazily in _animate_auto (main thread, one per tick)
+        self._auto_pil_frames = pil_frames
+        self._auto_frames = [None] * len(pil_frames)
         self._auto_delays = delays
         self._auto_idx = 0
-        self._auto_info.configure(text=f"{msg}  ·  {len(frames)} frames")
+        self._auto_info.configure(text=f"{msg}  ·  {len(pil_frames)} frames")
         self._animate_auto()
+        # Start the pending render (if any new settings changed while we were busy)
+        self._flush_auto_pending()
 
     def _on_auto_fail(self, msg):
         self._auto_rendering = False
@@ -1635,11 +1661,23 @@ class DMDConverterApp(ctk.CTk):
             text="❌  Auto-action failed", fill="#e74c3c", font=("Helvetica", 11)
         )
         self._auto_info.configure(text=msg)
+        # Start the pending render (if any new settings changed while we were busy)
+        self._flush_auto_pending()
+
+    def _flush_auto_pending(self):
+        """If an Auto render was requested while we were busy, start it now."""
+        pending = self._auto_pending_src
+        self._auto_pending_src = None
+        if pending and self._selected_iid:
+            self.after(50, lambda: self._start_auto_generation(pending))
 
     def _animate_auto(self):
-        if not self._auto_frames:
+        if not self._auto_pil_frames:
             return
-        idx = self._auto_idx % len(self._auto_frames)
+        idx = self._auto_idx % len(self._auto_pil_frames)
+        # Lazy PhotoImage creation — one frame at a time on the main thread
+        if self._auto_frames[idx] is None:
+            self._auto_frames[idx] = ImageTk.PhotoImage(self._auto_pil_frames[idx])
         self._auto_canvas.delete("all")
         self._auto_canvas.create_image(0, 0, anchor="nw", image=self._auto_frames[idx])
         self._auto_idx = idx + 1
@@ -1654,6 +1692,7 @@ class DMDConverterApp(ctk.CTk):
         if self._dmd_job:
             self.after_cancel(self._dmd_job)
             self._dmd_job = None
+        self._dmd_pil_frames.clear()
         self._dmd_frames.clear()
         self._dmd_delays.clear()
         self._dmd_idx = 0
@@ -1672,7 +1711,10 @@ class DMDConverterApp(ctk.CTk):
 
     def _start_dmd_generation(self, src):
         if self._dmd_rendering:
+            # Queue the latest request — will start once the current render finishes
+            self._dmd_pending_src = src
             return
+        self._dmd_pending_src = None
         self._dmd_rendering = True
         self._stop_dmd_preview()
         self._dmd_canvas.delete("all")
@@ -1687,53 +1729,70 @@ class DMDConverterApp(ctk.CTk):
         self._btn_dmd.configure(state="disabled", text="⏳ DMD…")
         params  = self._collect_params()
         start_s, end_s = self._get_trim()
+        # Capture display dimensions on the main thread (Tkinter is not thread-safe)
+        dmd_display_w = current_dmd_width
+        dmd_display_h = current_dmd_height
         threading.Thread(
             target=self._generate_dmd_preview,
-            args=(src, params, start_s, end_s), daemon=True
+            args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h), daemon=True
         ).start()
 
-    def _generate_dmd_preview(self, src, params, start_s, end_s):
+    def _generate_dmd_preview(self, src, params, start_s, end_s, dmd_display_w, dmd_display_h):
+        """Run in a background thread. Returns PIL images (NOT PhotoImage) to the main thread."""
         tmpdir  = tempfile.mkdtemp(prefix="dmd_dmd_")
-        out_gif = os.path.join(tmpdir, "preview.gif")
-        success, msg = process_file(src, out_gif, params, start_s, end_s)
-
-        if not success or not os.path.isfile(out_gif):
-            self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
-            return
-
-        frames, delays = [], []
         try:
-            img = Image.open(out_gif)
-            while True:
-                frame = img.copy().convert("RGB").resize(
-                    (int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR),
-                     int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)),
-                    Image.NEAREST
-                )
-                frames.append(ImageTk.PhotoImage(frame))
-                delays.append(max(img.info.get("duration", 80), 20))
-                img.seek(img.tell() + 1)
-        except EOFError:
-            pass
+            out_gif = os.path.join(tmpdir, "preview.gif")
+            success, msg = process_file(src, out_gif, params, start_s, end_s)
+
+            if not success or not os.path.isfile(out_gif):
+                self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
+                return
+
+            # Decode frames as plain PIL Images — PhotoImage must be created on the main thread
+            pil_frames, delays = [], []
+            try:
+                img = Image.open(out_gif)
+                while True:
+                    pil_frames.append(
+                        img.copy().convert("RGB").resize(
+                            (dmd_display_w, dmd_display_h), Image.NEAREST
+                        )
+                    )
+                    delays.append(max(img.info.get("duration", 80), 20))
+                    img.seek(img.tell() + 1)
+            except EOFError:
+                pass
+            except Exception as exc:
+                self.after(0, lambda: self._on_dmd_fail(str(exc), tmpdir))
+                return
+
+            if not pil_frames:
+                self.after(0, lambda: self._on_dmd_fail("No frames decoded from GIF", tmpdir))
+                return
+
+            self.after(0, lambda: self._on_dmd_ready(pil_frames, delays, tmpdir, out_gif))
+
         except Exception as exc:
-            self.after(0, lambda: self._on_dmd_fail(str(exc), tmpdir))
-            return
+            # Safety net: always unblock the rendering flag even on unexpected errors
+            self.after(0, lambda: self._on_dmd_fail(f"Unexpected error: {exc}", tmpdir))
 
-        self.after(0, lambda: self._on_dmd_ready(frames, delays, tmpdir, out_gif))
-
-    def _on_dmd_ready(self, frames, delays, tmpdir, out_gif):
+    def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif):
         self._dmd_rendering = False
         self._btn_dmd.configure(state="normal", text="🔬 DMD")
         self._stop_dmd_preview()
         self._dmd_tmpdir = tmpdir
-        self._dmd_frames = frames
+        # Store PIL Images; PhotoImages are created lazily in _animate_dmd (main thread, one per tick)
+        self._dmd_pil_frames = pil_frames
+        self._dmd_frames = [None] * len(pil_frames)
         self._dmd_delays = delays
         self._dmd_idx    = 0
         size_kb = os.path.getsize(out_gif) // 1024
         self._dmd_info.configure(
-            text=f"✅  {self.v_target_width.get()}×{self.v_target_height.get()}  ·  {len(frames)} frames  ·  {size_kb} KB"
+            text=f"✅  {self.v_target_width.get()}×{self.v_target_height.get()}  ·  {len(pil_frames)} frames  ·  {size_kb} KB"
         )
         self._animate_dmd()
+        # Start the pending render (if any new settings changed while we were busy)
+        self._flush_dmd_pending()
 
     def _on_dmd_fail(self, msg, tmpdir):
         self._dmd_rendering = False
@@ -1748,18 +1807,25 @@ class DMDConverterApp(ctk.CTk):
             text="❌  DMD render failed", fill="#e74c3c", font=("Helvetica", 11)
         )
         self._log(f"❌  DMD preview: {msg}", "error")
+        # Start the pending render (if any new settings changed while we were busy)
+        self._flush_dmd_pending()
+
+    def _flush_dmd_pending(self):
+        """If a DMD render was requested while we were busy, start it now."""
+        pending = self._dmd_pending_src
+        self._dmd_pending_src = None
+        if pending and self._selected_iid:
+            self.after(50, lambda: self._start_dmd_generation(pending))
 
     def _animate_dmd(self):
-        if not self._dmd_frames:
+        if not self._dmd_pil_frames:
             return
-        idx = self._dmd_idx % len(self._dmd_frames)
+        idx = self._dmd_idx % len(self._dmd_pil_frames)
+        # Lazy PhotoImage creation — one frame at a time on the main thread
+        if self._dmd_frames[idx] is None:
+            self._dmd_frames[idx] = ImageTk.PhotoImage(self._dmd_pil_frames[idx])
         self._dmd_canvas.delete("all")
-        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
-        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
-        x_off = (current_dmd_width - current_dmd_width) // 2 # Always 0
-        y_off = (current_dmd_height - current_dmd_height) // 2 # Always 0
-        self._dmd_canvas.create_image(x_off, y_off, anchor="nw",
-                                      image=self._dmd_frames[idx])
+        self._dmd_canvas.create_image(0, 0, anchor="nw", image=self._dmd_frames[idx])
         self._dmd_idx = idx + 1
         delay = self._dmd_delays[idx] if self._dmd_delays else 80
         self._dmd_job = self.after(delay, self._animate_dmd)
