@@ -656,10 +656,16 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
     # ── FFmpeg command ────────────────────────────────────────────────────────
+    # When auto_action is enabled the preprocessed MP4 already has the exact
+    # right duration (intro + tracking + short tail).  Playing it once
+    # (-stream_loop 0) avoids ffmpeg padding the last frame to fill duration_out.
+    # For all other modes we keep -stream_loop -1 so the scroll filter can run
+    # longer than the source clip.
+    stream_loop = "0" if auto_action_enabled else "-1"
     cmd = ["ffmpeg", "-y"]
     if trim_start > 0:
         cmd += ["-ss", str(trim_start)]
-    cmd += ["-stream_loop", "-1", "-t", duration_out, "-i", src_path]
+    cmd += ["-stream_loop", stream_loop, "-t", duration_out, "-i", src_path]
     cmd += [
         "-filter_complex", filter_graph,
         "-gifflags", "-offsetting-transdiff",
