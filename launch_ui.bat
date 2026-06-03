@@ -5,6 +5,7 @@
 ::
 :: First run : creates a Python venv and installs all dependencies.
 :: Next runs  : activates the venv and starts the UI directly.
+::              If requirements_ui.txt changed since last install, re-runs pip.
 ::
 :: Usage:
 ::   Double-click this file, or run it from cmd / PowerShell.
@@ -14,6 +15,33 @@ setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 set "VENV=%SCRIPT_DIR%.venv"
 set "UI=%SCRIPT_DIR%dmd_gif_converter_ui.py"
+set "REQ=%SCRIPT_DIR%requirements_ui.txt"
+set "REQ_HASH_FILE=%VENV%\.requirements_hash"
+
+:: ── Helper: compute MD5 of requirements_ui.txt via CertUtil ──────────────────
+:compute_hash
+    for /f "skip=1 tokens=* delims=" %%H in ('certutil -hashfile "%REQ%" MD5 2^>nul') do (
+        if "!_hash!"=="" set "_hash=%%H"
+    )
+    goto :eof
+
+:: ── Install / upgrade dependencies ───────────────────────────────────────────
+:install_deps
+    echo =^> Installing / updating dependencies...
+    "%VENV%\Scripts\pip" install --quiet --upgrade pip
+    "%VENV%\Scripts\pip" install --quiet -r "%REQ%"
+    if errorlevel 1 (
+        echo ERROR: pip install failed.
+        pause
+        exit /b 1
+    )
+    :: Save current hash
+    set "_hash="
+    call :compute_hash
+    echo !_hash!> "%REQ_HASH_FILE%"
+    echo =^> Dependencies up to date.
+    echo.
+    goto :eof
 
 :: ── Check / create venv ──────────────────────────────────────────────────────
 if not exist "%VENV%\Scripts\python.exe" (
@@ -21,8 +49,6 @@ if not exist "%VENV%\Scripts\python.exe" (
     echo.
 
     :: Find Python 3.10+
-    :: Note: we avoid "where" which may be missing on some Windows 10 installs.
-    ::       Instead we try to run each candidate directly and check errorlevel.
     set "PYTHON="
     for %%C in (python3.13 python3.12 python3.11 python3.10 python3 python py) do (
         if "!PYTHON!"=="" (
@@ -52,17 +78,21 @@ if not exist "%VENV%\Scripts\python.exe" (
         exit /b 1
     )
 
-    echo =^> Installing dependencies...
-    "%VENV%\Scripts\pip" install --quiet --upgrade pip
-    "%VENV%\Scripts\pip" install --quiet -r "%SCRIPT_DIR%requirements_ui.txt"
-    if errorlevel 1 (
-        echo ERROR: pip install failed.
-        pause
-        exit /b 1
-    )
+    call :install_deps
 
     echo =^> Environment ready.
     echo.
+) else (
+    :: Venv exists — check if requirements_ui.txt changed
+    set "_hash="
+    call :compute_hash
+    set "CURRENT_HASH=!_hash!"
+    set /p SAVED_HASH=<"%REQ_HASH_FILE%" 2>nul || set "SAVED_HASH="
+
+    if not "!CURRENT_HASH!"=="!SAVED_HASH!" (
+        echo =^> requirements_ui.txt changed — updating dependencies...
+        call :install_deps
+    )
 )
 
 :: ── Launch the UI ─────────────────────────────────────────────────────────────
@@ -73,4 +103,3 @@ if errorlevel 1 (
     echo ERROR: The application exited with an error. See output above.
     pause
 )
-

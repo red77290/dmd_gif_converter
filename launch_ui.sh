@@ -5,6 +5,7 @@
 #
 # First run : creates a Python venv and installs all dependencies.
 # Next runs  : activates the venv and starts the UI directly.
+#              If requirements_ui.txt changed since last install, re-runs pip.
 #
 # Usage:
 #   ./launch_ui.sh
@@ -14,6 +15,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv"
 UI="$SCRIPT_DIR/dmd_gif_converter_ui.py"
+REQ="$SCRIPT_DIR/requirements_ui.txt"
+REQ_HASH_FILE="$VENV/.requirements_hash"
 
 # ── Locate a suitable Python (3.10+) ─────────────────────────────────────────
 is_safe_python() {
@@ -61,6 +64,34 @@ find_python() {
     return 1
 }
 
+# ── Compute a checksum of requirements_ui.txt (portable: md5 or sha256) ──────
+req_checksum() {
+    if command -v md5sum >/dev/null 2>&1; then
+        md5sum "$REQ" | awk '{print $1}'
+    elif command -v md5 >/dev/null 2>&1; then
+        md5 -q "$REQ"
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$REQ" | awk '{print $1}'
+    else
+        # Fallback: use file modification time
+        stat -c '%Y' "$REQ" 2>/dev/null || stat -f '%m' "$REQ" 2>/dev/null || echo "unknown"
+    fi
+}
+
+# ── Install / upgrade dependencies if needed ─────────────────────────────────
+install_deps() {
+    echo "==> Installing / updating dependencies…"
+    "$VENV/bin/pip" install --quiet --upgrade pip
+    "$VENV/bin/pip" install --quiet -r "$REQ" || {
+        echo "ERROR: pip install failed."
+        exit 1
+    }
+    # Save current checksum so we skip this next time
+    req_checksum > "$REQ_HASH_FILE"
+    echo "==> Dependencies up to date."
+    echo ""
+}
+
 # ── Check / create venv ───────────────────────────────────────────────────────
 if [ -f "$VENV/bin/python3" ] && ! is_safe_python "$VENV/bin/python3"; then
     echo "==> Existing .venv uses an incompatible Python/Tk runtime. Recreating…"
@@ -89,15 +120,19 @@ if [ ! -f "$VENV/bin/python3" ]; then
         exit 1
     }
 
-    echo "==> Installing dependencies…"
-    "$VENV/bin/pip" install --quiet --upgrade pip
-    "$VENV/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements_ui.txt" || {
-        echo "ERROR: pip install failed."
-        exit 1
-    }
+    install_deps
 
     echo "==> Environment ready."
     echo ""
+else
+    # Venv already exists — check if requirements_ui.txt changed since last install
+    CURRENT_HASH="$(req_checksum)"
+    SAVED_HASH="$(cat "$REQ_HASH_FILE" 2>/dev/null || echo "")"
+
+    if [ "$CURRENT_HASH" != "$SAVED_HASH" ]; then
+        echo "==> requirements_ui.txt changed — updating dependencies…"
+        install_deps
+    fi
 fi
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
