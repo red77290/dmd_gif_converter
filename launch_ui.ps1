@@ -14,7 +14,8 @@
 #   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 # =============================================================================
 
-$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+# $PSScriptRoot is always the directory of the running script (PowerShell 3+)
+$ScriptDir    = $PSScriptRoot
 $Venv         = Join-Path $ScriptDir ".venv"
 $UI           = Join-Path $ScriptDir "dmd_gif_converter_ui.py"
 $Req          = Join-Path $ScriptDir "requirements_ui.txt"
@@ -37,7 +38,8 @@ function Install-Deps {
     & $VenvPip install --quiet --upgrade pip
     & $VenvPip install --quiet -r $Req
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: pip install failed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "ERROR: pip install failed. Check your internet connection and try again." -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
@@ -89,17 +91,24 @@ if (-not (Test-Path $VenvPy)) {
     Write-Host "==> Environment ready." -ForegroundColor Green
     Write-Host ""
 } else {
-    # Venv exists — check if requirements_ui.txt changed since last install
-    $currentHash = Get-ReqHash
-    $savedHash   = if (Test-Path $ReqHashFile) { (Get-Content $ReqHashFile -Raw).Trim() } else { "" }
-
-    if ($currentHash -ne $savedHash) {
-        Write-Host "==> requirements_ui.txt changed — updating dependencies..." -ForegroundColor Cyan
+    # Venv exists — also check pip is present (guards against corrupted venvs)
+    if (-not (Test-Path $VenvPip)) {
+        Write-Host "==> Venv seems corrupted (pip missing) — reinstalling dependencies..." -ForegroundColor Yellow
         Install-Deps
+    } else {
+        # Check if requirements_ui.txt changed since last install
+        $currentHash = Get-ReqHash
+        $savedHash   = if (Test-Path $ReqHashFile) { (Get-Content $ReqHashFile -Raw).Trim() } else { "" }
+
+        if ($currentHash -ne $savedHash) {
+            Write-Host "==> requirements_ui.txt changed — updating dependencies..." -ForegroundColor Cyan
+            Install-Deps
+        }
     }
 }
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
+Write-Host "==> Starting DMD GIF Converter..." -ForegroundColor Green
 & $VenvPy $UI
 
 if ($LASTEXITCODE -ne 0) {
