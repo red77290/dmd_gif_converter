@@ -202,6 +202,7 @@ DEFAULT_PARAMS = {
     # Scroll
     "scroll_speed": 24.0,        # pixels per second
     "bottom_crop_pct": 0.15,     # fraction of image bottom to ignore
+    "top_crop_pct": 0.0,         # fraction of image top to ignore
     #
     # scroll_cycles: number of round-trips + fractional stop position.
     #   integer part  = number of complete down→up cycles
@@ -470,8 +471,13 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     if scroll_enabled:
         # ── Auto-scroll (default behaviour, unchanged) ────────────────────────
+        # Top crop: ignore the top fraction of the scaled image (e.g. title bars).
+        # top_offset is always an even number (ffmpeg requires even crop coordinates).
+        top_crop_pct = float(p.get("top_crop_pct", 0.0))
+        top_offset   = math.floor(scaled_h * top_crop_pct / 2) * 2
+
         effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
-        effective_h = max(effective_h, target_height)
+        effective_h = max(effective_h - top_offset, target_height)
         scroll_dist = effective_h - target_height
         # Horizontal: centered when zoomed (= "0" for default zoom=1.0)
         crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
@@ -496,7 +502,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             frames_total = max(frames_move + 1, frames_src)
             duration_out = str(frames_total / fps_render)
 
-            # ── FFmpeg crop_y expression ──────────────────────────────────────
+            # ── FFmpeg crop_y expression (relative to start of usable area) ───
             if full_cyc > 0:
                 n_seq   = f"mod(n,{frames_full_cycle})"
                 cycle_y = (
@@ -525,18 +531,23 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
                 else:
                     crop_y = "0"
 
+            # Apply top offset: shift the whole scroll window down by top_offset px
+            if top_offset > 0:
+                crop_y = f"({top_offset}+{crop_y})" if crop_y != "0" else str(top_offset)
+
             log(
                 f"[SCROLL ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} "
-                f"| scroll_dist={scroll_dist}px | cycles={cycles} "
+                f"| scroll_dist={scroll_dist}px | top_off={top_offset}px | cycles={cycles} "
                 f"(full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
                 f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
             )
         else:
             duration_out = str(max(duration_src, 1.0))
-            crop_y       = "(in_h-out_h)/2"
+            # Center within the usable (non-cropped) area
+            crop_y = str(top_offset) if top_offset > 0 else "(in_h-out_h)/2"
             log(
                 f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} (centered) "
-                f"| fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
+                f"| top_off={top_offset}px | fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
             )
     else:
         # ── Manual positioning mode ───────────────────────────────────────────
@@ -852,6 +863,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Fraction of image bottom to ignore, 0–0.5 "
              f"(default: {DEFAULT_PARAMS['bottom_crop_pct']}).",
     )
+    p.add_argument(
+        "--top-crop", type=float,
+        default=DEFAULT_PARAMS["top_crop_pct"], metavar="F",
+        help=f"Fraction of image top to ignore, 0–0.5 "
+             f"(default: {DEFAULT_PARAMS['top_crop_pct']}). "
+             "Useful to skip title bars or top watermarks.",
+    )
 
     # ── FPS ───────────────────────────────────────────────────────────────────
     p.add_argument(
@@ -973,6 +991,7 @@ if __name__ == "__main__":
         "scroll_speed":   args.scroll_speed,
         "scroll_cycles":  args.scroll_cycles,
         "bottom_crop_pct": args.bottom_crop,
+        "top_crop_pct":   args.top_crop,
         "fps_min":        args.fps_min,
         "fps_max":        args.fps_max,
         "contrast":       args.contrast,
