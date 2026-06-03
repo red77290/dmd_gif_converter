@@ -700,8 +700,16 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     return True, f"[OK] {filename}"
 
 
-def process_folder(folder_in, folder_out, params=None, callback=None):
+def process_folder(folder_in, folder_out, params=None, callback=None, progress_callback=None):
     """Batch-convert all supported video files in a folder to DMD GIFs.
+
+    Args:
+        folder_in:          Source folder path.
+        folder_out:         Output folder path (created if absent).
+        params:             Conversion parameters dict (merged with DEFAULT_PARAMS).
+        callback:           Optional callable(message, level) for per-file log lines.
+        progress_callback:  Optional callable(done: int, total: int) called after
+                            each file completes — useful for progress bars.
 
     When auto_action is enabled the pipeline is split into two parallelised
     phases to avoid CPU over-subscription:
@@ -732,10 +740,23 @@ def process_folder(folder_in, folder_out, params=None, callback=None):
 
     # ── Single-phase path (auto_action disabled — unchanged behaviour) ─────────
     if not auto_enabled:
+        total = len(files)
+        done_count = [0]
+        done_lock  = __import__("threading").Lock()
+
         def _one(filename):
             src = os.path.join(str(folder_in), filename)
             out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
-            return process_file(src, out, params=p, callback=callback)
+            result = process_file(src, out, params=p, callback=callback)
+            with done_lock:
+                done_count[0] += 1
+                current = done_count[0]
+            if progress_callback:
+                try:
+                    progress_callback(current, total)
+                except Exception:
+                    pass
+            return result
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
             return list(ex.map(_one, files))
@@ -792,6 +813,10 @@ def process_folder(folder_in, folder_out, params=None, callback=None):
 
     log(f"[BATCH  ] Phase 2/2 — ffmpeg conversion ({len(files)} files, {max_workers} workers)")
 
+    total_2     = len(files)
+    done_count2 = [0]
+    done_lock2  = __import__("threading").Lock()
+
     def _convert(item):
         filename, pre_src, tmpdir = item
         out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
@@ -799,6 +824,14 @@ def process_folder(folder_in, folder_out, params=None, callback=None):
         if tmpdir and os.path.isdir(tmpdir):
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
+        with done_lock2:
+            done_count2[0] += 1
+            current = done_count2[0]
+        if progress_callback:
+            try:
+                progress_callback(current, total_2)
+            except Exception:
+                pass
         return success, msg
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:

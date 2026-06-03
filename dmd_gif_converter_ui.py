@@ -2199,9 +2199,16 @@ class DMDConverterApp(ctk.CTk):
 
     def _run_batch_folder(self, folder_in, folder_out, params):
         self.after(0, lambda: self._set_busy(True))
+        self.after(0, lambda: self._progress.set(0))
+
+        def on_progress(done, total):
+            frac = done / max(1, total)
+            self.after(0, lambda f=frac: self._progress.set(f))
+
         process_folder(
             folder_in, folder_out, params,
-            callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv))
+            callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
+            progress_callback=on_progress,
         )
         self.after(0, lambda: self._log("✅  Batch folder done."))
         self.after(0, lambda: self._set_busy(False))
