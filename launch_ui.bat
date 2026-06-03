@@ -21,10 +21,13 @@ if not exist "%VENV%\Scripts\python.exe" (
     echo.
 
     :: Find Python 3.10+
+    :: Note: we avoid "where" which may be missing on some Windows 10 installs.
+    ::       Instead we try to run each candidate directly and check errorlevel.
     set "PYTHON="
     for %%C in (python3.13 python3.12 python3.11 python3.10 python3 python py) do (
         if "!PYTHON!"=="" (
-            where %%C >nul 2>&1 && set "PYTHON=%%C"
+            %%C --version >nul 2>&1
+            if not errorlevel 1 set "PYTHON=%%C"
         )
     )
 
