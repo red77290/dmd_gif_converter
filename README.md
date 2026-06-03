@@ -1,8 +1,50 @@
-# 🎞️ DMD GIF Converter — v2.4.0
+# 🎞️ DMD GIF Converter — v3.0.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
+
+---
+
+## 🔍 GIF Search — download GIFs directly from the UI  *(new in v3.0.0)*
+
+> **TL;DR — type a keyword, set a quantity, press ⬇ DL, and GIFs appear in the list ready to convert.**  
+> Located in the **📁 Source files** panel on the left, between the file buttons and the list.
+
+The GIF Search panel lets you search DuckDuckGo for animated GIFs and download them directly into a managed temporary folder. Each downloaded GIF is immediately added to the file list — no manual folder navigation needed.
+
+```
+Keyword + quantity  ──[DuckDuckGo image search]──▶  temp folder  ──▶  file list  ──▶  Convert
+```
+
+### Features
+
+| Feature | Details |
+|---|---|
+| **Keyword search** | Any text — supports `Enter` key to trigger search |
+| **Configurable quantity** | 1–50 GIFs per search (default: 10) |
+| **Real-time progress** | Main progress bar updates as each file is downloaded |
+| **Per-file feed** | Each downloaded GIF appears in the list immediately |
+| **Cancel button** | Appears during download — stops after current file |
+| **Error handling** | Timeouts, bad URLs and wrong MIME types are skipped with log entries |
+| **Temp folder management** | All downloaded GIFs go to a managed temp dir, cleaned up on exit |
+| **Graceful fallback** | If `duckduckgo-search` or `requests` are missing, the panel shows a warning and the button is disabled — no crash |
+
+### How to use
+
+1. In the **📁 Source files** panel → find the **🔍 GIF Search** section
+2. Type a keyword (e.g. `pac-man`, `pixel art fire`, `retro arcade`)
+3. Set the quantity (default: 10, max: 50)
+4. Press **⬇ DL** or hit Enter
+5. GIFs download one by one and appear in the file list
+6. Select any, adjust parameters, and convert!
+
+### Requirements
+
+```bash
+pip install duckduckgo-search requests
+# already included in requirements_ui.txt — auto-installed by ./launch_ui.sh
+```
 
 ---
 
@@ -177,6 +219,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | Feature | Details |
 |---|---|
 | **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
+| **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity, auto-populates the list |
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
@@ -379,7 +422,7 @@ pip install -r requirements_ui.txt
 
 Or directly:
 ```bash
-pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python
+pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python duckduckgo-search requests
 ```
 
 > `dmd_gif_converter.py` (CLI / engine) has **zero external dependencies** — standard library only.  
@@ -589,6 +632,10 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Text overlay not appearing | Make sure **Text Content** is not empty and the font file exists in `media/fonts/` |
 | `[ERROR] Font file '…' not found` | The selected font is missing from `media/fonts/` — choose a different font in the dropdown |
 | `[TEXT  ] … ffmpeg drawtext unavailable` | Normal on macOS Homebrew ffmpeg (compiled without `--enable-libfreetype`) — **Pillow fallback is used automatically**, no action required |
+| GIF Search button is disabled | Install missing deps: `pip install duckduckgo-search requests` (or re-run `./launch_ui.sh`) |
+| GIF Search returns 0 results | DuckDuckGo may throttle rapid searches — wait a few seconds and retry |
+| Downloaded GIFs are very large | Normal for web GIFs — the converter will resize them to 128×32 automatically |
+| GIF Search timeout errors | Some image hosts are slow — increase quantity to compensate for skipped URLs |
 
 ---
 

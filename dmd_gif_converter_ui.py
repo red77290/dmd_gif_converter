@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DMD GIF Converter — Graphical Interface  v2.4.0
+DMD GIF Converter — Graphical Interface  v3.0.0
 Cross-platform UI (macOS · Windows · Linux) to convert any video/GIF
 to 128×32 LED DMD format.
 
@@ -20,6 +20,13 @@ New in v2.4.0:
   • 🖼️ Multi-Dalle / Tiling — configurable output resolution presets
   • 🎨 Background subtraction warmup fix (no more black-flash artefacts)
   • Structured logging — no more print() in production code
+
+New in v3.0.0:
+  • 🔍 GIF Search — search & download GIFs from DuckDuckGo directly in the UI
+      – Keyword search bar + configurable quantity (1–50)
+      – Downloads to a managed temp folder, auto-populates the file list
+      – Real-time progress via the main progress bar + log
+      – Cancel button, per-file error handling, graceful fallback if deps missing
 
 Usage:
     python dmd_gif_converter_ui.py
@@ -88,6 +95,20 @@ try:
 except ImportError:
     _ui_analyze_color = None
 
+# ── GIF Search optional dependencies ─────────────────────────────────────────
+# Package was renamed duckduckgo_search → ddgs ; try both for backward compat.
+try:
+    import requests as _requests
+    try:
+        from ddgs import DDGS as _DDGS          # new name (v9+)
+    except ImportError:
+        from duckduckgo_search import DDGS as _DDGS  # legacy name (<=8.x)
+    _gif_search_available = True
+except ImportError:
+    _requests = None
+    _DDGS = None
+    _gif_search_available = False
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 # Three preview canvases
 SRC_CANVAS_W  = 300
@@ -99,7 +120,7 @@ AUTO_CANVAS_H = 170
 DMD_DISPLAY_SCALE_FACTOR = 2.34375 # 300/128 = 75/32
 
 BG_CANVAS     = "#0d0d1a"
-APP_VERSION   = "2.4.0"
+APP_VERSION   = "3.0.0"
 
 # Auto-refresh debounce: ms to wait after last param change before rebuilding DMD
 DMD_REFRESH_DELAY_MS = 1800
@@ -241,6 +262,15 @@ class DMDConverterApp(ctk.CTk):
         self._auto_color_analyzing: bool = False
         self._pre_auto_color_values: dict = {}  # saved custom-mode slider values
 
+        # ── GIF Search state ──────────────────────────────────────────────────
+        self._download_active:  bool = False
+        self._download_cancel:  bool = False
+        self._gif_tmpdirs:      list = []  # list of temp dirs to clean up on close
+
+        # ── Tkinter vars — GIF Search ─────────────────────────────────────────
+        self.v_search_keyword = tk.StringVar(value="")
+        self.v_search_qty     = tk.IntVar(value=10)
+
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
             self.v_mode, self.v_scroll, self.v_bottom_crop, self.v_top_crop, self.v_scroll_cycles,
@@ -282,7 +312,7 @@ class DMDConverterApp(ctk.CTk):
         lp = ctk.CTkFrame(self, width=295, corner_radius=0)
         lp.grid(row=0, column=0, sticky="nsew")
         lp.grid_propagate(False)
-        lp.grid_rowconfigure(2, weight=1)
+        lp.grid_rowconfigure(3, weight=1)   # row 3 = tree (was 2)
         lp.grid_columnconfigure(0, weight=1)
 
         hdr = ctk.CTkFrame(lp, fg_color="transparent")
@@ -308,9 +338,12 @@ class DMDConverterApp(ctk.CTk):
                       height=30, fg_color="#3a3a4a", hover_color="#7b241c").grid(
             row=0, column=2, padx=2, sticky="ew")
 
+        # ── GIF Search section (row=2) ────────────────────────────────────────
+        self._build_search_section(lp)
+
         self._style_treeview()
         tree_host = tk.Frame(lp, bg="#12121f")
-        tree_host.grid(row=2, column=0, padx=6, pady=4, sticky="nsew")
+        tree_host.grid(row=3, column=0, padx=6, pady=4, sticky="nsew")
         tree_host.grid_rowconfigure(0, weight=1)
         tree_host.grid_columnconfigure(0, weight=1)
 
@@ -335,10 +368,10 @@ class DMDConverterApp(ctk.CTk):
 
         ctk.CTkLabel(lp, text="👆 Click a row to select · Del to remove",
                      text_color="#444466", font=ctk.CTkFont(size=10)
-                     ).grid(row=3, column=0, padx=8, pady=(0, 2), sticky="w")
+                     ).grid(row=4, column=0, padx=8, pady=(0, 2), sticky="w")
 
         bot = ctk.CTkFrame(lp, fg_color="transparent")
-        bot.grid(row=4, column=0, padx=6, pady=6, sticky="ew")
+        bot.grid(row=5, column=0, padx=6, pady=6, sticky="ew")
         bot.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(bot, text="📤 Output folder", font=ctk.CTkFont(size=12)).grid(
@@ -359,6 +392,274 @@ class DMDConverterApp(ctk.CTk):
             bot, text="🗑  Clear list", command=self.clear_files,
             fg_color="#3a3a4a", hover_color="#7b241c", height=28
         ).grid(row=2, column=0, columnspan=2, padx=4, pady=(8, 2), sticky="ew")
+
+    def _build_search_section(self, parent):
+        """Compact GIF-search panel inserted between the file buttons and the tree."""
+        sf = ctk.CTkFrame(parent, fg_color="#0d1a2a", corner_radius=6)
+        sf.grid(row=2, column=0, padx=8, pady=(0, 4), sticky="ew")
+        sf.grid_columnconfigure(0, weight=1)
+
+        # Header row
+        head = ctk.CTkFrame(sf, fg_color="transparent")
+        head.grid(row=0, column=0, padx=8, pady=(6, 2), sticky="ew")
+        head.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            head, text="🔍  GIF Search  (DuckDuckGo)",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#5ba3d9"
+        ).grid(row=0, column=0, sticky="w")
+
+        # Search bar row: [keyword entry] [qty entry] [Download btn]
+        sr = ctk.CTkFrame(sf, fg_color="transparent")
+        sr.grid(row=1, column=0, padx=8, pady=2, sticky="ew")
+        sr.grid_columnconfigure(0, weight=1)
+
+        self._search_entry = ctk.CTkEntry(
+            sr, textvariable=self.v_search_keyword,
+            placeholder_text="keyword…", height=28
+        )
+        self._search_entry.grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        self._search_entry.bind("<Return>", lambda _e: self._search_and_download())
+
+        # Quantity entry (small, 1-50)
+        qty_frame = ctk.CTkFrame(sr, fg_color="transparent")
+        qty_frame.grid(row=0, column=1, padx=(0, 4))
+        ctk.CTkLabel(qty_frame, text="×", font=ctk.CTkFont(size=11),
+                     text_color="#888899").pack(side="left")
+        self._qty_entry = ctk.CTkEntry(
+            qty_frame, textvariable=self.v_search_qty,
+            width=40, height=28, justify="center"
+        )
+        self._qty_entry.pack(side="left")
+
+        self._btn_search = ctk.CTkButton(
+            sr, text="⬇ DL", width=50, height=28,
+            fg_color="#1a4f6e", hover_color="#1a618d",
+            command=self._search_and_download,
+            state="normal" if _gif_search_available else "disabled"
+        )
+        self._btn_search.grid(row=0, column=2)
+
+        # Cancel button (hidden by default)
+        self._btn_cancel_dl = ctk.CTkButton(
+            sf, text="✕ Cancel", height=24,
+            fg_color="#4a1a1a", hover_color="#7b241c",
+            font=ctk.CTkFont(size=11),
+            command=self._cancel_download
+        )
+        # Not shown until a download starts
+
+        # Status label
+        self._search_status = ctk.CTkLabel(
+            sf, text="" if _gif_search_available else "⚠ duckduckgo-search / requests not installed",
+            text_color="#556677", font=ctk.CTkFont(size=10)
+        )
+        self._search_status.grid(row=3, column=0, padx=8, pady=(2, 6), sticky="w")
+
+    def _search_and_download(self):
+        """Validate inputs and launch the download thread."""
+        if not _gif_search_available:
+            messagebox.showerror(
+                "Missing dependencies",
+                "GIF Search requires extra packages.\n\n"
+                "Install with:\n  pip install duckduckgo-search requests\n\n"
+                "Or re-run ./launch_ui.sh — it installs automatically."
+            )
+            return
+
+        keyword = self.v_search_keyword.get().strip()
+        if not keyword:
+            messagebox.showwarning("Search", "Please enter a keyword to search for GIFs.")
+            self._search_entry.focus_set()
+            return
+
+        try:
+            qty = int(self.v_search_qty.get())
+            if qty < 1:
+                qty = 1
+            if qty > 50:
+                qty = 50
+            self.v_search_qty.set(qty)
+        except (ValueError, tk.TclError):
+            messagebox.showwarning("Search", "Quantity must be a number between 1 and 50.")
+            self._qty_entry.focus_set()
+            return
+
+        if self._download_active:
+            messagebox.showwarning("Busy", "A download is already in progress.")
+            return
+
+        # Create a dedicated temp dir for this search
+        tmpdir = tempfile.mkdtemp(prefix="dmd_gifsearch_")
+        self._gif_tmpdirs.append(tmpdir)
+
+        self._download_active = True
+        self._download_cancel = False
+
+        # UI feedback
+        self._btn_search.configure(state="disabled", text="⏳…")
+        self._btn_cancel_dl.grid(row=2, column=0, padx=8, pady=(0, 2), sticky="ew")
+        self._search_status.configure(
+            text=f"🔍 Searching '{keyword}'…", text_color="#5ba3d9"
+        )
+        self._progress.set(0)
+        self._status_lbl.configure(text=f"⬇  Downloading GIFs…")
+        self._log(f"🔍  GIF Search: '{keyword}' × {qty}  →  {tmpdir}")
+
+        threading.Thread(
+            target=self._run_download,
+            args=(keyword, qty, tmpdir),
+            daemon=True
+        ).start()
+
+    def _run_download(self, keyword: str, qty: int, tmpdir: str):
+        """Background thread: search + download GIFs one by one."""
+        downloaded = 0
+        errors     = 0
+
+        def _ui(fn):
+            self.after(0, fn)
+
+        try:
+            _ui(lambda: self._search_status.configure(
+                text=f"🔍 Querying DuckDuckGo…", text_color="#5ba3d9"
+            ))
+            results = list(_DDGS().images(
+                keyword + " gif",       # positional 'query' (ddgs v7+) — replaces keywords=
+                safesearch="off",
+                type_image="gif",
+                max_results=qty,
+            ))
+        except Exception as exc:
+            logger.warning("DuckDuckGo search failed: %s", exc)
+            _err = f"Search failed: {exc}"   # capture before lambda — exc is cleared after except block
+            _ui(lambda: self._on_download_done(
+                keyword, 0, 0, qty, error=_err
+            ))
+            return
+
+        if not results:
+            _ui(lambda: self._on_download_done(
+                keyword, 0, 0, qty, error=f"No GIFs found for '{keyword}'."
+            ))
+            return
+
+        total = len(results)
+        _ui(lambda: self._log(f"   Found {total} result(s) — downloading…"))
+
+        for i, result in enumerate(results):
+            if self._download_cancel:
+                break
+
+            image_url = result.get("image")
+            if not image_url:
+                continue
+
+            # Build filename
+            basename = os.path.basename(image_url).split("?")[0]
+            if not basename or "." not in basename:
+                basename = f"{keyword.replace(' ', '_')}_{i + 1}.gif"
+            # Ensure .gif extension
+            if not basename.lower().endswith(".gif"):
+                basename = os.path.splitext(basename)[0] + ".gif"
+            # Sanitise
+            safe_name = "".join(c if c.isalnum() or c in ("_", "-", ".") else "_" for c in basename)
+            file_path  = os.path.join(tmpdir, safe_name)
+
+            # Avoid overwriting if same name
+            if os.path.exists(file_path):
+                stem, ext = os.path.splitext(safe_name)
+                file_path = os.path.join(tmpdir, f"{stem}_{i}{ext}")
+
+            try:
+                resp = _requests.get(image_url, stream=True, timeout=12)
+                resp.raise_for_status()
+
+                # Validate Content-Type (best-effort)
+                ct = resp.headers.get("Content-Type", "")
+                if ct and "image" not in ct and "octet-stream" not in ct:
+                    logger.debug("Skipping non-image URL: %s (CT=%s)", image_url, ct)
+                    errors += 1
+                    continue
+
+                with open(file_path, "wb") as fh:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if self._download_cancel:
+                            break
+                        fh.write(chunk)
+
+                if self._download_cancel:
+                    # Remove incomplete file
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
+                    break
+
+                downloaded += 1
+                _fp = file_path
+                _ui(lambda p=_fp: self._add_downloaded_gif(p))
+                prog = downloaded / total
+                _ui(lambda v=prog: self._progress.set(v))
+                _ui(lambda d=downloaded, t=total: self._search_status.configure(
+                    text=f"⬇ {d}/{t} downloaded…", text_color="#5ba3d9"
+                ))
+
+            except _requests.exceptions.Timeout:
+                errors += 1
+                logger.warning("Timeout downloading %s", image_url)
+                _ui(lambda u=image_url: self._log(f"   ⚠ Timeout: {u[:60]}…", "error"))
+            except _requests.exceptions.RequestException as exc:
+                errors += 1
+                logger.warning("Download error %s: %s", image_url, exc)
+                _ui(lambda e=str(exc): self._log(f"   ⚠ Download error: {e[:80]}", "error"))
+            except Exception as exc:
+                errors += 1
+                logger.warning("Unexpected error for %s: %s", image_url, exc)
+                _ui(lambda e=str(exc): self._log(f"   ⚠ Unexpected: {e[:80]}", "error"))
+
+        _ui(lambda: self._on_download_done(keyword, downloaded, errors, total))
+
+    def _add_downloaded_gif(self, path: str):
+        """Main thread: add a freshly downloaded GIF to the file list."""
+        if not os.path.isfile(path):
+            return
+        self._add_file_raw(path)
+        self._update_count()
+
+    def _cancel_download(self):
+        """Request cancellation of an active download."""
+        if self._download_active:
+            self._download_cancel = True
+            self._search_status.configure(text="⏹ Cancelling…", text_color="#f39c12")
+
+    def _on_download_done(self, keyword: str, downloaded: int, errors: int, total: int,
+                          error: str = ""):
+        """Main thread: reset download UI state."""
+        self._download_active = False
+        self._download_cancel = False
+
+        self._btn_search.configure(state="normal" if _gif_search_available else "disabled",
+                                   text="⬇ DL")
+        self._btn_cancel_dl.grid_remove()
+
+        if error:
+            self._search_status.configure(text=f"❌ {error}", text_color="#e74c3c")
+            self._log(f"❌  GIF Search failed: {error}", "error")
+            self._progress.set(0)
+            self._status_lbl.configure(text="Ready")
+            return
+
+        cancelled = downloaded < total and not error
+        txt = f"✅ {downloaded}/{total} GIFs downloaded"
+        if errors:
+            txt += f"  ({errors} error{'s' if errors != 1 else ''})"
+        if cancelled:
+            txt += "  [cancelled]"
+        self._search_status.configure(text=txt, text_color="#2ecc71" if downloaded else "#e74c3c")
+        self._log(f"✅  GIF Search '{keyword}': {downloaded} downloaded, {errors} error(s).")
+        self._progress.set(1.0)
+        self._status_lbl.configure(text="Ready")
+        self.after(2500, lambda: self._progress.set(0))
 
     def _style_treeview(self):
         s = ttk.Style()
@@ -2245,6 +2546,11 @@ class DMDConverterApp(ctk.CTk):
         self._stop_dmd_preview()
         if self._adv_refresh_job:
             self.after_cancel(self._adv_refresh_job)
+        # Cancel any active download and clean up temp dirs
+        self._download_cancel = True
+        for td in self._gif_tmpdirs:
+            if td and os.path.isdir(td):
+                shutil.rmtree(td, ignore_errors=True)
         self.destroy()
 
 
