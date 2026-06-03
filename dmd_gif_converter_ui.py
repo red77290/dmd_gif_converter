@@ -33,6 +33,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import platform
 import glob
@@ -262,6 +263,9 @@ class DMDConverterApp(ctk.CTk):
         self._auto_color_analyzing: bool = False
         self._pre_auto_color_values: dict = {}  # saved custom-mode slider values
 
+        # ── Folder refresh state ──────────────────────────────────────────────
+        self._last_source_folder: str = ""
+
         # ── GIF Search state ──────────────────────────────────────────────────
         self._download_active:  bool = False
         self._download_cancel:  bool = False
@@ -337,6 +341,15 @@ class DMDConverterApp(ctk.CTk):
         ctk.CTkButton(br, text="✕ Remove",   command=self._remove_selected,
                       height=30, fg_color="#3a3a4a", hover_color="#7b241c").grid(
             row=0, column=2, padx=2, sticky="ew")
+
+        self._btn_refresh_folder = ctk.CTkButton(
+            br, text="🔄 Refresh folder", command=self.refresh_folder,
+            height=28, fg_color="#1a3a1a", hover_color="#2a5a2a",
+            font=ctk.CTkFont(size=11), state="disabled"
+        )
+        self._btn_refresh_folder.grid(
+            row=1, column=0, columnspan=3, padx=2, pady=(3, 0), sticky="ew"
+        )
 
         # ── GIF Search section (row=2) ────────────────────────────────────────
         self._build_search_section(lp)
@@ -881,10 +894,40 @@ class DMDConverterApp(ctk.CTk):
                 kw["number_of_steps"] = steps
             sl = ctk.CTkSlider(f, **kw)
             sl.grid(row=0, column=1, sticky="ew", padx=4)
-            lbl = ctk.CTkLabel(f, text=fmt.format(var.get()) + suffix,
-                               width=72, anchor="e", font=ctk.CTkFont(size=11))
-            lbl.grid(row=0, column=2, padx=(4, 4))
-            var.trace_add("write", lambda *_: lbl.configure(text=fmt.format(var.get()) + suffix))
+
+            def _lbl_txt():
+                return fmt.format(var.get()) + suffix
+
+            entry_sv = tk.StringVar(value=_lbl_txt())
+            entry = ctk.CTkEntry(f, textvariable=entry_sv, width=72, justify="right",
+                                 font=ctk.CTkFont(size=11))
+            entry.grid(row=0, column=2, padx=(4, 4))
+
+            _editing = [False]
+
+            def _on_focus_in(_e):
+                _editing[0] = True
+
+            def _commit(*_):
+                _editing[0] = False
+                raw = entry_sv.get().strip()
+                try:
+                    m = re.match(r'^([+-]?\d*\.?\d+)', raw)
+                    val = float(m.group(1)) if m else float(raw)
+                    val = max(from_, min(to, val))
+                    var.set(val)
+                except (ValueError, AttributeError):
+                    pass
+                entry_sv.set(_lbl_txt())
+
+            def _var_changed(*_):
+                if not _editing[0]:
+                    entry_sv.set(_lbl_txt())
+
+            var.trace_add("write", _var_changed)
+            entry.bind("<FocusIn>",  _on_focus_in)
+            entry.bind("<FocusOut>", _commit)
+            entry.bind("<Return>",   _commit)
             return sl
 
         # Mode
@@ -1011,11 +1054,42 @@ class DMDConverterApp(ctk.CTk):
                          font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
             sl = ctk.CTkSlider(f, from_=from_, to=to, variable=var)
             sl.grid(row=0, column=1, sticky="ew", padx=4)
-            lbl = ctk.CTkLabel(f, text=fmt.format(var.get()) + suffix,
-                               width=72, anchor="e", font=ctk.CTkFont(size=11))
-            lbl.grid(row=0, column=2, padx=(4, 4))
-            var.trace_add("write", lambda *_: lbl.configure(text=fmt.format(var.get()) + suffix))
+
+            def _lbl_txt():
+                return fmt.format(var.get()) + suffix
+
+            entry_sv = tk.StringVar(value=_lbl_txt())
+            entry = ctk.CTkEntry(f, textvariable=entry_sv, width=72, justify="right",
+                                 font=ctk.CTkFont(size=11))
+            entry.grid(row=0, column=2, padx=(4, 4))
+
+            _editing = [False]
+
+            def _on_focus_in(_e):
+                _editing[0] = True
+
+            def _commit(*_):
+                _editing[0] = False
+                raw = entry_sv.get().strip()
+                try:
+                    m = re.match(r'^([+-]?\d*\.?\d+)', raw)
+                    val = float(m.group(1)) if m else float(raw)
+                    val = max(from_, min(to, val))
+                    var.set(val)
+                except (ValueError, AttributeError):
+                    pass
+                entry_sv.set(_lbl_txt())
+
+            def _var_changed(*_):
+                if not _editing[0]:
+                    entry_sv.set(_lbl_txt())
+
+            var.trace_add("write", _var_changed)
+            entry.bind("<FocusIn>",  _on_focus_in)
+            entry.bind("<FocusOut>", _commit)
+            entry.bind("<Return>",   _commit)
             self._colorimetry_widgets.append(sl)
+            self._colorimetry_widgets.append(entry)
 
         cslider("Contrast",    self.v_contrast,    0.5,  2.5)
         cslider("Saturation",  self.v_saturation,  0.0,  4.0)
@@ -1081,12 +1155,43 @@ class DMDConverterApp(ctk.CTk):
                 kw["number_of_steps"] = steps
             sl = ctk.CTkSlider(f, **kw)
             sl.grid(row=0, column=1, sticky="ew", padx=4)
-            lbl_txt = (lambda: fmt.format(int(var.get())) + suffix) if is_int \
-                      else (lambda: fmt.format(var.get()) + suffix)
-            lbl = ctk.CTkLabel(f, text=lbl_txt(), width=80, anchor="e",
-                               font=ctk.CTkFont(size=11))
-            lbl.grid(row=0, column=2, padx=(4, 4))
-            var.trace_add("write", lambda *_: lbl.configure(text=lbl_txt()))
+
+            def _lbl_txt():
+                return (fmt.format(int(var.get())) if is_int else fmt.format(var.get())) + suffix
+
+            entry_sv = tk.StringVar(value=_lbl_txt())
+            entry = ctk.CTkEntry(f, textvariable=entry_sv, width=80, justify="right",
+                                 font=ctk.CTkFont(size=11))
+            entry.grid(row=0, column=2, padx=(4, 4))
+
+            _editing = [False]
+
+            def _on_focus_in(_e):
+                _editing[0] = True
+
+            def _commit(*_):
+                _editing[0] = False
+                raw = entry_sv.get().strip()
+                try:
+                    m = re.match(r'^([+-]?\d*\.?\d+)', raw)
+                    val = float(m.group(1)) if m else float(raw)
+                    val = max(from_, min(to, val))
+                    if is_int:
+                        var.set(int(val))
+                    else:
+                        var.set(val)
+                except (ValueError, AttributeError):
+                    pass
+                entry_sv.set(_lbl_txt())
+
+            def _var_changed(*_):
+                if not _editing[0]:
+                    entry_sv.set(_lbl_txt())
+
+            var.trace_add("write", _var_changed)
+            entry.bind("<FocusIn>",  _on_focus_in)
+            entry.bind("<FocusOut>", _commit)
+            entry.bind("<Return>",   _commit)
             return sl
 
         ctk.CTkLabel(
@@ -1184,7 +1289,7 @@ class DMDConverterApp(ctk.CTk):
         self._target_preset_menu.grid(row=0, column=1, sticky="w", padx=4)
 
         self._custom_tiling_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        self._custom_tiling_frame.pack(fill="x", padx=10, pady=2)
+        # Not packed initially — shown only when preset == "Custom"
         self._custom_tiling_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(self._custom_tiling_frame, text="Custom Width", width=145, anchor="w",
@@ -1425,14 +1530,12 @@ class DMDConverterApp(ctk.CTk):
 
     def _on_target_preset_change(self, preset):
         if preset == "Custom":
-            self._custom_width_entry.configure(state="normal")
-            self._custom_height_entry.configure(state="normal")
+            self._custom_tiling_frame.pack(fill="x", padx=10, pady=2)
         else:
             width, height = map(int, preset.split(" ")[0].split("x"))
             self.v_target_width.set(width)
             self.v_target_height.set(height)
-            self._custom_width_entry.configure(state="disabled")
-            self._custom_height_entry.configure(state="disabled")
+            self._custom_tiling_frame.pack_forget()
         # Update DMD canvas size immediately
         self._update_dmd_canvas_size()
 
@@ -1568,7 +1671,33 @@ class DMDConverterApp(ctk.CTk):
         folder = filedialog.askdirectory(title="Select source folder")
         if not folder:
             return
+        self._last_source_folder = folder
+        if hasattr(self, "_btn_refresh_folder"):
+            self._btn_refresh_folder.configure(state="normal")
         threading.Thread(target=self._scan_folder, args=(folder,), daemon=True).start()
+
+    def refresh_folder(self):
+        """Re-scan the last selected folder and add any new files."""
+        if not self._last_source_folder:
+            return
+        folder = self._last_source_folder
+        self._log(f"🔄  Refreshing folder: {Path(folder).name}…")
+        threading.Thread(target=self._scan_folder_refresh, args=(folder,), daemon=True).start()
+
+    def _scan_folder_refresh(self, folder):
+        """Like _scan_folder but only adds new files (silent if nothing new)."""
+        paths = sorted([
+            os.path.join(folder, f) for f in os.listdir(folder)
+            if Path(f).suffix.lower() in SUPPORTED_EXTENSIONS
+        ])
+        if not paths:
+            self.after(0, lambda: self._log("   No supported files found in folder."))
+            return
+        new_paths = [p for p in paths if p not in self._file_paths]
+        if not new_paths:
+            self.after(0, lambda: self._log("   ✅  No new files — folder is up to date."))
+            return
+        self.after(0, lambda: self._batch_insert(new_paths, 0, folder))
 
     def _scan_folder(self, folder):
         paths = sorted([
@@ -2421,7 +2550,11 @@ class DMDConverterApp(ctk.CTk):
     def _out_path(self, src):
         stem    = Path(src).stem
         out_dir = self.v_output_dir.get().strip() or str(Path(src).parent)
-        return os.path.join(out_dir, stem + ".gif")
+        out = os.path.join(out_dir, stem + ".gif")
+        # Prevent silently overwriting the source file
+        if os.path.normpath(out) == os.path.normpath(src):
+            out = os.path.join(out_dir, stem + "_dmd.gif")
+        return out
 
     def convert_selected(self):
         if not self._selected_iid:
