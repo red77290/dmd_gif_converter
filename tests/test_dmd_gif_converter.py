@@ -77,8 +77,8 @@ class TestConstants(unittest.TestCase):
     # DEFAULT_PARAMS doit contenir les clés essentielles
     def test_default_params_keys(self):
         required = [
-            "max_workers", "scroll_speed", "scroll_cycles",
-            "fps_min", "fps_max", "mode",
+            "max_workers", "scroll_speed", "bottom_crop_pct", "top_crop_pct",
+            "scroll_cycles", "fps_min", "fps_max", "mode",
             "contrast", "saturation", "brightness", "gamma",
             "sharpen_lum", "sharpen_chr", "dither",
             "target_width", "target_height",
@@ -90,6 +90,9 @@ class TestConstants(unittest.TestCase):
     def test_default_target_dimensions(self):
         self.assertEqual(conv.DEFAULT_PARAMS["target_width"],  128)
         self.assertEqual(conv.DEFAULT_PARAMS["target_height"],  32)
+
+    def test_default_top_crop_is_zero(self):
+        self.assertAlmostEqual(conv.DEFAULT_PARAMS["top_crop_pct"], 0.0)
 
     def test_default_mode(self):
         self.assertEqual(conv.DEFAULT_PARAMS["mode"], "pixel_art")
