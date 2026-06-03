@@ -446,16 +446,16 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         src_idx   += 1
 
     # ── Tail extension: freeze last frame while camera settles ────────────────
-    # If the source is too short the smooth camera may not have finished its
-    # movement toward the final target position.  We keep writing the frozen
-    # last frame while advancing the exponential smoothing until the per-frame
-    # displacement drops below 0.5 px, capped at 3 seconds of extra content.
-    # NOTE: background subtraction is also skipped here for the same reason as
-    # the intro — applying MOG2 to a repeated static frame would progressively
-    # darken the output as the model reclassifies the content as background.
+    # Kept intentionally short (≤ 0.3 s) because this output is a looping GIF:
+    # long tails create a visible freeze before the loop restarts.
+    # The exponential smoothing in the main loop already decelerates the camera
+    # naturally; the tail only catches the very last frame's residual movement.
+    # NOTE: background subtraction is skipped here — applying MOG2 to a repeated
+    # static frame would progressively darken the output as the model reclassifies
+    # the content as background.
     if last_frame is not None and cam_prev is not None and cam_now is not None:
-        max_extra = int(fps * 3)          # hard cap: 3 s worth of frames
-        settle_px = 0.5                   # stop when camera moves < 0.5 px/frame
+        max_extra = max(1, int(fps * 0.3))   # hard cap: 0.3 s (was 3 s)
+        settle_px = 1.0                       # stop when camera moves < 1 px/frame (was 0.5)
         extra = 0
         while extra < max_extra:
             cam_next = _smooth(cam_prev, cam_now, cfg.smoothness)
