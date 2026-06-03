@@ -463,10 +463,12 @@ class DMDConverterApp(ctk.CTk):
         # DMD canvas (right)
         dmd_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
         dmd_wrap.pack(side="left", padx=(4, 0))
-        ctk.CTkLabel(
-            dmd_wrap, text="DMD OUTPUT 128×32",
+        self._dmd_title_label = ctk.CTkLabel(
+            dmd_wrap,
+            text=f"DMD OUTPUT {DEFAULT_PARAMS['target_width']}×{DEFAULT_PARAMS['target_height']}",
             font=ctk.CTkFont(size=10, weight="bold"), text_color="#2e7a4a"
-        ).pack(pady=(4, 0))
+        )
+        self._dmd_title_label.pack(pady=(4, 0))
         # Initialize with default dimensions, will be updated dynamically
         self._dmd_canvas = tk.Canvas(
             dmd_wrap, width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR),
@@ -482,6 +484,10 @@ class DMDConverterApp(ctk.CTk):
         # Backward-compat aliases
         self._canvas       = self._src_canvas
         self._preview_info = self._src_info
+
+        # Keep canvas size + title label in sync with dimension vars (including Custom mode)
+        self.v_target_width.trace_add("write",  self._update_dmd_canvas_size)
+        self.v_target_height.trace_add("write", self._update_dmd_canvas_size)
 
         self._draw_canvas_idle()
         self._draw_auto_canvas_idle()
@@ -1132,10 +1138,15 @@ class DMDConverterApp(ctk.CTk):
         else:
             self._text_bg_opacity_frame.pack_forget()
 
-    def _update_dmd_canvas_size(self):
-        new_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
-        new_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+    def _update_dmd_canvas_size(self, *_):
+        w = self.v_target_width.get()
+        h = self.v_target_height.get()
+        new_width  = int(w * DMD_DISPLAY_SCALE_FACTOR)
+        new_height = int(h * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.configure(width=new_width, height=new_height)
+        # Update the title label to reflect the current output dimensions
+        if hasattr(self, "_dmd_title_label"):
+            self._dmd_title_label.configure(text=f"DMD OUTPUT {w}×{h}")
         # Re-center the idle text if it's showing
         if not self._dmd_frames and not self._dmd_rendering:
             self._draw_dmd_canvas_idle()
