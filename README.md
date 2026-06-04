@@ -258,10 +258,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 ### Screenshots
 
 ![DMD GIF Converter UI](media/UI_PREVIEW.png)
-<video controls autoplay loop muted width="100%">
-  <source src="media/UI_PREVIEW.mov" type="video/quicktime">
-  Your browser does not support the video tag.
-</video>
+<iframe width="100%" height="315" src="https://www.youtube.com/embed/zLWw8AmCeOk" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
 ### Features at a glance
 
