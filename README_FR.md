@@ -6,6 +6,24 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ---
 
+## Table des matières
+- [🔍 Recherche de GIFs — téléchargez des GIFs directement depuis l'UI](#-recherche-de-gifs--telechargez-des-gifs-directement-depuis-lui--nouveau-en-v300)
+- [🤖 Auto Action Framing — caméra cinématique par IA](#-auto-action-framing--camera-cinematique-par-ia)
+- [🎨 Smart Color Boost — colorimétrie heuristique par IA](#-smart-color-boost--colorimetrie-heuristique-par-ia)
+- [✨ Ce que fait le script](#-ce-que-fait-le-script)
+- [🖥️ Interface graphique](#️-interface-graphique)
+  - [🔧 Panneau Paramètres Avancés](#-panneau-parametres-avances-nouveau-en-v21)
+- [📋 Prérequis](#-prerequis)
+- [🚀 Démarrage rapide](#-demarrage-rapide)
+- [▶️ Utilisation en ligne de commande (sans interface)](#️-utilisation-en-ligne-de-commande-sans-interface)
+- [⚙️ Paramètres](#-parametres)
+- [🔍 Comportement détaillé](#-comportement-detaille)
+- [❓ Dépannage](#-depannage)
+- [📄 Licence](#-licence)
+- [🙏 Remerciements](#-remerciements)
+
+---
+
 ## 🔍 Recherche de GIFs — téléchargez des GIFs directement depuis l'UI  *(nouveau en v3.0.0)*
 
 > **En bref — tapez un mot-clé, choisissez une quantité, appuyez sur ⬇ DL, et les GIFs apparaissent dans la liste prêts à convertir.**  
@@ -84,7 +102,7 @@ Auto Action effectue une **analyse d'image intensive en CPU** sur chaque frame (
 - **Mémoire :** chaque worker charge la vidéo entière en frames brutes
 
 Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scroll standard est déjà optimal.  
-**Pour de la vidéo live, du sport, du cinéma, ou toute vidéo avec une personne ou un sujet en mouvement → activez Auto Action et obtenez un résultat professionnel entièrement automatisé.**
+**Pour de la vidéo live, du sport, des clips, ou toute vidéo avec une personne ou un sujet en mouvement → activez Auto Action et obtenez un résultat professionnel entièrement automatisé.**
 
 ### Comment l'activer
 
@@ -128,7 +146,7 @@ Quand **Auto floor detect** est activé, la caméra utilise un **EMA asymétriqu
 | Situation | Comportement |
 |---|---|
 | Personnage **atterrit** / descend sur une plateforme plus basse | L'estimation du sol se met à jour rapidement (α = 0,28 — atteint le nouveau sol en ~10 images) |
-| Personnage **saute** ou monte | L'estimation du sol bouge à peine (α = 0,02 — < 30 px de dérive sur 8 images en l'air) |
+| Personnage **saute** ou monte | L'estimation du sol bouge à peine (α = 0,02 — < 30 px de dérive sur 8 frames en l'air) |
 | Sujet **hors-champ** (pas de détection) | La caméra maintient le dernier niveau de sol connu — pas de dérive |
 
 La caméra reste ainsi ancrée au sol pendant les sauts et suit naturellement le personnage quand il atterrit sur une nouvelle plateforme (plus basse).
@@ -269,7 +287,7 @@ Toutes les valeurs par défaut = « aucun effet » — la sortie standard est id
 
 #### 🎨 Smart Color Boost — colorimétrie heuristique IA
 
-> Voir la section dédiée en tête de ce README pour le guide complet.
+> Voir la [section dédiée complète](#smart-color-boost--colorimetrie-heuristique-par-ia) en tête de ce README pour le guide complet.
 
 - Accessible directement dans le bloc **🎨 Content mode** du panneau Paramètres (pas dans Advanced)
 - Analyse une **keyframe à 50 %** de la source et calcule automatiquement contraste / saturation / gamma / luminosité
@@ -279,7 +297,7 @@ Toutes les valeurs par défaut = « aucun effet » — la sortie standard est id
 
 #### 🎯 Auto Action Framing — caméra IA
 
-> Voir la section dédiée en tête de ce README pour le guide complet.
+> Voir la [section dédiée complète](#auto-action-framing--camera-cinematique-par-ia) en tête de ce README pour le guide complet.
 
 - **Désactivé par défaut** — à activer pour tout contenu vidéo live avec de l'action
 - Effectue une **passe de vision par ordinateur** (OpenCV) sur chaque image avant ffmpeg
@@ -290,7 +308,7 @@ Toutes les valeurs par défaut = « aucun effet » — la sortie standard est id
 | Curseur | Défaut | Effet |
 |---|---|---|
 | Case à cocher | `OFF` | Interrupteur principal |
-| Mode de détection | `person` | `person` / `motion` / `hybrid` / `center` |
+| Mode de détection | `person` | `person` · `motion` · `hybrid` · `center` |
 | **Intro panoramique** | `1,5 s` | Plan large en préfixe (première image gelée, source rejouée intégralement) |
 | Action strength | `0,65` | Serrage du cadre autour du sujet |
 | Camera smooth | `0,85` | Lissage exponentiel — plus élevé = caméra plus lente |
@@ -369,7 +387,7 @@ Graver un texte directement dans le GIF de sortie. Le texte est **toujours appli
 | Contrôle | Défaut | Description |
 |---|---|---|
 | **Enable Text Overlay** | ☐ off | Interrupteur principal |
-| **Text Content** | `""` | Texte à afficher sur chaque frame |
+| **Text Content** | `""` | Chaîne de texte à afficher |
 | **Font Size** | `8 px` | Taille en pixels (4–32 px) |
 | **Text Color** | `white` | `white` / `yellow` / `red` / `green` / `blue` |
 | **Text Position** | `bottom_center` | 9 positions (top/middle/bottom × left/center/right) |
@@ -611,7 +629,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `max_duration` | `0.0` | Durée maximale du clip en secondes (`0` = pas de limite) |
 | `auto_color_enabled` | `False` | 🎨 Smart Color Boost — colorimétrie heuristique IA |
 | `auto_action_enabled` | `False` | 🤖 Caméra IA cinématique — voir section dédiée |
-| `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
+| `action_detector` | `person` | `person` · `motion` · `hybrid` · `center` |
 | `action_intro` | `1.5` | Durée du plan large d'introduction en secondes |
 | `action_strength` | `0.65` | Serrage du cadre autour du sujet |
 | `action_smoothness` | `0.85` | Facteur de lissage exponentiel de la caméra |

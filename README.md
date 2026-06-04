@@ -6,6 +6,24 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ---
 
+## Table of Contents
+- [🔍 GIF Search — download GIFs directly from the UI](#-gif-search--download-gifs-directly-from-the-ui--new-in-v300)
+- [🤖 Auto Action Framing — AI-powered cinematic camera](#-auto-action-framing--ai-powered-cinematic-camera)
+- [🎨 Smart Color Boost — AI heuristic colorimetry](#-smart-color-boost--ai-heuristic-colorimetry)
+- [✨ What it does](#-what-it-does)
+- [🖥️ Graphical interface](#️-graphical-interface)
+  - [🔧 Advanced Settings panel](#-advanced-settings-panel-new-in-v21)
+- [📋 Requirements](#-requirements)
+- [🚀 Quick start](#-quick-start)
+- [▶️ CLI usage (no UI required)](#️-cli-usage-no-ui-required)
+- [⚙️ Parameters](#-parameters)
+- [🔍 How it works](#-how-it-works)
+- [❓ Troubleshooting](#-troubleshooting)
+- [📄 License](#-license)
+- [🙏 Credits](#-credits)
+
+---
+
 ## 🔍 GIF Search — download GIFs directly from the UI  *(new in v3.0.0)*
 
 > **TL;DR — type a keyword, set a quantity, press ⬇ DL, and GIFs appear in the list ready to convert.**  
@@ -84,7 +102,7 @@ Auto Action performs **full CPU-intensive computer vision** on every frame (HOG 
 - **Memory:** each worker loads the full video as raw frames
 
 For batch conversion of large libraries, this cost adds up. If you are converting retro sprites or pixel-art GIFs, the standard scroll pipeline is already optimal.  
-**For live footage, sports, cinema clips, or any video with a person or moving subject → enable Auto Action and get professional results automatically.**
+**For live footage, sports, clips, or any video with a person or moving subject → enable Auto Action and get professional results automatically.**
 
 ### How to enable it
 
@@ -268,7 +286,7 @@ All values default to "no effect" — standard output is 100% identical to v2.0.
 
 #### 🎨 Smart Color Boost — AI heuristic colorimetry
 
-> See the full dedicated section earlier in this README for the complete guide.
+> See the [full dedicated section](#smart-color-boost--ai-heuristic-colorimetry) earlier in this README for the complete guide.
 
 - Located directly in the **🎨 Content mode** block of the Parameters panel (not in Advanced)
 - Analyses a **keyframe at 50 %** of the source and computes contrast / saturation / gamma / brightness automatically
@@ -278,7 +296,7 @@ All values default to "no effect" — standard output is 100% identical to v2.0.
 
 #### 🎯 Auto Action Framing — AI cinematic camera
 
-> See the full dedicated section at the top of this README for the complete guide.
+> See the [full dedicated section](#auto-action-framing--ai-powered-cinematic-camera) at the top of this README for the complete guide.
 
 - **Disabled by default** — enable when you need intelligent camera movement on live footage
 - Runs a full **computer vision pass** (OpenCV) on every frame before ffmpeg
@@ -336,7 +354,7 @@ Set to `0` or uncheck to disable.
 | **Auto vertical scroll** ✅ | When checked: standard scroll behaviour (unchanged) | ✅ checked |
 | **Zoom** | Scale multiplier before cropping (1.0 = fit to 128 px) | `1.0×` |
 | **X offset** | Horizontal crop start in pixels (manual mode only) | `0 px` |
-| **Y offset** | Vertical crop start in pixels (manual mode only) | `0 px` |
+| **Y offset** | Vertical crop offset px (manual mode only) | `0 px` |
 
 > Uncheck **Auto vertical scroll** to enable manual mode. Zoom first, then set X/Y to
 > choose exactly which 128×32 window to crop from the scaled frame.
