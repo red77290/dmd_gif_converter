@@ -258,6 +258,10 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 ### Screenshots
 
 ![DMD GIF Converter UI](media/UI_PREVIEW.png)
+<video controls autoplay loop muted width="100%">
+  <source src="media/UI_PREVIEW.mov" type="video/quicktime">
+  Your browser does not support the video tag.
+</video>
 
 ### Features at a glance
 
@@ -313,9 +317,9 @@ All values default to "no effect" — standard output is 100% identical to v2.0.
 | Camera smooth | `0.85` | Exponential smoothing — higher = slower camera |
 | Zoom max | `1.8×` | Maximum allowed zoom-in |
 | ROI padding | `0.20` | Breathing room around the detected subject |
-| Bottom crop % | `0 %` | Exclude bottom N % of frame from detection (feet / floor / HUD) |
-| Vertical bias | `0.0` | Manual vertical shift: `+1.0` = camera down (floor), `-1.0` = camera up |
-| **Auto floor detect** ✨ | `OFF` | Dynamic floor tracking via asymmetric EMA — resists jumps, follows landings · overrides vertical bias |
+| Bottom crop % | `0 %` | Exclude bottom N % of frame from detection (feet / floor / HUD from dragging the camera down) |
+| Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
+| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings · overrides vertical bias |
 
 #### 💡 LED Pixel Simulation — DMD preview mode
 
@@ -354,7 +358,7 @@ Set to `0` or uncheck to disable.
 | **Auto vertical scroll** ✅ | When checked: standard scroll behaviour (unchanged) | ✅ checked |
 | **Zoom** | Scale multiplier before cropping (1.0 = fit to 128 px) | `1.0×` |
 | **X offset** | Horizontal crop start in pixels (manual mode only) | `0 px` |
-| **Y offset** | Vertical crop offset px (manual mode only) | `0 px` |
+| **Y offset** | Vertical crop start in pixels (manual mode only) | `0 px` |
 
 > Uncheck **Auto vertical scroll** to enable manual mode. Zoom first, then set X/Y to
 > choose exactly which 128×32 window to crop from the scaled frame.
@@ -396,7 +400,7 @@ Burn a text label directly into the output GIF. Text is **always applied on the 
 **Text styles** (tuned for 128×32 visibility):
 
 | Style | Effect | Best use |
-|---|---|---|
+|---|---|
 | `outline` ★ default | 1 px black stroke around the glyph | Maximum readability on any background |
 | `bold` | 1 px same-colour stroke → thicker glyph | Bright text on dark content |
 | `shadow` | 1 px dark drop-shadow offset | Depth effect, slight readability gain |
