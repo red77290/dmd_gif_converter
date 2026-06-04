@@ -366,7 +366,7 @@ class DMDConverterApp(ctk.CTk):
 
         self._tree = ttk.Treeview(
             tree_host, style="File.Treeview",
-            show="tree", selectmode="browse"
+            show="tree", selectmode="extended"
         )
         sb = ttk.Scrollbar(tree_host, orient="vertical",
                            command=self._tree.yview, style="File.Vertical.TScrollbar")
@@ -383,7 +383,7 @@ class DMDConverterApp(ctk.CTk):
         self._tree.bind("<Delete>",           lambda _e: self._remove_selected())
         self._tree.bind("<BackSpace>",        lambda _e: self._remove_selected())
 
-        ctk.CTkLabel(lp, text="👆 Click a row to select · Del to remove",
+        ctk.CTkLabel(lp, text="👆 Click · Ctrl/⇧ multi-select · Del to remove",
                      text_color="#444466", font=ctk.CTkFont(size=10)
                      ).grid(row=4, column=0, padx=8, pady=(0, 2), sticky="w")
 
@@ -444,7 +444,7 @@ class DMDConverterApp(ctk.CTk):
                      text_color="#888899").pack(side="left")
         self._qty_entry = ctk.CTkEntry(
             qty_frame, textvariable=self.v_search_qty,
-            width=40, height=28, justify="center"
+            width=52, height=28, justify="center"
         )
         self._qty_entry.pack(side="left")
 
@@ -493,11 +493,11 @@ class DMDConverterApp(ctk.CTk):
             qty = int(self.v_search_qty.get())
             if qty < 1:
                 qty = 1
-            if qty > 50:
-                qty = 50
+            if qty > 300:
+                qty = 300
             self.v_search_qty.set(qty)
         except (ValueError, tk.TclError):
-            messagebox.showwarning("Search", "Quantity must be a number between 1 and 50.")
+            messagebox.showwarning("Search", "Quantity must be a number between 1 and 300.")
             self._qty_entry.focus_set()
             return
 
@@ -1775,7 +1775,10 @@ class DMDConverterApp(ctk.CTk):
         sel = self._tree.selection()
         if not sel:
             return
-        iid = sel[0]
+        # With extended selectmode, use the focused item (last clicked) for preview.
+        iid = self._tree.focus() or sel[0]
+        if iid not in sel:
+            iid = sel[0]
         if iid == self._selected_iid:
             return
         self._selected_iid = iid
@@ -1792,8 +1795,8 @@ class DMDConverterApp(ctk.CTk):
         sel = self._tree.selection()
         if not sel:
             return
-        iid = sel[0]
-        if self._selected_iid == iid:
+        # If the currently previewed file is among the items to remove, stop preview first.
+        if self._selected_iid in sel:
             self._stop_src_preview()
             self._stop_auto_preview()
             self._stop_dmd_preview()
@@ -1802,10 +1805,11 @@ class DMDConverterApp(ctk.CTk):
             self._draw_canvas_idle()
             self._draw_auto_canvas_idle()
             self._draw_dmd_canvas_idle()
-        path = self._file_data.pop(iid, None)
-        if path:
-            self._file_paths.discard(path)
-        self._tree.delete(iid)
+        for iid in sel:
+            path = self._file_data.pop(iid, None)
+            if path:
+                self._file_paths.discard(path)
+            self._tree.delete(iid)
         self._update_count()
 
     def clear_files(self):
