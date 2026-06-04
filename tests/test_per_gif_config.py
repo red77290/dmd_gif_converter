@@ -242,6 +242,9 @@ def _make_app():
     app.v_action_padding            = tk.DoubleVar(value=0.20)
     app.v_action_intro              = tk.DoubleVar(value=1.5)
     app.v_action_bottom_crop        = tk.DoubleVar(value=0.0)
+    app.v_action_auto_bottom_crop   = tk.BooleanVar(value=False)
+    app.v_action_top_crop           = tk.DoubleVar(value=0.0)
+    app.v_action_auto_top_crop      = tk.BooleanVar(value=False)
     app.v_action_vertical_bias      = tk.DoubleVar(value=0.0)
     app.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
     app.v_bg_sub_enable             = tk.BooleanVar(value=False)
@@ -296,7 +299,9 @@ class TestSnapshotParams(unittest.TestCase):
             "hue_shift", "noise_reduction", "film_grain", "vignette",
             "auto_action_enabled", "action_detector",
             "action_strength", "action_smoothness", "action_zoom_max",
-            "action_padding", "action_intro", "action_bottom_crop",
+            "action_padding", "action_intro",
+            "action_bottom_crop", "action_auto_bottom_crop",
+            "action_top_crop", "action_auto_top_crop",
             "action_vertical_bias", "action_auto_vertical_bias",
             "bg_sub_enable", "target_width", "target_height", "target_preset",
             "text_overlay_enabled", "text_content",
