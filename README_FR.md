@@ -168,7 +168,10 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_smoothness` | Camera smooth | `0,85` | `0` = instantané · `0,98` = caméra très lente |
 | `action_zoom_max` | Zoom max | `1,8×` | Zoom dynamique maximum que la caméra IA peut appliquer |
 | `action_padding` | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
-| `action_bottom_crop` | Bottom crop % | `0 %` | Exclut les N % inférieurs du frame de la détection (cache les pieds, le sol, le HUD pour ne pas faire descendre la caméra) |
+| `action_bottom_crop` | Bottom crop % | `0 %` | Exclut les N % inférieurs du frame de la détection (manuel — ignoré si auto actif) |
+| `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Détecte automatiquement** la limite basse du sujet. Active le mode **Face Priority** 👤 quand le corps est plus grand que la fenêtre DMD — recadre sur la région tête/visage pour que le visage soit toujours entièrement visible |
+| `action_top_crop` | Top crop % | `0 %` | Exclut les N % supérieurs du frame de la détection (manuel — ignoré si auto actif) |
+| `action_auto_top_crop` | Auto top crop | `OFF` | **Détecte automatiquement** la limite haute du sujet (tête / ciel) — adapte la marge selon face ou corps entier |
 | `action_vertical_bias` | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol visible), `-1,0` = caméra vers le haut |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Détecte automatiquement** le niveau du sol via un EMA asymétrique — résiste aux sauts, suit les atterrissages. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
 
@@ -203,6 +206,61 @@ La caméra reste ainsi ancrée au sol pendant les sauts et suit naturellement le
 **Flag CLI :**
 ```bash
 python auto_action_cli.py input.mp4 --auto-floor-detect
+```
+
+### Auto crop haut / bas — cadrage automatique du sujet
+
+> **Pour tout type de contenu** : animations de visage en gros plan, personnages en pied, sprites 2D.
+
+#### Auto bottom crop
+
+Analyse un échantillon de frames (~40) et détecte où **le sujet se termine en bas** (pieds, sol, ligne de sol).
+Élimine automatiquement le HUD, les barres de sous-titres et les dalles de sol vides qui feraient descendre la caméra.
+
+##### 👤 Mode Face Priority (automatique)
+
+Quand le personnage détecté est **plus grand que la fenêtre DMD** (hauteur ROI > 80 % de `largeur_frame / ratio_cible`), le système bascule automatiquement en **mode Face Priority** :
+
+- La limite basse effective est recalculée sur les **~32 % supérieurs du ROI** (tête + cou + épaules) au lieu des pieds
+- La caméra est **contrainte à la région tête** pour toute la phase de tracking → le visage est toujours entièrement visible à l'écran
+- Le tag `[face priority 👤]` apparaît dans le journal de conversion quand ce mode s'active
+
+Ce mode s'active quand la **majorité (> 50 %) des frames** échantillonnées ont un corps trop grand — il ne se déclenche pas sur une seule frame outlier.
+
+#### Auto top crop
+
+Détecte où **le sujet commence en haut** (tête, bout des cheveux, pointe d'arme).
+Élimine le ciel, le plafond ou les bandes noires au-dessus du personnage.
+
+#### Adaptation au type de contenu
+
+Le ratio d'aspect médian de la bounding box détectée permet d'inférer si le sujet est un **visage/gros plan** ou un **corps entier**, et d'ajuster la marge en conséquence :
+
+| Ratio h/w | Type de sujet | Marge ajoutée |
+|-----------|---------------|---------------|
+| < 1,3 | Gros plan / visage | 15 % de la hauteur du frame |
+| 1,3 – 2,5 | Buste / haut du corps | 10 % de la hauteur du frame |
+| > 2,5 | Corps entier | 6 % de la hauteur du frame |
+
+#### Bascule Manuel ↔ Auto
+
+Les deux crops disposent d'une **case à cocher indépendante** et d'un curseur manuel :
+
+- **Auto activé** → le curseur est grisé ; la valeur est calculée automatiquement à chaque rendu.
+- **Auto désactivé** → le curseur est actif ; vous fixez le pourcentage manuellement.
+
+Les deux modes sont totalement indépendants — auto bas + manuel haut est valide.
+
+**Flags CLI :**
+```bash
+# Auto sur les deux bornes
+python auto_action_cli.py input.mp4 --auto-bottom-crop --auto-top-crop
+
+# Crop manuel bas + auto haut
+python auto_action_cli.py input.mp4 --bottom-crop 0.10 --auto-top-crop
+
+# Crop manuel haut et bas (comportement d'origine)
+python auto_action_cli.py input.mp4 --top-crop 0.05 --bottom-crop 0.15
 ```
 
 ### Dépendance requise
@@ -691,7 +749,10 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `action_zoom_max` | `1.8` | Zoom IA maximum |
 | `action_padding` | `0.20` | Marge autour du ROI détecté |
 | `bg_sub_enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
-| `action_bottom_crop` | `0.0` | Exclut les N % inférieurs du cadre de la détection auto-action (0 = désactivé) |
+| `action_bottom_crop` | `0.0` | Exclut les N % inférieurs du cadre (manuel, 0 = désactivé) |
+| `action_auto_bottom_crop` | `False` | Détecte auto la limite basse du sujet (pieds / sol) |
+| `action_top_crop` | `0.0` | Exclut les N % supérieurs du cadre (manuel, 0 = désactivé) |
+| `action_auto_top_crop` | `False` | Détecte auto la limite haute du sujet (tête / ciel) |
 | `action_vertical_bias` | `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
 | `action_auto_vertical_bias` | `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
 | `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
