@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.0.0
+# 🎞️ DMD GIF Converter — v3.1.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -22,7 +22,7 @@ Keyword + quantity  ──[DuckDuckGo image search]──▶  temp folder  ─�
 | Feature | Details |
 |---|---|
 | **Keyword search** | Any text — supports `Enter` key to trigger search |
-| **Configurable quantity** | 1–50 GIFs per search (default: 10) |
+| **Configurable quantity** | 1–300 GIFs per search (default: 10) |
 | **Real-time progress** | Main progress bar updates as each file is downloaded |
 | **Per-file feed** | Each downloaded GIF appears in the list immediately |
 | **Cancel button** | Appears during download — stops after current file |
@@ -34,7 +34,7 @@ Keyword + quantity  ──[DuckDuckGo image search]──▶  temp folder  ─�
 
 1. In the **📁 Source files** panel → find the **🔍 GIF Search** section
 2. Type a keyword (e.g. `pac-man`, `pixel art fire`, `retro arcade`)
-3. Set the quantity (default: 10, max: 50)
+3. Set the quantity (default: 10, max: **300**)
 4. Press **⬇ DL** or hit Enter
 5. GIFs download one by one and appear in the file list
 6. Select any, adjust parameters, and convert!
@@ -62,6 +62,7 @@ Source video  ──[AI analysis]──▶  4:1 cinematic crop  ──[ffmpeg]�
         Motion detection (optical flow)
         Smooth exponential camera
         Intro panoramic establishing shot
+        Auto floor tracking (2-D platformers)
 ```
 
 ### What it does automatically
@@ -105,6 +106,9 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_smoothness` | Camera smooth | `0.85` | `0` = instant · `0.98` = very slow camera |
 | `action_zoom_max` | Zoom max | `1.8×` | Maximum dynamic zoom the AI camera can apply |
 | `action_padding` | ROI padding | `0.20` | Extra space added around the detected subject |
+| `action_bottom_crop` | Bottom crop % | `0 %` | Exclude the bottom N % of the frame from detection (hides feet, floor, HUD from dragging the camera down) |
+| `action_vertical_bias` | Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
+| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings. Overrides the manual vertical bias. Ideal for 2-D platformers. |
 
 ### Detector modes
 
@@ -115,9 +119,32 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `hybrid` | Merges person + motion bounding boxes — broadest coverage |
 | `center` | No detection — keeps the camera centred (intro pan only) |
 
-### Requirements
+### Auto floor detect — dynamic ground tracking
 
-Auto Action requires **OpenCV** (installed automatically by `launch_ui.sh`):
+> **Best for 2-D platformers** and any content where the floor level changes.
+
+When **Auto floor detect** is enabled, the camera uses an **asymmetric exponential moving average (EMA)** to memorise the floor position frame by frame:
+
+| Situation | Behaviour |
+|---|---|
+| Character **lands** / descends to a lower platform | Floor estimate updates quickly (α = 0.28 — reaches new floor in ~10 frames) |
+| Character **jumps** or moves upward | Floor estimate barely moves (α = 0.02 — < 30 px drift over 8 frames of airtime) |
+| Subject **off-screen** (no detection) | Camera holds last known floor level — no drift |
+
+This means the camera stays anchored to the ground during jumps and naturally follows the character when they land on a new (lower) platform.
+
+**Priority rules:**
+1. `auto_vertical_bias = True` → auto floor tracking active, manual `vertical_bias` ignored
+2. `auto_vertical_bias = False` + `vertical_bias ≠ 0` → manual lerp bias applied
+3. Both off → camera follows ROI centre (default behaviour)
+
+**CLI flag:**
+```bash
+python auto_action_cli.py input.mp4 --auto-floor-detect
+# manual bias flag is silently ignored when --auto-floor-detect is set
+```
+
+
 
 ```bash
 pip install opencv-python   # or: pip install -r requirements_ui.txt
@@ -219,7 +246,8 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | Feature | Details |
 |---|---|
 | **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
-| **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity, auto-populates the list |
+| **Multi-select file list** | Ctrl+click / Shift+click to select multiple files · Del removes all selected at once |
+| **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity (up to 300), auto-populates the list |
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
@@ -266,6 +294,9 @@ All values default to "no effect" — standard output is 100% identical to v2.0.
 | Camera smooth | `0.85` | Exponential smoothing — higher = slower camera |
 | Zoom max | `1.8×` | Maximum allowed zoom-in |
 | ROI padding | `0.20` | Breathing room around the detected subject |
+| Bottom crop % | `0 %` | Exclude bottom N % of frame from detection (feet / floor / HUD) |
+| Vertical bias | `0.0` | Manual vertical shift: `+1.0` = camera down (floor), `-1.0` = camera up |
+| **Auto floor detect** ✨ | `OFF` | Dynamic floor tracking via asymmetric EMA — resists jumps, follows landings · overrides vertical bias |
 
 #### ⏱ Max Duration
 
@@ -550,6 +581,9 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_zoom_max` | `1.8` | Maximum AI zoom factor |
 | `action_padding` | `0.20` | Padding around detected ROI |
 | `bg_sub_enable` | `False` | Replace background with black (maximises subject contrast) |
+| `action_bottom_crop` | `0.0` | Exclude bottom N % of frame from auto-action detection (0 = disabled) |
+| `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
+| `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
 | `target_width` | `128` | Output width in pixels (multi-panel tiling) |
 | `target_height` | `32` | Output height in pixels (multi-panel tiling) |
 | `text_overlay_enabled` | `False` | 💬 Burn a text label into the output GIF |
@@ -627,6 +661,9 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Auto Action says "OpenCV not installed" | Run `pip install opencv-python` or re-run `./launch_ui.sh` (installs automatically) |
 | Auto Action preview is slow to appear | Normal — AI analysis takes a few seconds per video; progress shown in the AUTO ACTION canvas |
 | Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
+| Floor not visible in 2-D platformer | Enable **Auto floor detect** in the Auto Action advanced settings — it anchors the camera to the detected ground level |
+| Camera pans up during jumps | Enable **Auto floor detect** — it uses an asymmetric EMA that resists upward movement during airtime |
+| Auto floor detect still not showing floor | Increase **Bottom crop %** to hide the HUD/floor area from the main detector, then re-enable Auto floor detect |
 | Smart Color Boost makes colours look wrong | Disable it and tune manually — it works best on heterogeneous or poorly-exposed footage |
 | Smart Color Boost log shows `fallback` | OpenCV unavailable — run `pip install opencv-python` |
 | Text overlay not appearing | Make sure **Text Content** is not empty and the font file exists in `media/fonts/` |
@@ -635,7 +672,8 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | GIF Search button is disabled | Install missing deps: `pip install duckduckgo-search requests` (or re-run `./launch_ui.sh`) |
 | GIF Search returns 0 results | DuckDuckGo may throttle rapid searches — wait a few seconds and retry |
 | Downloaded GIFs are very large | Normal for web GIFs — the converter will resize them to 128×32 automatically |
-| GIF Search timeout errors | Some image hosts are slow — increase quantity to compensate for skipped URLs |
+| GIF Search timeout errors | Some image hosts are slow — increase quantity (up to 300) to compensate for skipped URLs |
+| Want to remove multiple GIFs at once | Hold **Ctrl** or **Shift** then click to multi-select, then press **Del** or click **✕ Remove** |
 
 ---
 
