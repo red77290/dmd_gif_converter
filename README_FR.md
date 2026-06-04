@@ -8,6 +8,7 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ## Table des matières
 - [🔍 Recherche de GIFs — téléchargez des GIFs directement depuis l'UI](#-recherche-de-gifs--telechargez-des-gifs-directement-depuis-lui--nouveau-en-v300)
+- [🎞️ Config par GIF — réglages indépendants par fichier](#️-config-par-gif--reglages-independants-par-fichier)
 - [🤖 Auto Action Framing — caméra cinématique par IA](#-auto-action-framing--camera-cinematique-par-ia)
 - [🎨 Smart Color Boost — colorimétrie heuristique par IA](#-smart-color-boost--colorimetrie-heuristique-par-ia)
 - [✨ Ce que fait le script](#-ce-que-fait-le-script)
@@ -63,6 +64,49 @@ Mot-clé + quantité  ──[recherche images DuckDuckGo]──▶  dossier temp
 pip install duckduckgo-search requests
 # déjà inclus dans requirements_ui.txt — installé automatiquement par ./launch_ui.sh
 ```
+
+---
+
+## 🎞️ Config par GIF — réglages indépendants par fichier
+
+> **En bref — activez le toggle et chaque GIF mémorise ses propres réglages.**  
+> Situé tout en haut du panneau **⚙️ Parameters**, au-dessus de tous les curseurs.
+
+Par défaut, tous les fichiers de la liste partagent le même jeu de paramètres global. Quand vous activez **Config par GIF**, chaque fichier stocke une copie indépendante de tous les ~50 paramètres (colorimétrie, scroll, FPS, texte, Auto Action…) et recharge sa propre copie à chaque fois que vous le sélectionnez.
+
+### Comment ça fonctionne
+
+```
+Toggle OFF (défaut)                 Toggle ON
+─────────────────────────────       ──────────────────────────────────────
+Tous les GIFs partagent les params  Chaque GIF a son propre snapshot
+Sélection gifA → params inchangés   Sélection gifA → config de A restaurée
+Modifier un curseur → affecte tout  Modifier un curseur → affecte A seul
+Sélection gifB → mêmes params       Sélection gifB → config de B restaurée
+                                        (ou defaults si jamais configuré)
+```
+
+### Pas à pas
+
+1. Ouvrez l'interface et ajoutez vos fichiers GIF/vidéo dans la liste
+2. Cochez **"🎞️ Per-GIF Config"** tout en haut du panneau Paramètres
+3. Sélectionnez un fichier — un badge de statut apparaît :
+   - **🆕 Aucune config sauvegardée** → les paramètres globaux par défaut sont utilisés (réglez librement)
+   - **✅ Config chargée** → les réglages sauvegardés pour ce fichier ont été restaurés
+4. Ajustez les paramètres pour ce fichier
+5. Sélectionnez un autre fichier — les réglages actuels sont **sauvegardés instantanément et silencieusement** avant que la nouvelle config soit chargée
+6. Répétez pour chaque fichier de la liste
+7. Appuyez sur **▶ Convert** — chaque fichier est traité avec ses propres réglages
+
+### Points importants
+
+| Comportement | Détail |
+|---|---|
+| **Sauvegarde à la sélection** | La config est capturée de façon synchrone dès que vous cliquez sur un autre fichier — aucun délai de rendu |
+| **Nouveaux fichiers = defaults** | Les fichiers jamais sélectionnés héritent des paramètres globaux courants |
+| **Toggle OFF restaure les globals** | Désactiver le toggle restaure l'état des paramètres qui existait au moment de l'activation |
+| **Clear efface les configs** | **🗑 Clear** ou **✕ Remove** supprime également les configs per-gif des fichiers retirés |
+| **Fermeture vide la mémoire** | Les configs per-gif sont uniquement en session — elles ne sont pas persistées sur le disque |
 
 ---
 
@@ -274,6 +318,7 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
 | **⏱ Max Duration** | Limite la durée et place la fenêtre n'importe où dans la source |
 | **🎨 Smart Color Boost** | Colorimétrie IA en un clic — ajuste automatiquement contraste, saturation et gamma |
+| **🎞️ Config par GIF** | Toggle global — quand activé, chaque fichier stocke sa propre copie indépendante de tous les ~50 paramètres · config sauvegardée instantanément au changement de sélection |
 | **Tous les paramètres standards** | Curseurs et menus pour le mode, le scroll, les FPS, la colorimétrie |
 | **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, valeurs par défaut = sortie identique à v2.0 |
 | **Batch dossier** | Convertit un dossier entier en un clic |
@@ -285,6 +330,15 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 
 Cliquer sur le bouton **🔧 Advanced Settings ▼** en bas du panneau Paramètres.  
 Toutes les valeurs par défaut = « aucun effet » — la sortie standard est identique à v2.0.
+
+#### 🎞️ Config par GIF
+
+> Voir la [section dédiée complète](#️-config-par-gif--reglages-independants-par-fichier) en tête de ce README pour le guide complet.
+
+- Toggle tout en haut du panneau Paramètres
+- Chaque fichier mémorise un snapshot indépendant de tous les ~50 paramètres
+- La config est sauvegardée **de façon synchrone** au changement de sélection (aucun délai, aucune contamination croisée entre fichiers)
+- Désactiver le toggle restaure l'état global des paramètres au moment de l'activation
 
 #### 🎨 Smart Color Boost — colorimétrie heuristique IA
 
@@ -732,6 +786,9 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | GIFs téléchargés très volumineux | Normal pour les GIFs web — le convertisseur les redimensionne automatiquement en 128×32 |
 | Erreurs de timeout pendant le téléchargement | Certains hébergeurs d'images sont lents — augmentez la quantité (jusqu'à 300) pour compenser les URLs ignorées |
 | Supprimer plusieurs GIFs en même temps | Maintenez **Ctrl** ou **Shift** puis cliquez pour multi-sélectionner, ensuite **Suppr** ou cliquer **✕ Remove** |
+| Config par GIF : les params semblent se mélanger entre fichiers | Vérifiez que vous **cliquez** sur le nouveau fichier (la sauvegarde se déclenche sur l'événement de sélection) |
+| Config par GIF : le toggle OFF revient aux mauvais params | Comportement attendu — il restaure l'état exact au moment du toggle ON, pas la config du GIF courant |
+| Config par GIF : configs perdues après redémarrage | Les configs sont uniquement en session (RAM) — l'export n'est pas encore supporté |
 
 ---
 

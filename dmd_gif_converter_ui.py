@@ -196,6 +196,10 @@ class DMDConverterApp(ctk.CTk):
         # Auto-refresh debounce job
         self._adv_refresh_job   = None
 
+        # Guard flag: suppresses pipeline-refresh debounce during _restore_params
+        # to prevent a debounce storm from ~40 simultaneous var.set() calls.
+        self._restoring_params: bool = False
+
         # Pending preview requests (queued while a render is in-flight)
         self._dmd_pending_src  = None   # src to render after current DMD render finishes
         self._auto_pending_src = None   # src to render after current Auto render finishes
@@ -273,6 +277,11 @@ class DMDConverterApp(ctk.CTk):
 
         # ── Folder refresh state ──────────────────────────────────────────────
         self._last_source_folder: str = ""
+
+        # ── Per-GIF config state ──────────────────────────────────────────────
+        self.v_per_gif_config          = tk.BooleanVar(value=False)
+        self._per_gif_configs:  dict   = {}   # path → snapshot dict
+        self._per_gif_global_snapshot: dict = {}  # global params when mode is enabled
 
         # ── GIF Search state ──────────────────────────────────────────────────
         self._download_active:  bool = False
@@ -948,6 +957,24 @@ class DMDConverterApp(ctk.CTk):
             entry.bind("<FocusOut>", _commit)
             entry.bind("<Return>",   _commit)
             return sl
+
+        # ── Per-GIF config toggle ─────────────────────────────────────────────
+        pg_frame = ctk.CTkFrame(parent, fg_color="#0f1a10", corner_radius=6)
+        pg_frame.pack(fill="x", padx=8, pady=(8, 4))
+        pg_frame.grid_columnconfigure(1, weight=1)
+        self._per_gif_cb = ctk.CTkCheckBox(
+            pg_frame,
+            text="🎞️  Per-GIF Config  —  each file has its own settings",
+            variable=self.v_per_gif_config,
+            command=self._on_per_gif_toggle,
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#88ddaa",
+        )
+        self._per_gif_cb.pack(side="left", padx=12, pady=8)
+        self._per_gif_status_lbl = ctk.CTkLabel(
+            pg_frame, text="",
+            text_color="#557755", font=ctk.CTkFont(size=10)
+        )
+        self._per_gif_status_lbl.pack(side="left", padx=(0, 8))
 
         # Mode
         section("🎨  Content mode")
@@ -1807,13 +1834,50 @@ class DMDConverterApp(ctk.CTk):
         iid = self._tree.focus() or sel[0]
         if iid not in sel:
             iid = sel[0]
+
+        # ── Short-circuit: same item re-clicked ──────────────────────────────
         if iid == self._selected_iid:
             return
+
+        # ── SAVE first — synchronous, instant, before ANY state change ───────
+        # This must happen before _restore_params overwrites the UI vars.
+        if self.v_per_gif_config.get() and self._selected_iid:
+            old_path = self._file_data.get(self._selected_iid)
+            if old_path:
+                self._per_gif_configs[old_path] = self._snapshot_params()
+
+        # ── Cancel any pending debounce refresh (stale render for old GIF) ───
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
+            self._adv_refresh_job = None
+
         self._selected_iid = iid
         if hasattr(self, "_btn_convert") and not self._busy:
             self._btn_convert.configure(state="normal")
         path = self._file_data.get(iid)
         if path:
+            # Per-GIF config: load saved config (if any) when mode is enabled.
+            # _restore_params fires ~40 var traces → each would re-schedule the
+            # debounce.  We suppress them with a flag so the restore is atomic
+            # and silent; we cancel once more afterwards for safety.
+            if self.v_per_gif_config.get():
+                if path in self._per_gif_configs:
+                    self._restoring_params = True
+                    try:
+                        self._restore_params(self._per_gif_configs[path])
+                    finally:
+                        self._restoring_params = False
+                    self._update_per_gif_status(path, saved=True)
+                else:
+                    self._update_per_gif_status(path, saved=False)
+
+            # Cancel debounce once more: _restore_params may have fired traces
+            # before the flag was set (or the flag was cleared), so make sure
+            # no stale job is queued before we start fresh renders.
+            if self._adv_refresh_job:
+                self.after_cancel(self._adv_refresh_job)
+                self._adv_refresh_job = None
+
             self._load_preview(path)
             # If Smart Color Boost is active, refresh computed values for this file
             if self.v_auto_color_enabled.get():
@@ -1837,6 +1901,7 @@ class DMDConverterApp(ctk.CTk):
             path = self._file_data.pop(iid, None)
             if path:
                 self._file_paths.discard(path)
+                self._per_gif_configs.pop(path, None)  # remove per-gif config
             self._tree.delete(iid)
         self._update_count()
 
@@ -1847,12 +1912,15 @@ class DMDConverterApp(ctk.CTk):
         self._tree.delete(*self._tree.get_children())
         self._file_data.clear()
         self._file_paths.clear()
+        self._per_gif_configs.clear()  # clear all per-gif configs
         self._selected_iid = ""
         self._trim_frame.grid_remove()
         self._draw_canvas_idle()
         self._draw_auto_canvas_idle()
         self._draw_dmd_canvas_idle()
         self._update_count()
+        if hasattr(self, "_per_gif_status_lbl"):
+            self._per_gif_status_lbl.configure(text="")
 
     def _set_file_status(self, iid, status):
         try:
@@ -2382,6 +2450,9 @@ class DMDConverterApp(ctk.CTk):
 
     # ── Auto-refresh debounce ─────────────────────────────────────────────────
     def _schedule_pipeline_refresh(self, *_):
+        # Ignore debounce requests fired by _restore_params bulk var-sets.
+        if self._restoring_params:
+            return
         if self._adv_refresh_job:
             self.after_cancel(self._adv_refresh_job)
         self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_pipeline)
@@ -2473,6 +2544,152 @@ class DMDConverterApp(ctk.CTk):
         if s <= 0.0 and e >= self._source_duration - 0.05:
             return None, None
         return s, e
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  PER-GIF CONFIG
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _on_per_gif_toggle(self):
+        """Called when the Per-GIF config toggle changes."""
+        is_on = self.v_per_gif_config.get()
+        if is_on:
+            # Capture current params as the "global default" baseline
+            self._per_gif_global_snapshot = self._snapshot_params()
+            if hasattr(self, "_per_gif_status_lbl"):
+                self._per_gif_status_lbl.configure(text="ON — select a file to load/save its config")
+        else:
+            # Restore global snapshot so params go back to what they were before
+            if self._per_gif_global_snapshot:
+                self._restore_params(self._per_gif_global_snapshot)
+            if hasattr(self, "_per_gif_status_lbl"):
+                self._per_gif_status_lbl.configure(text="")
+
+    def _update_per_gif_status(self, path: str, saved: bool):
+        """Update the status label to reflect whether the current gif has a saved config."""
+        if not hasattr(self, "_per_gif_status_lbl"):
+            return
+        name = Path(path).name
+        if saved:
+            self._per_gif_status_lbl.configure(
+                text=f"✅ Config loaded for {name[:30]}", text_color="#88ddaa"
+            )
+        else:
+            self._per_gif_status_lbl.configure(
+                text=f"🆕 No saved config for {name[:30]} — using current defaults",
+                text_color="#aaa855"
+            )
+
+    def _snapshot_params(self) -> dict:
+        """Capture all current UI var values into a plain dict for per-gif storage."""
+        return {
+            "mode":                       self.v_mode.get(),
+            "workers":                    self.v_workers.get(),
+            "scroll":                     self.v_scroll.get(),
+            "bottom_crop":                self.v_bottom_crop.get(),
+            "top_crop":                   self.v_top_crop.get(),
+            "scroll_cycles":              self.v_scroll_cycles.get(),
+            "fps_min":                    self.v_fps_min.get(),
+            "fps_max":                    self.v_fps_max.get(),
+            "contrast":                   self.v_contrast.get(),
+            "saturation":                 self.v_saturation.get(),
+            "brightness":                 self.v_brightness.get(),
+            "gamma":                      self.v_gamma.get(),
+            "sharpen_lum":                self.v_sharpen_lum.get(),
+            "sharpen_chr":                self.v_sharpen_chr.get(),
+            "dither":                     self.v_dither.get(),
+            "scroll_enabled":             self.v_scroll_enabled.get(),
+            "zoom":                       self.v_zoom.get(),
+            "manual_x":                   self.v_manual_x.get(),
+            "manual_y":                   self.v_manual_y.get(),
+            "hue_shift":                  self.v_hue_shift.get(),
+            "noise_reduction":            self.v_noise_reduction.get(),
+            "film_grain":                 self.v_film_grain.get(),
+            "vignette":                   self.v_vignette.get(),
+            "auto_action_enabled":        self.v_auto_action_enabled.get(),
+            "action_detector":            self.v_action_detector.get(),
+            "action_strength":            self.v_action_strength.get(),
+            "action_smoothness":          self.v_action_smoothness.get(),
+            "action_zoom_max":            self.v_action_zoom_max.get(),
+            "action_padding":             self.v_action_padding.get(),
+            "action_intro":               self.v_action_intro.get(),
+            "action_bottom_crop":         self.v_action_bottom_crop.get(),
+            "action_vertical_bias":       self.v_action_vertical_bias.get(),
+            "action_auto_vertical_bias":  self.v_action_auto_vertical_bias.get(),
+            "bg_sub_enable":              self.v_bg_sub_enable.get(),
+            "target_width":               self.v_target_width.get(),
+            "target_height":              self.v_target_height.get(),
+            "target_preset":              self.v_target_preset.get(),
+            "text_overlay_enabled":       self.v_text_overlay_enabled.get(),
+            "text_content":               self.v_text_content.get(),
+            "text_font_size":             self.v_text_font_size.get(),
+            "text_color":                 self.v_text_color.get(),
+            "text_position":              self.v_text_position.get(),
+            "text_font_file":             self.v_text_font_file.get(),
+            "text_style":                 self.v_text_style.get(),
+            "text_bg":                    self.v_text_bg.get(),
+            "text_bg_opacity":            self.v_text_bg_opacity.get(),
+            "max_dur_enabled":            self.v_max_dur_enabled.get(),
+            "max_duration":               self.v_max_duration.get(),
+            "auto_color_enabled":         self.v_auto_color_enabled.get(),
+        }
+
+    def _restore_params(self, s: dict):
+        """Restore all UI vars from a snapshot dict (per-gif or global)."""
+        self.v_mode.set(s.get("mode", "pixel_art"))
+        self.v_workers.set(s.get("workers", 2))
+        self.v_scroll.set(s.get("scroll", 24.0))
+        self.v_bottom_crop.set(s.get("bottom_crop", 0.15))
+        self.v_top_crop.set(s.get("top_crop", 0.0))
+        self.v_scroll_cycles.set(s.get("scroll_cycles", 1.5))
+        self.v_fps_min.set(s.get("fps_min", 10.0))
+        self.v_fps_max.set(s.get("fps_max", 25.0))
+        self.v_contrast.set(s.get("contrast", 1.6))
+        self.v_saturation.set(s.get("saturation", 2.2))
+        self.v_brightness.set(s.get("brightness", -0.03))
+        self.v_gamma.set(s.get("gamma", 0.85))
+        self.v_sharpen_lum.set(s.get("sharpen_lum", 1.8))
+        self.v_sharpen_chr.set(s.get("sharpen_chr", 0.5))
+        self.v_dither.set(s.get("dither", "none"))
+        self.v_scroll_enabled.set(s.get("scroll_enabled", True))
+        self.v_zoom.set(s.get("zoom", 1.0))
+        self.v_manual_x.set(s.get("manual_x", 0))
+        self.v_manual_y.set(s.get("manual_y", 0))
+        self.v_hue_shift.set(s.get("hue_shift", 0.0))
+        self.v_noise_reduction.set(s.get("noise_reduction", 0.0))
+        self.v_film_grain.set(s.get("film_grain", 0))
+        self.v_vignette.set(s.get("vignette", False))
+        self.v_auto_action_enabled.set(s.get("auto_action_enabled", False))
+        self.v_action_detector.set(s.get("action_detector", "person"))
+        self.v_action_strength.set(s.get("action_strength", 0.65))
+        self.v_action_smoothness.set(s.get("action_smoothness", 0.85))
+        self.v_action_zoom_max.set(s.get("action_zoom_max", 2.0))
+        self.v_action_padding.set(s.get("action_padding", 0.20))
+        self.v_action_intro.set(s.get("action_intro", 1.5))
+        self.v_action_bottom_crop.set(s.get("action_bottom_crop", 0.0))
+        self.v_action_vertical_bias.set(s.get("action_vertical_bias", 0.0))
+        self.v_action_auto_vertical_bias.set(s.get("action_auto_vertical_bias", False))
+        self.v_bg_sub_enable.set(s.get("bg_sub_enable", False))
+        self.v_target_width.set(s.get("target_width", 128))
+        self.v_target_height.set(s.get("target_height", 32))
+        self.v_target_preset.set(s.get("target_preset", "128x32 (1x1)"))
+        self.v_text_overlay_enabled.set(s.get("text_overlay_enabled", False))
+        self.v_text_content.set(s.get("text_content", ""))
+        self.v_text_font_size.set(s.get("text_font_size", 8))
+        self.v_text_color.set(s.get("text_color", "white"))
+        self.v_text_position.set(s.get("text_position", "bottom_center"))
+        self.v_text_font_file.set(s.get("text_font_file", "HelvetiPixel.ttf"))
+        self.v_text_style.set(s.get("text_style", "outline"))
+        self.v_text_bg.set(s.get("text_bg", False))
+        self.v_text_bg_opacity.set(s.get("text_bg_opacity", 60))
+        self.v_max_dur_enabled.set(s.get("max_dur_enabled", True))
+        self.v_max_duration.set(s.get("max_duration", 120.0))
+        self.v_auto_color_enabled.set(s.get("auto_color_enabled", False))
+        # Sync UI widgets whose visibility is controlled by callbacks, not traces
+        self._update_custom_visibility()
+        self._on_text_overlay_toggle()
+        self._on_scroll_enabled_change()
+        self._on_text_bg_toggle()
+        self._on_max_dur_toggle()
 
     # ══════════════════════════════════════════════════════════════════════════
     #  PARAMS
@@ -2805,6 +3022,8 @@ class DMDConverterApp(ctk.CTk):
         for td in self._gif_tmpdirs:
             if td and os.path.isdir(td):
                 shutil.rmtree(td, ignore_errors=True)
+        # Clear per-gif configs on close
+        self._per_gif_configs.clear()
         self.destroy()
 
 
