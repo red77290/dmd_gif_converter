@@ -249,6 +249,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | **Multi-select file list** | Ctrl+click / Shift+click to select multiple files · Del removes all selected at once |
 | **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity (up to 300), auto-populates the list |
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
+| **💡 LED Sim** | Toggle pixel-grid overlay on the DMD preview — simulates the physical HUB75 LED matrix appearance · **ON by default** |
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
 | **⏱ Max Duration** | Cap clip length + place the window anywhere in the source |
@@ -298,9 +299,33 @@ All values default to "no effect" — standard output is 100% identical to v2.0.
 | Vertical bias | `0.0` | Manual vertical shift: `+1.0` = camera down (floor), `-1.0` = camera up |
 | **Auto floor detect** ✨ | `OFF` | Dynamic floor tracking via asymmetric EMA — resists jumps, follows landings · overrides vertical bias |
 
-#### ⏱ Max Duration
+#### 💡 LED Pixel Simulation — DMD preview mode
 
-Caps the output clip length to a configurable maximum (default **2:00 min**).  
+> **Active par défaut.** Click **💡 LED Sim ✓** in the preview bar to toggle.
+
+The LED Sim button overlays a pixel grid on the **DMD OUTPUT** canvas so you can see exactly how the content will look on a real HUB75 LED matrix — individual LED emitters with dark gaps between them.
+
+```
+Normal preview       LED Sim preview (default)
+┌──────────────┐     ┌──────────────┐
+│ smooth pixels│     │· · · · · · ·│   · = dark gap between LEDs
+│ upscaled ×2.3│  →  │· ■ ■ ■ · ■ ■│   ■ = lit LED (colour preserved)
+└──────────────┘     │· · · · · · ·│
+                     └──────────────┘
+```
+
+| Property | Value |
+|---|---|
+| Cell size | **4×4** display pixels per DMD pixel |
+| Gap | **1 px** dark border on every edge (simulates LED casing) |
+| Lit area | **3×3** px per LED → 56 % of cell |
+| Canvas size | 512×128 for 128×32 (4× zoom), auto-clamped to **640 px** max |
+| Re-render | Automatic when toggled |
+| Performance | < 1 ms/frame overhead (vectorised NumPy, no Python loops) |
+
+The filter lives in the standalone `dmd_led_sim.py` module and is independently testable (zero UI dependencies).
+
+#### ⏱ Max Duration  
 Move the **trim Start** slider to place the 2-minute window anywhere in the source video.  
 Set to `0` or uncheck to disable.
 
@@ -657,6 +682,8 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Stops at wrong position | Adjust `--scroll-cycles` (default `1.5` = centre hold) |
 | Banding on gradients | Switch to `anime` or `cinema` — dithering causes streaks with scrolling |
 | DMD preview not auto-refreshing | Wait ~2 s after last slider move; make sure a file is selected |
+| LED Sim preview looks wrong / too dark | The grid is normal — it shows the physical gap between LEDs. Toggle **💡 LED Sim** off for the classic upscaled view |
+| LED Sim canvas is very large | Expected for multi-panel configs — the 4× zoom is clamped at 640 px width |
 | Manual mode shows wrong area | Increase Zoom first, then move X/Y sliders |
 | Auto Action says "OpenCV not installed" | Run `pip install opencv-python` or re-run `./launch_ui.sh` (installs automatically) |
 | Auto Action preview is slow to appear | Normal — AI analysis takes a few seconds per video; progress shown in the AUTO ACTION canvas |

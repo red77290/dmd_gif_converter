@@ -250,6 +250,7 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 | **Multi-sélection dans la liste** | Ctrl+clic / Shift+clic pour sélectionner plusieurs fichiers · Suppr les efface tous d'un coup |
 | **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), alimente la liste automatiquement |
 | **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
+| **💡 LED Sim** | Superpose une grille pixel sur la preview DMD — simule l'aspect physique d'une dalle HUB75 · **activé par défaut** |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
 | **⏱ Max Duration** | Limite la durée et place la fenêtre n'importe où dans la source |
@@ -298,6 +299,32 @@ Toutes les valeurs par défaut = « aucun effet » — la sortie standard est id
 | Bottom crop % | `0 %` | Exclut les N % inférieurs du cadre de la détection (pieds / sol / HUD) |
 | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol), `-1,0` = caméra vers le haut |
 | **Auto floor detect** ✨ | `OFF` | Suivi dynamique du sol par EMA asymétrique — résiste aux sauts, suit les atterrissages · écrase le bias manuel |
+
+#### 💡 Simulation LED — mode aperçu DMD
+
+> **Activé par défaut.** Cliquez sur **💡 LED Sim ✓** dans la barre de preview pour basculer.
+
+Le bouton LED Sim superpose une grille de pixels sur le canvas **DMD OUTPUT** pour voir exactement comment le contenu s'affichera sur une vraie dalle HUB75 — chaque LED visible individuellement avec les écarts physiques entre elles.
+
+```
+Aperçu normal        Aperçu LED Sim (défaut)
+┌──────────────┐     ┌──────────────┐
+│ pixels lisses│     │· · · · · · ·│   · = espace sombre entre LEDs
+│ zoom ×2,3   │  →  │· ■ ■ ■ · ■ ■│   ■ = LED allumée (couleur préservée)
+└──────────────┘     │· · · · · · ·│
+                     └──────────────┘
+```
+
+| Propriété | Valeur |
+|---|---|
+| Taille de cellule | **4×4** pixels d'affichage par pixel DMD |
+| Écart | **1 px** de bordure sombre sur chaque bord (simule le boîtier LED) |
+| Surface éclairée | **3×3** px par LED → 56 % de la cellule |
+| Taille du canvas | 512×128 pour 128×32 (zoom 4×), plafonné à **640 px** max |
+| Re-rendu | Automatique à la bascule |
+| Performance | < 1 ms/frame (NumPy vectorisé, zéro boucle Python) |
+
+Le filtre est implémenté dans le module standalone `dmd_led_sim.py`, testable indépendamment de l'interface (zéro dépendance UI).
 
 #### ⏱ Max Duration
 
@@ -667,6 +694,8 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Arrêt à la mauvaise position | Ajuster `--scroll-cycles` (défaut `1.5` = arrêt au centre) |
 | Banding sur les dégradés | Passer en mode `anime` ou `cinema` — le dithering crée des raies avec du contenu défilant |
 | L'aperçu DMD ne se rafraîchit pas | Attendre ~2 s après le dernier déplacement de curseur ; vérifier qu'un fichier est sélectionné |
+| Aperçu LED Sim trop sombre / quadrillé | C'est normal — les écarts noirs simulent les espaces physiques entre LEDs. Désactivez **💡 LED Sim** pour l'aperçu classique |
+| Canvas LED Sim très grand | Attendu pour les configs multi-dalle — le zoom 4× est plafonné à 640 px de large |
 | Mode manuel montre la mauvaise zone | Augmenter d'abord le Zoom, puis ajuster les curseurs X/Y |
 | Auto Action : « OpenCV not installed » | Lancer `pip install opencv-python` ou re-lancer `./launch_ui.sh` (installe automatiquement) |
 | Aperçu Auto Action lent à apparaître | Normal — l'analyse IA prend quelques secondes par vidéo ; progression affichée dans le canvas AUTO ACTION |
