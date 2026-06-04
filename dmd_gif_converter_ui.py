@@ -234,6 +234,9 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_zoom_max     = tk.DoubleVar(value=2.0)
         self.v_action_padding      = tk.DoubleVar(value=0.20)
         self.v_action_intro        = tk.DoubleVar(value=1.5)
+        self.v_action_bottom_crop  = tk.DoubleVar(value=0.0)
+        self.v_action_vertical_bias = tk.DoubleVar(value=0.0)
+        self.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
         self.v_bg_sub_enable       = tk.BooleanVar(value=False) # New background subtraction checkbox
 
         # ── Tkinter vars — Multi-dalle / Tiling ───────────────────────────────
@@ -286,7 +289,8 @@ class DMDConverterApp(ctk.CTk):
             self.v_auto_action_enabled, self.v_action_detector,
             self.v_action_strength, self.v_action_smoothness,
             self.v_action_zoom_max, self.v_action_padding,
-            self.v_action_intro, self.v_bg_sub_enable,
+            self.v_action_intro, self.v_action_bottom_crop, self.v_action_vertical_bias,
+            self.v_action_auto_vertical_bias, self.v_bg_sub_enable,
             self.v_target_width, self.v_target_height, self.v_target_preset,
             self.v_text_overlay_enabled, self.v_text_content, # Added text overlay vars
             self.v_text_font_size, self.v_text_color, self.v_text_position, # Added text overlay vars
@@ -1245,10 +1249,36 @@ class DMDConverterApp(ctk.CTk):
                    "{:.2f}", "", steps=60)
         adv_slider(parent, "Intro panoramic", self.v_action_intro, 0.0, 5.0,
                    "{:.1f}", " s", steps=50)
+        adv_slider(parent, "Bottom crop (%)", self.v_action_bottom_crop, 0.0, 0.5,
+                   "{:.0%}", "", steps=50)
+        self._slider_vertical_bias = adv_slider(parent, "Vertical bias", self.v_action_vertical_bias, -1.0, 1.0,
+                   "{:.2f}", "", steps=100)
+
+        # ── Auto floor detect checkbox ──────────────────────────────────────
+        auto_floor_row = ctk.CTkFrame(parent, fg_color="transparent")
+        auto_floor_row.pack(fill="x", padx=14, pady=(0, 2))
+        ctk.CTkCheckBox(
+            auto_floor_row,
+            text="Auto floor detect (overrides Vertical bias)",
+            variable=self.v_action_auto_vertical_bias,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        ).pack(side="left")
+
+        def _toggle_auto_floor(*_):
+            state = "disabled" if self.v_action_auto_vertical_bias.get() else "normal"
+            self._slider_vertical_bias.configure(state=state)
+
+        self.v_action_auto_vertical_bias.trace_add("write", _toggle_auto_floor)
+
         ctk.CTkLabel(
             parent,
             text="    Intro: full-frame overview shown before zooming in on action.\n"
-                 "    Set to 0 to disable (start immediately on action).",
+                 "    Set to 0 to disable (start immediately on action).\n"
+                 "    Bottom crop: exclude bottom % of frame (pieds / sol / HUD).\n"
+                 "    Vertical bias: +1.0 = caméra vers le bas (sol visible · platformers)\n"
+                 "                   -1.0 = caméra vers le haut (ciel / plafond visible).\n"
+                 "    Auto floor detect: détecte automatiquement le sol frame par frame\n"
+                 "                       en plaçant le bas de la ROI à ~85 % de la hauteur visible.",
             text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
         ).pack(padx=14, pady=(0, 6), anchor="w")
 
@@ -1577,6 +1607,9 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_zoom_max.set(2.0)
         self.v_action_padding.set(0.20)
         self.v_action_intro.set(1.5)
+        self.v_action_bottom_crop.set(0.0)
+        self.v_action_vertical_bias.set(0.0)
+        self.v_action_auto_vertical_bias.set(False)
         self.v_bg_sub_enable.set(False) # Reset background subtraction
         self.v_target_preset.set("128x32 (1x1)") # Reset tiling preset
         self.v_target_width.set(DEFAULT_PARAMS["target_width"])
@@ -2015,6 +2048,9 @@ class DMDConverterApp(ctk.CTk):
             padding=float(self.v_action_padding.get()),
             intro_duration=float(self.v_action_intro.get()),
             bg_sub_enable=self.v_bg_sub_enable.get(),
+            bottom_crop_pct=float(self.v_action_bottom_crop.get()),
+            vertical_bias=float(self.v_action_vertical_bias.get()),
+            auto_vertical_bias=bool(self.v_action_auto_vertical_bias.get()),
             start_s=start_s,
             end_s=end_s,
             target_width=self.v_target_width.get(),
@@ -2529,6 +2565,9 @@ class DMDConverterApp(ctk.CTk):
             "action_zoom_max": self.v_action_zoom_max.get(),
             "action_padding": self.v_action_padding.get(),
             "action_intro": self.v_action_intro.get(),
+            "action_bottom_crop": self.v_action_bottom_crop.get(),
+            "action_vertical_bias": self.v_action_vertical_bias.get(),
+            "action_auto_vertical_bias": self.v_action_auto_vertical_bias.get(),
             "bg_sub_enable": self.v_bg_sub_enable.get(),
             "target_width": self.v_target_width.get(),
             "target_height": self.v_target_height.get(),
