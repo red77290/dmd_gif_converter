@@ -8,6 +8,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ## Table of Contents
 - [🔍 GIF Search — download GIFs directly from the UI](#-gif-search--download-gifs-directly-from-the-ui--new-in-v300)
+- [🎞️ Per-GIF Config — independent settings per file](#️-per-gif-config--independent-settings-per-file)
 - [🤖 Auto Action Framing — AI-powered cinematic camera](#-auto-action-framing--ai-powered-cinematic-camera)
 - [🎨 Smart Color Boost — AI heuristic colorimetry](#-smart-color-boost--ai-heuristic-colorimetry)
 - [✨ What it does](#-what-it-does)
@@ -63,6 +64,49 @@ Keyword + quantity  ──[DuckDuckGo image search]──▶  temp folder  ─�
 pip install duckduckgo-search requests
 # already included in requirements_ui.txt — auto-installed by ./launch_ui.sh
 ```
+
+---
+
+## 🎞️ Per-GIF Config — independent settings per file
+
+> **TL;DR — flip the toggle ON and every GIF remembers its own settings.**  
+> Located at the very top of the **⚙️ Parameters** panel, above all sliders.
+
+By default every file in the list shares the same global parameter set. When you enable **Per-GIF Config**, each file stores a completely independent copy of all ~50 parameters (colorimetry, scroll, FPS, text overlay, Auto Action, etc.) and reloads its own copy every time you select it.
+
+### How it works
+
+```
+Toggle OFF (default)                Toggle ON
+─────────────────────────────       ──────────────────────────────────────
+All GIFs use the same params        Each GIF has its own snapshot
+Select gifA → params unchanged      Select gifA → loads gifA's saved config
+Tweak a slider → affects all        Tweak a slider → only affects gifA
+Select gifB → same params           Select gifB → loads gifB's saved config
+                                        (or keeps current defaults if new)
+```
+
+### Step-by-step
+
+1. Open the UI and add your GIF/video files to the list
+2. Check **"🎞️ Per-GIF Config"** at the top of the Parameters panel
+3. Select a file — a status badge appears:
+   - **🆕 No saved config** → using current global defaults (tweak freely)
+   - **✅ Config loaded** → the file's saved settings were restored
+4. Adjust any parameters for this file
+5. Select another file — the current settings are **immediately and silently saved** for the previous file before the new config is loaded
+6. Repeat for each file in your list
+7. Hit **▶ Convert** — each file is processed with its own settings
+
+### Important notes
+
+| Behaviour | Detail |
+|---|---|
+| **Saves on selection change** | Config is captured synchronously the instant you click another file — no rendering delay |
+| **New files start with defaults** | Files never-before-selected inherit the current global params |
+| **Toggle OFF restores globals** | Disabling the toggle restores the parameter state that existed when you first toggled it ON |
+| **Clear list resets configs** | **🗑 Clear** or **✕ Remove** also erases the per-gif configs for those files |
+| **Close clears memory** | Per-gif configs are session-only — they are not persisted to disk |
 
 ---
 
@@ -273,6 +317,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | **Trim / clip** | Set start and end time — single-file conversion only |
 | **⏱ Max Duration** | Cap clip length + place the window anywhere in the source |
 | **🎨 Smart Color Boost** | One-click AI colorimetry — auto-adjusts contrast, saturation and gamma per source |
+| **🎞️ Per-GIF Config** | Global toggle — when ON each file stores its own independent copy of all ~50 parameters · config saved instantly on selection change |
 | **All standard parameters** | Sliders and drop-downs for mode, scroll, FPS, colorimetry |
 | **🔧 Advanced Settings** | Collapsible panel — all extras hidden by default, default values never alter the output |
 | **Batch folder** | Convert an entire folder in one click |
@@ -284,6 +329,15 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 
 Expand the **🔧 Advanced Settings ▼** button at the bottom of the Parameters panel.  
 All values default to "no effect" — standard output is 100% identical to v2.0.
+
+#### 🎞️ Per-GIF Config
+
+> See the [full dedicated section](#️-per-gif-config--independent-settings-per-file) earlier in this README for the complete guide.
+
+- Toggle at the **very top** of the Parameters panel
+- Each file keeps an independent snapshot of all ~50 parameters
+- Config is saved **synchronously** on selection change (no rendering delay, no cross-contamination)
+- Disabling the toggle restores the global parameter state from before the toggle was enabled
 
 #### 🎨 Smart Color Boost — AI heuristic colorimetry
 
@@ -720,6 +774,9 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Downloaded GIFs are very large | Normal for web GIFs — the converter will resize them to 128×32 automatically |
 | GIF Search timeout errors | Some image hosts are slow — increase quantity (up to 300) to compensate for skipped URLs |
 | Want to remove multiple GIFs at once | Hold **Ctrl** or **Shift** then click to multi-select, then press **Del** or click **✕ Remove** |
+| Per-GIF Config: params seem to bleed between files | Make sure to **click** the new file (not just hover) — the save triggers on the selection-change event |
+| Per-GIF Config: toggle OFF reverts to wrong params | Expected — it restores the exact state at the moment you toggled ON, not the current GIF's config |
+| Per-GIF Config: configs lost after restart | Configs are session-only (RAM) — export is not yet supported |
 
 ---
 
