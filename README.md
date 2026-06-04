@@ -258,7 +258,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 ### Screenshots
 
 ![DMD GIF Converter UI](media/UI_PREVIEW.png)
-<iframe width="100%" height="315" src="https://www.youtube.com/embed/zLWw8AmCeOk" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+![DMD GIF Converter UI Demo](media/UI_PREVIEW.gif)
 
 ### Features at a glance
 

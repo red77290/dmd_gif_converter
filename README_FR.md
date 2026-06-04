@@ -259,7 +259,7 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 ### Captures d'écran
 
 ![DMD GIF Converter UI](media/UI_PREVIEW.png)
-<iframe width="100%" height="315" src="https://www.youtube.com/embed/zLWw8AmCeOk" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+![DMD GIF Converter UI Demo](media/UI_PREVIEW.gif)
 
 ### Fonctionnalités
 
