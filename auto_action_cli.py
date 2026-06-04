@@ -7,10 +7,20 @@ Example:
 """
 
 import argparse
+import logging
 import shutil
 import sys
 
 from dmd_auto_action import AutoActionConfig, preprocess_video_for_dmd, available_detectors
+
+# ── Module-level logger ───────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-7s] %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stderr,
+)
+logger = logging.getLogger(__name__)
 
 
 def main() -> int:
@@ -27,7 +37,7 @@ def main() -> int:
     p.add_argument("--vertical-bias", type=float, default=0.0,
                    help="Shift camera center: +1.0=down (show floor/platformer), -1.0=up (show sky)")
     p.add_argument("--auto-floor-detect", action="store_true", default=False,
-                   help="Auto floor detection: places ROI bottom at ~85%% of crop height (overrides --vertical-bias)")
+                   help="Auto floor detection: places ROI bottom at ~93%% of crop height (overrides --vertical-bias)")
     p.add_argument("--start", type=float, default=None)
     p.add_argument("--end", type=float, default=None)
     args = p.parse_args()
@@ -46,18 +56,19 @@ def main() -> int:
     )
 
     ok, out_path, msg = preprocess_video_for_dmd(args.src, cfg)
-    print(msg)
-    if not ok or not out_path:
+    if ok:
+        logger.info("%s", msg)
+    else:
+        logger.error("%s", msg)
         return 1
 
     if args.out:
         shutil.copy2(out_path, args.out)
-        print(f"Saved: {args.out}")
+        logger.info("Saved → %s", args.out)
     else:
-        print(f"Generated: {out_path}")
+        logger.info("Generated → %s", out_path)
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

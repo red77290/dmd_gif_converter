@@ -120,6 +120,10 @@ AUTO_CANVAS_H = 170
 # DMD output is still displayed at 128×32 scaled ×2.34
 DMD_DISPLAY_SCALE_FACTOR = 2.34375 # 300/128 = 75/32
 
+# LED pixel-simulation — constants and filter imported from dmd_led_sim
+# (zero UI dependencies, independently testable)
+from dmd_led_sim import LED_SIM_SCALE, LED_SIM_GAP, LED_SIM_MAX_W, apply_led_grid as _apply_led_grid
+
 BG_CANVAS     = "#0d0d1a"
 APP_VERSION   = "3.0.0"
 
@@ -141,6 +145,7 @@ _MODE_DESC = {
     "cinema":    "Live-action films, real footage",
     "custom":    "Manual control of every parameter",
 }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +282,9 @@ class DMDConverterApp(ctk.CTk):
         # ── Tkinter vars — GIF Search ─────────────────────────────────────────
         self.v_search_keyword = tk.StringVar(value="")
         self.v_search_qty     = tk.IntVar(value=10)
+
+        # ── Tkinter vars — LED pixel simulation ───────────────────────────────
+        self.v_led_sim = tk.BooleanVar(value=True)   # ON by default
 
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
@@ -747,6 +755,13 @@ class DMDConverterApp(ctk.CTk):
             command=self.show_dmd_preview
         )
         self._btn_dmd.pack(side="left", padx=3)
+
+        self._btn_led_sim = ctk.CTkButton(
+            pb, text="💡 LED Sim  ✓", width=96, height=28,
+            fg_color="#5a4a00", hover_color="#7a6400",
+            command=self._toggle_led_sim
+        )
+        self._btn_led_sim.pack(side="left", padx=3)
 
         # Dual canvas row
         dc = ctk.CTkFrame(pf, fg_color="transparent")
@@ -1585,15 +1600,28 @@ class DMDConverterApp(ctk.CTk):
         else:
             self._text_bg_opacity_frame.pack_forget()
 
+    def _compute_led_sim_display_size(self):
+        """Return (display_w, display_h, scale) for LED sim mode, clamped to LED_SIM_MAX_W."""
+        w = self.v_target_width.get()
+        h = self.v_target_height.get()
+        scale = LED_SIM_SCALE
+        while w * scale > LED_SIM_MAX_W and scale > 2:
+            scale -= 1
+        return w * scale, h * scale, scale
+
     def _update_dmd_canvas_size(self, *_):
         w = self.v_target_width.get()
         h = self.v_target_height.get()
-        new_width  = int(w * DMD_DISPLAY_SCALE_FACTOR)
-        new_height = int(h * DMD_DISPLAY_SCALE_FACTOR)
+        if getattr(self, "v_led_sim", None) and self.v_led_sim.get():
+            new_width, new_height, _ = self._compute_led_sim_display_size()
+        else:
+            new_width  = int(w * DMD_DISPLAY_SCALE_FACTOR)
+            new_height = int(h * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.configure(width=new_width, height=new_height)
         # Update the title label to reflect the current output dimensions
         if hasattr(self, "_dmd_title_label"):
-            self._dmd_title_label.configure(text=f"DMD OUTPUT {w}×{h}")
+            sim_badge = "  💡" if (getattr(self, "v_led_sim", None) and self.v_led_sim.get()) else ""
+            self._dmd_title_label.configure(text=f"DMD OUTPUT {w}×{h}{sim_badge}")
         # Re-center the idle text if it's showing
         if not self._dmd_frames and not self._dmd_rendering:
             self._draw_dmd_canvas_idle()
@@ -2206,14 +2234,22 @@ class DMDConverterApp(ctk.CTk):
         params  = self._collect_params()
         start_s, end_s = self._get_trim()
         # Capture display dimensions on the main thread (Tkinter is not thread-safe)
-        dmd_display_w = current_dmd_width
-        dmd_display_h = current_dmd_height
+        led_sim = self.v_led_sim.get()
+        if led_sim:
+            dmd_display_w, dmd_display_h, sim_scale = self._compute_led_sim_display_size()
+        else:
+            dmd_display_w = current_dmd_width
+            dmd_display_h = current_dmd_height
+            sim_scale = 0
         threading.Thread(
             target=self._generate_dmd_preview,
-            args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h), daemon=True
+            args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h,
+                  led_sim, sim_scale), daemon=True
         ).start()
 
-    def _generate_dmd_preview(self, src, params, start_s, end_s, dmd_display_w, dmd_display_h):
+    def _generate_dmd_preview(self, src, params, start_s, end_s,
+                              dmd_display_w, dmd_display_h,
+                              led_sim: bool = False, sim_scale: int = 0):
         """Run in a background thread. Returns PIL images (NOT PhotoImage) to the main thread."""
         tmpdir  = tempfile.mkdtemp(prefix="dmd_dmd_")
         try:
@@ -2229,11 +2265,12 @@ class DMDConverterApp(ctk.CTk):
             try:
                 img = Image.open(out_gif)
                 while True:
-                    pil_frames.append(
-                        img.copy().convert("RGB").resize(
-                            (dmd_display_w, dmd_display_h), Image.NEAREST
-                        )
+                    frame = img.copy().convert("RGB").resize(
+                        (dmd_display_w, dmd_display_h), Image.NEAREST
                     )
+                    if led_sim and sim_scale >= 2:
+                        frame = self._apply_led_grid(frame, sim_scale)
+                    pil_frames.append(frame)
                     delays.append(max(img.info.get("duration", 80), 20))
                     img.seek(img.tell() + 1)
             except EOFError:
@@ -2292,6 +2329,43 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_pending_src = None
         if pending and self._selected_iid:
             self.after(50, lambda: self._start_dmd_generation(pending))
+
+    def _toggle_led_sim(self):
+        """Toggle LED pixel-simulation mode and immediately re-render the DMD preview."""
+        is_on = not self.v_led_sim.get()
+        self.v_led_sim.set(is_on)
+        # Update button appearance
+        if is_on:
+            self._btn_led_sim.configure(
+                fg_color="#5a4a00", hover_color="#7a6400",
+                text="💡 LED Sim  ✓"
+            )
+        else:
+            self._btn_led_sim.configure(
+                fg_color="#1a1a2e", hover_color="#2a2a4a",
+                text="💡 LED Sim"
+            )
+        # Resize canvas to match new mode
+        self._update_dmd_canvas_size()
+        # Invalidate cached PhotoImages (scale changed) and re-render
+        self._dmd_frames = [None] * len(self._dmd_pil_frames)  # force re-bake
+        if self._selected_iid and not self._dmd_rendering:
+            src = self._file_data.get(self._selected_iid)
+            if src:
+                self._start_dmd_generation(src)
+
+    @staticmethod
+    def _apply_led_grid(pil_img: "Image.Image", sim_scale: int,
+                        gap: int = LED_SIM_GAP) -> "Image.Image":
+        """Fast NumPy LED pixel-grid overlay.
+
+        Each logical pixel occupies a (sim_scale × sim_scale) cell in the
+        display image.  A dark border of `gap` px on every edge simulates the
+        physical gap between LED emitters on an HUB75 matrix.
+
+        The operation is fully vectorised — no Python loops over pixels.
+        """
+        return _apply_led_grid(pil_img, sim_scale, gap)
 
     def _animate_dmd(self):
         if not self._dmd_pil_frames:
