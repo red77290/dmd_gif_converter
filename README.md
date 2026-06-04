@@ -650,6 +650,9 @@ MIT — free to use, modify and distribute.
 - **[FFmpeg](https://ffmpeg.org/)** — video processing engine
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** — modern cross-platform UI framework
 - **[Pillow](https://python-pillow.org/)** — image handling for the UI preview and text overlay fallback
+- **[DuckDuckGo](https://duckduckgo.com/)** — image search API powering the GIF Search feature (no API key required)
+- **[duckduckgo-search](https://github.com/deedy5/duckduckgo_search)** — Python wrapper for the DuckDuckGo search API
+- **[Requests](https://docs.python-requests.org/)** — HTTP library used for GIF downloads
 - **[Bitbank2](https://github.com/bitbank2/AnimatedGIF)** — AnimatedGIF library for ESP32
 - **[Mrfaptastic](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA)** — high-performance DMA HUB75 driver for ESP32
 - **[Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite)** — the project this tool was built for

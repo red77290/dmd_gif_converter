@@ -30,6 +30,9 @@ class AutoActionConfig:
     padding: float = 0.20              # extra padding around ROI
     intro_duration: float = 1.5        # seconds of full-frame overview before focusing
     bg_sub_enable: bool = False       # enable background subtraction (replaces background with black)
+    bottom_crop_pct: float = 0.0      # fraction of image bottom to exclude from framing (0 = disabled)
+    vertical_bias: float = 0.0        # shift camera center: +1.0 = down (show floor), -1.0 = up (show sky)
+    auto_vertical_bias: bool = False  # auto floor detection: places ROI bottom (floor) at ~85 % of crop height
     # out_w / out_h are no longer used for the actual output resolution.
     # The preprocessor always outputs at the source native width with a 4:1
     # crop ratio (= DMD ratio 128:32) so that ffmpeg receives full-quality input.
@@ -177,17 +180,122 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
-def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig):
-    """Compute target camera rect at 4:1 ratio based on ROI + user strength."""
+class _FloorEstimator:
+    """Asymmetric exponential moving average for floor/ground level estimation.
+
+    Designed for 2-D platformer content where the floor height changes between
+    platforms and the character regularly jumps off the ground.
+
+    Behaviour
+    ---------
+    • *Attack* (roi_bottom **increases** → character descends / lands lower):
+      fast update — the camera follows new lower platforms quickly.
+    • *Release* (roi_bottom **decreases** → character jumps / ascends):
+      very slow update — the camera ignores short-lived aerial positions and
+      stays anchored to the last known ground level.
+
+    The result: during a jump the floor estimate barely moves; when the
+    character lands on a new (possibly lower) platform the estimate adapts
+    within roughly 10–15 frames (~0.5–1 s at 12 fps).
+    """
+
+    # α ∈ (0, 1] — higher = faster response
+    _ALPHA_ATTACK  = 0.28   # fast: character lands lower / new lower platform
+    _ALPHA_RELEASE = 0.02   # very slow: character in the air / moving upward
+
+    def __init__(self, frame_h: int) -> None:
+        self._frame_h: float = float(frame_h)
+        self._floor_y: Optional[float] = None
+
+    def update(self, roi_bottom: Optional[float]) -> float:
+        """Feed the latest roi_bottom and return the current floor estimate."""
+        if roi_bottom is None:
+            # No detection: keep last known floor (camera stays anchored).
+            if self._floor_y is None:
+                # Very first frame with no ROI → default to 80 % of frame.
+                self._floor_y = self._frame_h * 0.80
+            return self._floor_y
+
+        rb = float(roi_bottom)
+        if self._floor_y is None:
+            self._floor_y = rb          # first detection: snap immediately
+            return self._floor_y
+
+        # Asymmetric update
+        alpha = self._ALPHA_ATTACK if rb >= self._floor_y else self._ALPHA_RELEASE
+        self._floor_y += alpha * (rb - self._floor_y)
+        return self._floor_y
+
+    @property
+    def floor_y(self) -> Optional[float]:
+        return self._floor_y
+
+
+def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
+                       floor_y_est: Optional[float] = None):
+    """Compute target camera rect at target_ratio based on ROI + user strength.
+
+    Always returns a rect where cw / ch == target_ratio exactly so that the
+    subsequent cv2.resize(cropped, (out_w, out_h)) never stretches the image.
+
+    Vertical positioning priority (highest → lowest):
+      1. auto_vertical_bias=True + floor_y_est provided
+                               → dynamic floor-aware placement via _FloorEstimator
+      2. auto_vertical_bias=True (no floor_y_est)
+                               → per-frame roi bottom at ~93 % of crop (fallback)
+      3. vertical_bias != 0    → manual lerp toward top/bottom edge
+      4. neither               → follow ROI center (or frame center when no ROI)
+    """
     target_ratio = float(cfg.target_width) / cfg.target_height
+    _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
+    _auto = getattr(cfg, "auto_vertical_bias", False)
+
+    # Fraction of crop height at which the estimated floor should appear.
+    # 0.93 means the floor is 93 % down from the top of the visible strip
+    # (≈ 7 % margin at the bottom) — aggressive enough to show the ground in
+    # most 2-D platformers without risking clipping below the frame.
+    _FLOOR_RATIO: float = 0.93
+
+    def _apply_bias(cy: float, crop_h: float) -> float:
+        """Lerp camera center toward frame top (-) or bottom (+).
+        bias=+1.0 → camera as low as possible (floor visible).
+        bias=-1.0 → camera as high as possible.
+        Expressed as fraction of available vertical travel so it works
+        independently of zoom level.
+        """
+        if abs(_bias) < 1e-4:
+            return cy
+        target_cy = float(frame_h) - crop_h / 2.0 if _bias > 0 else crop_h / 2.0
+        cy = cy + _bias * (target_cy - cy)
+        return _clamp(cy, crop_h / 2.0, float(frame_h) - crop_h / 2.0)
+
+    def _apply_auto_floor(cy: float, floor_y: float, crop_h: float) -> float:
+        """Place floor_y at _FLOOR_RATIO from the top of the crop window.
+
+        floor_y = cy - crop_h/2 + floor_ratio * crop_h
+        → cy     = floor_y + crop_h * (0.5 - floor_ratio)
+        """
+        cy = floor_y + crop_h * (0.5 - _FLOOR_RATIO)
+        return _clamp(cy, crop_h / 2.0, float(frame_h) - crop_h / 2.0)
 
     if roi is None:
-        # Keep source center when no ROI is available.
+        # No ROI — full-frame overview centered.
         cx = frame_w / 2.0
         cy = frame_h / 2.0
-        # Fit widest target_ratio crop possible.
-        crop_h = min(frame_h, frame_w / target_ratio)
+        crop_h = min(float(frame_h), float(frame_w) / target_ratio)
         crop_w = crop_h * target_ratio
+        if _auto:
+            if floor_y_est is not None:
+                # We have a memorised floor level: use it even without a live ROI
+                # so the camera stays anchored when the subject briefly leaves frame.
+                cy = _apply_auto_floor(cy, floor_y_est, crop_h)
+            else:
+                # No estimate yet: lean aggressively downward (65 % toward bottom).
+                cy_max = float(frame_h) - crop_h / 2.0
+                cy = cy + 0.65 * (cy_max - cy)
+                cy = _clamp(cy, crop_h / 2.0, float(frame_h) - crop_h / 2.0)
+        else:
+            cy = _apply_bias(cy, crop_h)
         return cx, cy, crop_w, crop_h
 
     x, y, w, h = roi
@@ -195,38 +303,44 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig):
     cy = y + h / 2.0
 
     # Convert detector strength into zoom demand.
-    # 0.0 => very loose framing, 1.0 => tight framing (up to zoom_max)
     strength = _clamp(cfg.strength, 0.0, 1.0)
     zoom = 1.0 + strength * (max(1.0, cfg.zoom_max) - 1.0)
 
-    # Start from ROI bounds with extra padding.
+    # Start from ROI bounds with extra padding, expanded to target aspect ratio.
     roi_w = max(16.0, w * (1.0 + cfg.padding))
-    roi_h = max(8.0, h * (1.0 + cfg.padding))
-
-    # Expand to target aspect ratio.
+    roi_h = max(8.0,  h * (1.0 + cfg.padding))
     if roi_w / roi_h < target_ratio:
         roi_w = roi_h * target_ratio
     else:
         roi_h = roi_w / target_ratio
 
-    # Apply zoom factor (higher zoom -> smaller crop window).
+    # Apply zoom factor (higher zoom → smaller crop window).
     crop_w = roi_w / zoom
     crop_h = roi_h / zoom
 
-    # Keep inside frame bounds — and enforce zoom_max as a hard minimum crop
-    # size so the camera never zooms in beyond zoom_max times regardless of
-    # how small the detected ROI is (e.g. distant face, tiny sprite).
-    # min_crop_h is derived from min_crop_w at target_ratio to keep the constraints
-    # coherent and avoid the aspect-ratio fixup widening the crop back out.
-    min_crop_w = max(float(cfg.target_width) / 4, float(frame_w) / max(1.0, cfg.zoom_max))
-    min_crop_h = max(float(cfg.target_height) / 4,  min_crop_w / target_ratio)
-    crop_w = _clamp(crop_w, min_crop_w, float(frame_w))
-    crop_h = _clamp(crop_h, min_crop_h, float(frame_h))
+    # Hard minimum: never zoom beyond zoom_max regardless of ROI size.
+    min_crop_w = max(float(cfg.target_width) / 4,
+                     float(frame_w) / max(1.0, cfg.zoom_max))
+    min_crop_h = min_crop_w / target_ratio
+    crop_w = max(crop_w, min_crop_w)
+    crop_h = max(crop_h, min_crop_h)
 
-    if crop_w / crop_h < target_ratio:
-        crop_w = min(frame_w, crop_h * target_ratio)
+    # ── Enforce exact aspect ratio ──────────────────────────────────────────
+    # Derive crop_w from crop_h. If that exceeds frame_w, cap at frame_w and
+    # recompute crop_h — this guarantees cw/ch == target_ratio always.
+    crop_w = crop_h * target_ratio
+    if crop_w > float(frame_w):
+        crop_w = float(frame_w)
+        crop_h = float(frame_w) / target_ratio
+
+    # ── Vertical positioning ────────────────────────────────────────────────
+    if _auto:
+        # Use the pre-smoothed floor estimate when available (supplied by the
+        # main loop via _FloorEstimator); fall back to raw roi bottom otherwise.
+        fy = floor_y_est if floor_y_est is not None else float(y + h)
+        cy = _apply_auto_floor(cy, fy, crop_h)
     else:
-        crop_h = min(frame_h, crop_w / target_ratio)
+        cy = _apply_bias(cy, crop_h)
 
     return cx, cy, crop_w, crop_h
 
@@ -239,29 +353,34 @@ def _smooth(prev, curr, smoothness: float):
 
 
 def _crop_frame(frame, cam_rect):
+    """Crop frame to cam_rect, always returning a region of exactly
+    round(cw) × round(ch) pixels (no dimension drift from push-back)."""
     h, w = frame.shape[:2]
     cx, cy, cw, ch = cam_rect
 
+    # Pin output dimensions first — avoid the dimension-drift that occurs when
+    # independent rounding of (cx±cw/2) produces a width ≠ round(cw).
+    out_w = max(1, int(round(cw)))
+    out_h = max(1, int(round(ch)))
+
+    # Top-left corner from centre.
     x1 = int(round(cx - cw / 2.0))
     y1 = int(round(cy - ch / 2.0))
-    x2 = int(round(cx + cw / 2.0))
-    y2 = int(round(cy + ch / 2.0))
 
+    # Push-back: move the window (not resize) to stay inside the frame.
+    if x1 + out_w > w:
+        x1 = w - out_w
     if x1 < 0:
-        x2 -= x1
         x1 = 0
+    if y1 + out_h > h:
+        y1 = h - out_h
     if y1 < 0:
-        y2 -= y1
         y1 = 0
-    if x2 > w:
-        x1 -= (x2 - w)
-        x2 = w
-    if y2 > h:
-        y1 -= (y2 - h)
-        y2 = h
 
-    x1 = max(0, x1)
-    y1 = max(0, y1)
+    x2 = x1 + out_w
+    y2 = y1 + out_h
+
+    # Safety clamp (only needed when out_w > w or out_h > h).
     x2 = min(w, x2)
     y2 = min(h, y2)
 
@@ -306,6 +425,11 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     target_aspect_ratio = float(cfg.target_width) / cfg.target_height
     out_h = max(8, (frame_w // int(target_aspect_ratio) // 2) * 2) # even number, matching target aspect ratio
 
+    # Bottom crop: restrict action detection and camera framing to the top portion of the frame.
+    # This avoids framing being dragged down by feet/floor/subtitles/HUD elements.
+    _bcp = _clamp(getattr(cfg, "bottom_crop_pct", 0.0), 0.0, 0.9)
+    effective_frame_h = max(cfg.target_height, int(frame_h * (1.0 - _bcp)))
+
     initial_start_s = cfg.start_s if cfg.start_s is not None else 0.0
     if initial_start_s > 0:
         cap.set(cv2.CAP_PROP_POS_MSEC, float(initial_start_s) * 1000.0)
@@ -326,7 +450,8 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     detector = _FrameDetector()
 
     # Full-frame overview rect: widest target_width:target_height crop centred on the source.
-    cam_full_view = _build_camera_rect(frame_w, frame_h, None, cfg)
+    # Uses effective_frame_h so the intro never pans into the bottom-cropped region.
+    cam_full_view = _build_camera_rect(frame_w, effective_frame_h, None, cfg)
 
     # ── Intro frame count — capped relative to source length ─────────────────
     # A fixed intro_duration can dominate very short sources (e.g. a 0.5 s GIF
@@ -407,6 +532,13 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     src_idx  = 0     # independent counter for end_s trimming
     # No need to adjust src_idx here, as cap.set() above resets the pointer.
 
+    # Dynamic floor estimator: active only when auto_vertical_bias is on.
+    # Instantiated here so it persists across the whole tracking phase and
+    # accumulates a stable ground-level estimate frame by frame.
+    _floor_est: Optional[_FloorEstimator] = (
+        _FloorEstimator(effective_frame_h) if cfg.auto_vertical_bias else None
+    )
+
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -416,9 +548,18 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         if cfg.end_s is not None and (initial_start_s + t) >= float(cfg.end_s):
             break
 
-        # Detect ROI on the original frame
-        roi = detector.detect(frame, cfg.detector)
-        cam_now = _build_camera_rect(frame_w, frame_h, roi, cfg)
+        # Detect ROI on the original frame, restricted to the non-bottom-cropped area
+        detect_frame = frame[:effective_frame_h, :] if _bcp > 0.0 else frame
+        roi = detector.detect(detect_frame, cfg.detector)
+
+        # Update floor estimate (asymmetric EMA) and forward it to the camera.
+        floor_y_est: Optional[float] = None
+        if _floor_est is not None:
+            roi_bottom = float(roi[1] + roi[3]) if roi is not None else None
+            floor_y_est = _floor_est.update(roi_bottom)
+
+        cam_now = _build_camera_rect(frame_w, effective_frame_h, roi, cfg,
+                                     floor_y_est=floor_y_est)
         cam = _smooth(cam_prev, cam_now, cfg.smoothness)
         cam_prev = cam
         last_frame = frame

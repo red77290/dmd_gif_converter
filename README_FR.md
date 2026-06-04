@@ -659,6 +659,9 @@ MIT — libre d'utilisation, modification et distribution.
 - **[FFmpeg](https://ffmpeg.org/)** — moteur de traitement vidéo
 - **[CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)** — interface graphique moderne multi-plateforme
 - **[Pillow](https://python-pillow.org/)** — gestion des images pour l'aperçu et le fallback text overlay
+- **[DuckDuckGo](https://duckduckgo.com/)** — API de recherche d'images utilisée par la fonction Recherche GIF (sans clé API)
+- **[duckduckgo-search](https://github.com/deedy5/duckduckgo_search)** — bibliothèque Python pour l'API de recherche DuckDuckGo
+- **[Requests](https://docs.python-requests.org/)** — bibliothèque HTTP utilisée pour le téléchargement des GIFs
 - **[Bitbank2](https://github.com/bitbank2/AnimatedGIF)** — bibliothèque AnimatedGIF pour ESP32
 - **[Mrfaptastic](https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA)** — moteur DMA HUB75 pour ESP32
 - Projet **[Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite)**

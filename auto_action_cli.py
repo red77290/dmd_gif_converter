@@ -22,6 +22,12 @@ def main() -> int:
     p.add_argument("--smoothness", type=float, default=0.85)
     p.add_argument("--zoom-max", type=float, default=1.8)
     p.add_argument("--padding", type=float, default=0.20)
+    p.add_argument("--bottom-crop", type=float, default=0.0,
+                   help="Fraction of image bottom to exclude from framing (0=disabled, e.g. 0.15)")
+    p.add_argument("--vertical-bias", type=float, default=0.0,
+                   help="Shift camera center: +1.0=down (show floor/platformer), -1.0=up (show sky)")
+    p.add_argument("--auto-floor-detect", action="store_true", default=False,
+                   help="Auto floor detection: places ROI bottom at ~85%% of crop height (overrides --vertical-bias)")
     p.add_argument("--start", type=float, default=None)
     p.add_argument("--end", type=float, default=None)
     args = p.parse_args()
@@ -32,6 +38,9 @@ def main() -> int:
         smoothness=args.smoothness,
         zoom_max=args.zoom_max,
         padding=args.padding,
+        bottom_crop_pct=args.bottom_crop,
+        vertical_bias=args.vertical_bias,
+        auto_vertical_bias=args.auto_floor_detect,
         start_s=args.start,
         end_s=args.end,
     )
