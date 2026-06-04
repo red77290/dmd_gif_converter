@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.0.0
+# 🎞️ DMD GIF Converter — v3.1.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
@@ -22,7 +22,7 @@ Mot-clé + quantité  ──[recherche images DuckDuckGo]──▶  dossier temp
 | Fonctionnalité | Détails |
 |---|---|
 | **Recherche par mot-clé** | N'importe quel texte — supporte la touche `Entrée` pour lancer la recherche |
-| **Quantité configurable** | 1 à 50 GIFs par recherche (défaut : 10) |
+| **Quantité configurable** | 1 à **300** GIFs par recherche (défaut : 10) |
 | **Progression en temps réel** | La barre de progression principale se met à jour à chaque fichier téléchargé |
 | **Alimentation fichier par fichier** | Chaque GIF téléchargé apparaît dans la liste immédiatement |
 | **Bouton Annuler** | Apparaît pendant le téléchargement — s'arrête après le fichier en cours |
@@ -34,7 +34,7 @@ Mot-clé + quantité  ──[recherche images DuckDuckGo]──▶  dossier temp
 
 1. Dans le panneau **📁 Fichiers source** → trouvez la section **🔍 GIF Search**
 2. Tapez un mot-clé (ex. `pac-man`, `pixel art fire`, `retro arcade`)
-3. Définissez la quantité (défaut : 10, max : 50)
+3. Définissez la quantité (défaut : 10, max : **300**)
 4. Appuyez sur **⬇ DL** ou Entrée
 5. Les GIFs se téléchargent un par un et apparaissent dans la liste
 6. Sélectionnez-en un, ajustez les paramètres, et convertissez !
@@ -62,6 +62,7 @@ Vidéo source  ──[analyse IA]──▶  crop 4:1 cinématique  ──[ffmpeg
          Détection de mouvement (soustraction de fond + flux optique)
          Caméra virtuelle à lissage exponentiel
          Plan large d'introduction panoramique
+         Suivi automatique du sol (jeux de plateformes 2D)
 ```
 
 ### Ce que ça fait automatiquement
@@ -105,6 +106,9 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_smoothness` | Camera smooth | `0,85` | `0` = instantané · `0,98` = caméra très lente |
 | `action_zoom_max` | Zoom max | `1,8×` | Zoom dynamique maximum que la caméra IA peut appliquer |
 | `action_padding` | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
+| `action_bottom_crop` | Bottom crop % | `0 %` | Exclut les N % inférieurs du frame de la détection (cache les pieds, le sol, le HUD pour ne pas faire descendre la caméra) |
+| `action_vertical_bias` | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol visible), `-1,0` = caméra vers le haut |
+| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Détecte automatiquement** le niveau du sol via un EMA asymétrique — résiste aux sauts, suit les atterrissages. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
 
 ### Modes de détection
 
@@ -114,6 +118,30 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `motion` | Sport, véhicules, action rapide sans silhouette humaine claire |
 | `hybrid` | Fusionne les boîtes person + motion — couverture la plus large |
 | `center` | Pas de détection — caméra centrée (panoramique intro uniquement) |
+
+### Auto floor detect — suivi dynamique du sol
+
+> **Idéal pour les jeux de plateformes 2D** et tout contenu où le niveau du sol change.
+
+Quand **Auto floor detect** est activé, la caméra utilise un **EMA asymétrique** (Exponential Moving Average) pour mémoriser le niveau du sol image par image :
+
+| Situation | Comportement |
+|---|---|
+| Personnage **atterrit** / descend sur une plateforme plus basse | L'estimation du sol se met à jour rapidement (α = 0,28 — atteint le nouveau sol en ~10 images) |
+| Personnage **saute** ou monte | L'estimation du sol bouge à peine (α = 0,02 — < 30 px de dérive sur 8 images en l'air) |
+| Sujet **hors-champ** (pas de détection) | La caméra maintient le dernier niveau de sol connu — pas de dérive |
+
+La caméra reste ainsi ancrée au sol pendant les sauts et suit naturellement le personnage quand il atterrit sur une nouvelle plateforme (plus basse).
+
+**Règles de priorité :**
+1. `auto_vertical_bias = True` → suivi auto du sol actif, `vertical_bias` manuel ignoré
+2. `auto_vertical_bias = False` + `vertical_bias ≠ 0` → décalage manuel appliqué
+3. Les deux désactivés → la caméra suit le centre du ROI (comportement par défaut)
+
+**Flag CLI :**
+```bash
+python auto_action_cli.py input.mp4 --auto-floor-detect
+```
 
 ### Dépendance requise
 
@@ -219,7 +247,8 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 | Fonctionnalité | Détails |
 |---|---|
 | **Import par fichier ou dossier** | ➕ fichiers individuels, 📂 dossier entier — tous les formats vidéo acceptés |
-| **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité, alimente la liste automatiquement |
+| **Multi-sélection dans la liste** | Ctrl+clic / Shift+clic pour sélectionner plusieurs fichiers · Suppr les efface tous d'un coup |
+| **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), alimente la liste automatiquement |
 | **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
@@ -266,6 +295,9 @@ Toutes les valeurs par défaut = « aucun effet » — la sortie standard est id
 | Camera smooth | `0,85` | Lissage exponentiel — plus élevé = caméra plus lente |
 | Zoom max | `1,8×` | Zoom maximum autorisé |
 | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
+| Bottom crop % | `0 %` | Exclut les N % inférieurs du cadre de la détection (pieds / sol / HUD) |
+| Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol), `-1,0` = caméra vers le haut |
+| **Auto floor detect** ✨ | `OFF` | Suivi dynamique du sol par EMA asymétrique — résiste aux sauts, suit les atterrissages · écrase le bias manuel |
 
 #### ⏱ Max Duration
 
@@ -559,6 +591,9 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `action_zoom_max` | `1.8` | Zoom IA maximum |
 | `action_padding` | `0.20` | Marge autour du ROI détecté |
 | `bg_sub_enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
+| `action_bottom_crop` | `0.0` | Exclut les N % inférieurs du cadre de la détection auto-action (0 = désactivé) |
+| `action_vertical_bias` | `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
+| `action_auto_vertical_bias` | `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
 | `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
 | `target_height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
 | `text_overlay_enabled` | `False` | 💬 Graver un texte dans le GIF de sortie |
@@ -636,6 +671,9 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Auto Action : « OpenCV not installed » | Lancer `pip install opencv-python` ou re-lancer `./launch_ui.sh` (installe automatiquement) |
 | Aperçu Auto Action lent à apparaître | Normal — l'analyse IA prend quelques secondes par vidéo ; progression affichée dans le canvas AUTO ACTION |
 | Résultat Auto Action incorrect | Essayer un autre **mode de détection** (`motion` ou `hybrid`) — le mode `person` fonctionne mieux avec des silhouettes humaines visibles |
+| Sol non visible dans un jeu de plateformes 2D | Activer **Auto floor detect** dans les paramètres avancés Auto Action — il ancre la caméra au niveau du sol détecté |
+| La caméra remonte pendant les sauts | Activer **Auto floor detect** — son EMA asymétrique résiste aux mouvements vers le haut pendant les phases aériennes |
+| Auto floor detect ne montre toujours pas le sol | Augmenter **Bottom crop %** pour masquer le HUD/sol du détecteur principal, puis réactiver Auto floor detect |
 | Smart Color Boost donne de mauvaises couleurs | Désactivez-le et réglez manuellement — fonctionne mieux sur du contenu mal exposé ou hétérogène |
 | Smart Color Boost log affiche `fallback` | OpenCV non disponible — lancer `pip install opencv-python` |
 | Le texte overlay n'apparaît pas | Vérifiez que **Text Content** n'est pas vide et que le fichier de police existe dans `media/fonts/` |
@@ -644,7 +682,8 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Le bouton Recherche GIF est désactivé | Installez les dépendances manquantes : `pip install duckduckgo-search requests` (ou relancez `./launch_ui.sh`) |
 | Recherche GIF : 0 résultat | DuckDuckGo peut limiter les requêtes rapides — patientez quelques secondes et réessayez |
 | GIFs téléchargés très volumineux | Normal pour les GIFs web — le convertisseur les redimensionne automatiquement en 128×32 |
-| Erreurs de timeout pendant le téléchargement | Certains hébergeurs d'images sont lents — augmentez la quantité pour compenser les URLs ignorées |
+| Erreurs de timeout pendant le téléchargement | Certains hébergeurs d'images sont lents — augmentez la quantité (jusqu'à 300) pour compenser les URLs ignorées |
+| Supprimer plusieurs GIFs en même temps | Maintenez **Ctrl** ou **Shift** puis cliquez pour multi-sélectionner, ensuite **Suppr** ou cliquer **✕ Remove** |
 
 ---
 
