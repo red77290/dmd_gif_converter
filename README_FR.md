@@ -259,6 +259,10 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 ### Captures d'écran
 
 ![DMD GIF Converter UI](media/UI_PREVIEW.png)
+<video controls autoplay loop muted width="100%">
+  <source src="media/UI_PREVIEW.mov" type="video/quicktime">
+  Votre navigateur ne supporte pas la balise vidéo.
+</video>
 
 ### Fonctionnalités
 
