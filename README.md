@@ -168,7 +168,10 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_smoothness` | Camera smooth | `0.85` | `0` = instant · `0.98` = very slow camera |
 | `action_zoom_max` | Zoom max | `1.8×` | Maximum dynamic zoom the AI camera can apply |
 | `action_padding` | ROI padding | `0.20` | Extra space added around the detected subject |
-| `action_bottom_crop` | Bottom crop % | `0 %` | Exclude the bottom N % of the frame from detection (hides feet, floor, HUD from dragging the camera down) |
+| `action_bottom_crop` | Bottom crop % | `0 %` | Exclude the bottom N % of the frame from detection (manual — overridden when auto is active) |
+| `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Automatically** detect where the subject ends at the bottom (feet / floor). Activates **Face Priority** mode 👤 when the body is taller than the DMD window — crops to the head/face region so the face is always fully visible |
+| `action_top_crop` | Top crop % | `0 %` | Exclude the top N % of the frame from detection (manual — overridden when auto is active) |
+| `action_auto_top_crop` | Auto top crop | `OFF` | **Automatically** detect where the subject starts at the top (head / sky) — adapts padding to face vs full-body content |
 | `action_vertical_bias` | Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings. Overrides the manual vertical bias. Ideal for 2-D platformers. |
 
@@ -206,10 +209,49 @@ python auto_action_cli.py input.mp4 --auto-floor-detect
 # manual bias flag is silently ignored when --auto-floor-detect is set
 ```
 
+### Auto crop top / bottom — automatic subject framing
 
+> Works for any content type: face close-ups, full-body character sprites, 2-D platformers.
 
+#### Auto bottom crop
+
+Samples ~40 evenly-spaced frames and detects where **the subject ends at the bottom** (feet, ground line).
+Automatically eliminates HUD bars, floor tiles, and subtitle strips that would drag the camera down.
+
+#### Auto top crop
+
+Detects where **the subject starts at the top** (head, hair tip, weapon).
+Eliminates sky, ceiling, or black bars above the character.
+
+#### Content-type adaptation
+
+The median bounding-box aspect ratio infers whether the subject is a **face/close-up** or **full body**, adjusting the margin accordingly:
+
+| Aspect ratio h/w | Subject type | Margin applied |
+|-----------------|--------------|----------------|
+| < 1.3 | Close-up / face | 15 % of frame height |
+| 1.3 – 2.5 | Bust / upper body | 10 % of frame height |
+| > 2.5 | Full body | 6 % of frame height |
+
+#### Manual ↔ Auto toggle
+
+Both crops have an **independent checkbox** and a manual slider:
+
+- **Auto ON** → slider grayed out; value computed automatically at render time.
+- **Auto OFF** → slider active; you set the crop percentage manually.
+
+The two modes are fully independent — auto bottom + manual top is valid.
+
+**CLI flags:**
 ```bash
-pip install opencv-python   # or: pip install -r requirements_ui.txt
+# Auto both boundaries
+python auto_action_cli.py input.mp4 --auto-bottom-crop --auto-top-crop
+
+# Manual bottom + auto top
+python auto_action_cli.py input.mp4 --bottom-crop 0.10 --auto-top-crop
+
+# Manual both (original behaviour)
+python auto_action_cli.py input.mp4 --top-crop 0.05 --bottom-crop 0.15
 ```
 
 If OpenCV is not installed, the feature is silently skipped and the standard pipeline runs instead — **no crash, no data loss**.
@@ -679,7 +721,10 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_zoom_max` | `1.8` | Maximum AI zoom factor |
 | `action_padding` | `0.20` | Padding around detected ROI |
 | `bg_sub_enable` | `False` | Replace background with black (maximises subject contrast) |
-| `action_bottom_crop` | `0.0` | Exclude bottom N % of frame from auto-action detection (0 = disabled) |
+| `action_bottom_crop` | `0.0` | Exclude bottom N % of frame (manual, 0 = disabled) |
+| `action_auto_bottom_crop` | `False` | Auto-detect bottom crop from ROI analysis |
+| `action_top_crop` | `0.0` | Exclude top N % of frame (manual, 0 = disabled) |
+| `action_auto_top_crop` | `False` | Auto-detect top crop from ROI analysis |
 | `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
 | `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
 | `target_width` | `128` | Output width in pixels (multi-panel tiling) |

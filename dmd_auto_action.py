@@ -29,8 +29,11 @@ class AutoActionConfig:
     zoom_max: float = 2.0              # max dynamic zoom factor (hard limit)
     padding: float = 0.20              # extra padding around ROI
     intro_duration: float = 1.5        # seconds of full-frame overview before focusing
-    bg_sub_enable: bool = False       # enable background subtraction (replaces background with black)
-    bottom_crop_pct: float = 0.0      # fraction of image bottom to exclude from framing (0 = disabled)
+    bg_sub_enable: bool = False        # enable background subtraction (replaces background with black)
+    bottom_crop_pct: float = 0.0       # fraction of image bottom to exclude from framing (0 = disabled)
+    top_crop_pct: float = 0.0          # fraction of image top to exclude from framing (0 = disabled)
+    auto_bottom_crop: bool = False     # auto-detect bottom crop boundary from ROI analysis
+    auto_top_crop: bool = False        # auto-detect top crop boundary from ROI analysis
     vertical_bias: float = 0.0        # shift camera center: +1.0 = down (show floor), -1.0 = up (show sky)
     auto_vertical_bias: bool = False  # auto floor detection: places ROI bottom (floor) at ~85 % of crop height
     # out_w / out_h are no longer used for the actual output resolution.
@@ -231,8 +234,152 @@ class _FloorEstimator:
         return self._floor_y
 
 
+def _compute_auto_crop_margins(
+    cap,
+    detector: "_FrameDetector",
+    cfg: "AutoActionConfig",
+    frame_w: int,
+    frame_h: int,
+    sample_count: int = 40,
+) -> Tuple[float, float]:
+    """Sample frames to compute optimal top/bottom crop percentages.
+
+    Analyses ``sample_count`` evenly-spaced frames, collects bounding-box
+    edges from the detector, and returns (top_pct, bottom_pct) as fractions
+    of *frame_h* that are safe to exclude.
+
+    Content-type inference & face priority
+    ---------------------------------------
+    The aspect ratio of the median detected bounding box determines whether
+    the subject is a **face/close-up** (roughly square ROI → tight padding)
+    or a **full body** (tall narrow ROI → looser padding).
+
+    **Face priority mode** (new):
+    When the subject's bounding-box height exceeds the DMD window height
+    (``frame_w / target_ratio``), the whole body cannot fit on screen at once.
+    In this case the system automatically prioritises the **face / head region**
+    by treating only the top ``FACE_FRAC`` fraction of the body ROI as the
+    effective "content bottom".  This guarantees the face is always fully
+    visible within the DMD strip, regardless of how tall the character is.
+
+    Face priority activates whenever the majority (> 50 %) of sampled frames
+    have a ROI taller than ``DMD_CROP_H_FACTOR × dmd_window_h``.
+
+    Returns
+    -------
+    (top_pct, bottom_pct) : both in [0, 0.9].  Values of 0.0 mean no crop.
+    """
+    import cv2  # already guaranteed imported by caller
+    try:
+        import numpy as np
+    except ImportError:
+        return 0.0, 0.0
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if total_frames <= 0:
+        return 0.0, 0.0
+
+    # Height of the DMD crop window in source pixels (at native source width).
+    # If the ROI is taller than this, the whole body cannot fit in one frame.
+    target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
+    dmd_crop_h   = frame_w / target_ratio
+
+    # ── Face-priority constants ───────────────────────────────────────────────
+    # DMD_CROP_H_FACTOR: body must be at least this multiple of dmd_crop_h
+    # before face priority kicks in.  0.80 means "at least 80 % as tall as the
+    # DMD window" — catches characters that would be cropped even slightly.
+    DMD_CROP_H_FACTOR: float = 0.80
+    # FACE_FRAC: fraction of body height estimated to contain the face + head
+    # (head + neck + upper shoulders).  0.32 works well for both realistic and
+    # anime/game characters where the head is relatively large.
+    FACE_FRAC: float = 0.32
+
+    step = max(1, total_frames // sample_count)
+    roi_tops: list[float]    = []
+    roi_bottoms: list[float] = []   # may be face-bottom when face priority
+    roi_heights: list[float] = []
+    roi_widths: list[float]  = []
+    face_priority_count: int = 0    # frames where body > DMD window
+
+    saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+
+    for i in range(0, min(total_frames - 1, sample_count * step), step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            continue
+        roi = detector.detect(frame, cfg.detector)
+        if roi is not None:
+            rx, ry, rw, rh = roi
+            roi_tops.append(float(ry))
+            roi_heights.append(float(rh))
+            roi_widths.append(float(rw))
+
+            # Face priority check: is the body taller than the DMD window?
+            if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
+                # Body too tall — only include the head/face region (top FACE_FRAC)
+                # as the effective content bottom for this frame.
+                roi_bottoms.append(float(ry + rh * FACE_FRAC))
+                face_priority_count += 1
+            else:
+                # Body fits — include actual feet.
+                roi_bottoms.append(float(ry + rh))
+
+    # Restore capture position
+    cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
+
+    if not roi_tops:
+        return 0.0, 0.0
+
+    # ── Face priority mode decision ───────────────────────────────────────────
+    # Activated when the majority of sampled frames have a body that is too
+    # tall for the DMD window.
+    face_priority = face_priority_count > len(roi_tops) * 0.5
+
+    # ── Content-type inference ────────────────────────────────────────────────
+    # Face/close-up: median aspect ratio (h/w) close to 1.0  → subject is compact.
+    # Full body:     median aspect ratio >> 1 (tall & narrow) → need more headroom.
+    median_h = float(np.median(roi_heights))
+    median_w = float(np.median(roi_widths)) if roi_widths else max(1.0, median_h)
+    aspect   = median_h / max(1.0, median_w)
+
+    # Padding multiplier
+    # Face priority mode → treat as face content regardless of raw aspect ratio
+    # (the effective content is now the head region).
+    if face_priority:
+        # Generous head-region padding — ensure forehead is not clipped.
+        pad_frac = 0.12
+    elif aspect < 1.3:
+        # Close-up / face-like ROI
+        pad_frac = 0.15
+    elif aspect < 2.5:
+        # Intermediate (bust / upper body)
+        pad_frac = 0.10
+    else:
+        # Full body (very tall ROI) that still fits in DMD window
+        pad_frac = 0.06
+
+    pad_px = frame_h * pad_frac
+
+    # ── Percentile boundaries ─────────────────────────────────────────────────
+    # 5th percentile of tops → where the subject reliably starts (head).
+    # 95th percentile of bottoms → where the effective content ends.
+    #   In face priority mode "bottom" is the estimated face-bottom, not the feet.
+    top_y    = float(np.percentile(roi_tops,    5)) - pad_px
+    bottom_y = float(np.percentile(roi_bottoms, 95)) + pad_px
+
+    top_y    = max(0.0, top_y)
+    bottom_y = min(float(frame_h), bottom_y)
+
+    top_pct    = _clamp(top_y / frame_h, 0.0, 0.9)
+    bottom_pct = _clamp((frame_h - bottom_y) / frame_h, 0.0, 0.9)
+
+    return top_pct, bottom_pct
+
+
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
-                       floor_y_est: Optional[float] = None):
+                       floor_y_est: Optional[float] = None,
+                       frame_top: float = 0.0):
     """Compute target camera rect at target_ratio based on ROI + user strength.
 
     Always returns a rect where cw / ch == target_ratio exactly so that the
@@ -245,6 +392,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                                → per-frame roi bottom at ~93 % of crop (fallback)
       3. vertical_bias != 0    → manual lerp toward top/bottom edge
       4. neither               → follow ROI center (or frame center when no ROI)
+
+    Parameters
+    ----------
+    frame_top : float
+        Y-coordinate of the top boundary for camera motion (pixels).
+        Set to ``frame_h * top_crop_pct`` so the camera never pans above the
+        top-crop line.  Default 0.0 = no top restriction.
     """
     target_ratio = float(cfg.target_width) / cfg.target_height
     _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
@@ -256,6 +410,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     # most 2-D platformers without risking clipping below the frame.
     _FLOOR_RATIO: float = 0.93
 
+    def _cy_min(crop_h: float) -> float:
+        """Minimum camera centre y: never pan above the top-crop line."""
+        return max(crop_h / 2.0, frame_top + crop_h / 2.0)
+
+    def _cy_max(crop_h: float) -> float:
+        return float(frame_h) - crop_h / 2.0
+
     def _apply_bias(cy: float, crop_h: float) -> float:
         """Lerp camera center toward frame top (-) or bottom (+).
         bias=+1.0 → camera as low as possible (floor visible).
@@ -265,9 +426,9 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         """
         if abs(_bias) < 1e-4:
             return cy
-        target_cy = float(frame_h) - crop_h / 2.0 if _bias > 0 else crop_h / 2.0
+        target_cy = _cy_max(crop_h) if _bias > 0 else _cy_min(crop_h)
         cy = cy + _bias * (target_cy - cy)
-        return _clamp(cy, crop_h / 2.0, float(frame_h) - crop_h / 2.0)
+        return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
 
     def _apply_auto_floor(cy: float, floor_y: float, crop_h: float) -> float:
         """Place floor_y at _FLOOR_RATIO from the top of the crop window.
@@ -276,13 +437,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         → cy     = floor_y + crop_h * (0.5 - floor_ratio)
         """
         cy = floor_y + crop_h * (0.5 - _FLOOR_RATIO)
-        return _clamp(cy, crop_h / 2.0, float(frame_h) - crop_h / 2.0)
+        return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
 
     if roi is None:
         # No ROI — full-frame overview centered.
         cx = frame_w / 2.0
-        cy = frame_h / 2.0
-        crop_h = min(float(frame_h), float(frame_w) / target_ratio)
+        cy = (frame_top + frame_h) / 2.0
+        crop_h = min(float(frame_h) - frame_top, float(frame_w) / target_ratio)
         crop_w = crop_h * target_ratio
         if _auto:
             if floor_y_est is not None:
@@ -291,9 +452,9 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                 cy = _apply_auto_floor(cy, floor_y_est, crop_h)
             else:
                 # No estimate yet: lean aggressively downward (65 % toward bottom).
-                cy_max = float(frame_h) - crop_h / 2.0
+                cy_max = _cy_max(crop_h)
                 cy = cy + 0.65 * (cy_max - cy)
-                cy = _clamp(cy, crop_h / 2.0, float(frame_h) - crop_h / 2.0)
+                cy = _clamp(cy, _cy_min(crop_h), cy_max)
         else:
             cy = _apply_bias(cy, crop_h)
         return cx, cy, crop_w, crop_h
@@ -341,6 +502,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cy = _apply_auto_floor(cy, fy, crop_h)
     else:
         cy = _apply_bias(cy, crop_h)
+
+    # Final safety clamp: ensures cy stays within the effective vertical range
+    # [frame_top + ch/2, frame_h - ch/2] regardless of ROI position.
+    cy = _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
 
     return cx, cy, crop_w, crop_h
 
@@ -424,11 +589,38 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # Calculate out_h based on the desired target aspect ratio
     target_aspect_ratio = float(cfg.target_width) / cfg.target_height
     out_h = max(8, (frame_w // int(target_aspect_ratio) // 2) * 2) # even number, matching target aspect ratio
-
-    # Bottom crop: restrict action detection and camera framing to the top portion of the frame.
     # This avoids framing being dragged down by feet/floor/subtitles/HUD elements.
     _bcp = _clamp(getattr(cfg, "bottom_crop_pct", 0.0), 0.0, 0.9)
-    effective_frame_h = max(cfg.target_height, int(frame_h * (1.0 - _bcp)))
+    _tcp = _clamp(getattr(cfg, "top_crop_pct", 0.0), 0.0, 0.9)
+
+    # ── Auto crop margins ─────────────────────────────────────────────────────
+    # When auto_bottom_crop or auto_top_crop is enabled, sample the video to
+    # compute the tightest crop that still contains the full subject (face or
+    # full body), then override the manual crop percentages.
+    # Face priority: if the body is taller than the DMD window, the scan
+    # automatically adjusts the bottom boundary to show only the head/face region.
+    _auto_bc = getattr(cfg, "auto_bottom_crop", False)
+    _auto_tc = getattr(cfg, "auto_top_crop", False)
+    _face_priority_mode = False  # will be set True if face priority was triggered
+    if _auto_bc or _auto_tc:
+        detector_for_scan = _FrameDetector()
+        computed_top, computed_bottom = _compute_auto_crop_margins(
+            cap, detector_for_scan, cfg, frame_w, frame_h
+        )
+        if _auto_tc:
+            _tcp = computed_top
+        if _auto_bc:
+            _bcp = computed_bottom
+            # Face priority detection: if the effective visible height is
+            # significantly smaller than the DMD window height, the auto-scan
+            # must have applied face priority (body was too tall to fit).
+            _target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
+            _dmd_window_h = frame_w / _target_ratio
+            _effective_h  = frame_h * (1.0 - _bcp) - frame_h * _tcp
+            _face_priority_mode = _effective_h < _dmd_window_h * 0.75
+
+    effective_frame_top = int(frame_h * _tcp)
+    effective_frame_h   = max(cfg.target_height, int(frame_h * (1.0 - _bcp)))
 
     initial_start_s = cfg.start_s if cfg.start_s is not None else 0.0
     if initial_start_s > 0:
@@ -451,7 +643,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
 
     # Full-frame overview rect: widest target_width:target_height crop centred on the source.
     # Uses effective_frame_h so the intro never pans into the bottom-cropped region.
-    cam_full_view = _build_camera_rect(frame_w, effective_frame_h, None, cfg)
+    # Uses effective_frame_top so the intro never pans above the top-cropped region.
+    cam_full_view = _build_camera_rect(frame_w, effective_frame_h, None, cfg,
+                                       frame_top=float(effective_frame_top))
 
     # ── Intro frame count — capped relative to source length ─────────────────
     # A fixed intro_duration can dominate very short sources (e.g. a 0.5 s GIF
@@ -535,6 +729,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # Dynamic floor estimator: active only when auto_vertical_bias is on.
     # Instantiated here so it persists across the whole tracking phase and
     # accumulates a stable ground-level estimate frame by frame.
+    # effective_frame_h is passed as the reference height; effective_frame_top
+    # offsets are handled in the detection loop (ROI y is shifted back to
+    # absolute frame coordinates before being fed to the estimator).
     _floor_est: Optional[_FloorEstimator] = (
         _FloorEstimator(effective_frame_h) if cfg.auto_vertical_bias else None
     )
@@ -548,9 +745,16 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         if cfg.end_s is not None and (initial_start_s + t) >= float(cfg.end_s):
             break
 
-        # Detect ROI on the original frame, restricted to the non-bottom-cropped area
-        detect_frame = frame[:effective_frame_h, :] if _bcp > 0.0 else frame
+        # Detect ROI on the original frame, restricted to the non-cropped area
+        # (between effective_frame_top and effective_frame_h).
+        detect_frame = frame[effective_frame_top:effective_frame_h, :]
         roi = detector.detect(detect_frame, cfg.detector)
+
+        # Translate ROI y-coordinate back into original frame space so that
+        # _build_camera_rect and _FloorEstimator work in absolute pixels.
+        if roi is not None and effective_frame_top > 0:
+            rx, ry, rw, rh = roi
+            roi = (rx, ry + effective_frame_top, rw, rh)
 
         # Update floor estimate (asymmetric EMA) and forward it to the camera.
         floor_y_est: Optional[float] = None
@@ -559,7 +763,8 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             floor_y_est = _floor_est.update(roi_bottom)
 
         cam_now = _build_camera_rect(frame_w, effective_frame_h, roi, cfg,
-                                     floor_y_est=floor_y_est)
+                                     floor_y_est=floor_y_est,
+                                     frame_top=float(effective_frame_top))
         cam = _smooth(cam_prev, cam_now, cfg.smoothness)
         cam_prev = cam
         last_frame = frame
@@ -620,7 +825,16 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
 
     tail_info  = f" +{extra}t"     if extra > 0       else ""
     intro_info = f" +{intro_frames}i" if intro_frames > 0 else ""
+    crop_info  = ""
+    if _tcp > 0.0 or _bcp > 0.0:
+        auto_suffix_t = "▲auto" if _auto_tc else "▲manual"
+        auto_suffix_b = "▼auto" if _auto_bc else "▼manual"
+        face_info = " [face priority 👤]" if _face_priority_mode else ""
+        crop_info = (
+            f", top={_tcp:.0%}{auto_suffix_t}"
+            f" bot={_bcp:.0%}{auto_suffix_b}{face_info}"
+        )
     return True, out_path, (
         f"Auto action OK ({frame_idx} frames{intro_info}{tail_info}, "
-        f"{out_w}×{out_h}, detector={cfg.detector})."
+        f"{out_w}×{out_h}, detector={cfg.detector}{crop_info})."
     )

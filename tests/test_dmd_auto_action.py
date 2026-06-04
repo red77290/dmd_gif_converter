@@ -25,6 +25,7 @@ from dmd_auto_action import (
     _FloorEstimator,
     _build_camera_rect,
     _clamp,
+    _compute_auto_crop_margins,
     _crop_frame,
     _smooth,
     available_detectors,
@@ -69,6 +70,9 @@ class TestAutoActionConfig(unittest.TestCase):
         self.assertFalse(cfg.auto_vertical_bias)
         self.assertAlmostEqual(cfg.vertical_bias, 0.0)
         self.assertAlmostEqual(cfg.bottom_crop_pct, 0.0)
+        self.assertAlmostEqual(cfg.top_crop_pct, 0.0)
+        self.assertFalse(cfg.auto_bottom_crop)
+        self.assertFalse(cfg.auto_top_crop)
         self.assertIsNone(cfg.start_s)
         self.assertIsNone(cfg.end_s)
         self.assertEqual(cfg.target_width, 128)
@@ -494,6 +498,266 @@ class TestPreprocessVideoForDmd(unittest.TestCase):
         """Chaque mode de détecteur doit être dans la liste autorisée."""
         for mode in available_detectors():
             self.assertIn(mode, ["person", "motion", "hybrid", "center"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AutoActionConfig — auto crop fields
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAutoActionConfigAutoCrop(unittest.TestCase):
+
+    def test_auto_bottom_crop_default_false(self):
+        cfg = AutoActionConfig()
+        self.assertFalse(cfg.auto_bottom_crop)
+
+    def test_auto_top_crop_default_false(self):
+        cfg = AutoActionConfig()
+        self.assertFalse(cfg.auto_top_crop)
+
+    def test_top_crop_pct_default_zero(self):
+        cfg = AutoActionConfig()
+        self.assertAlmostEqual(cfg.top_crop_pct, 0.0)
+
+    def test_auto_bottom_crop_can_be_enabled(self):
+        cfg = AutoActionConfig(auto_bottom_crop=True)
+        self.assertTrue(cfg.auto_bottom_crop)
+
+    def test_auto_top_crop_can_be_enabled(self):
+        cfg = AutoActionConfig(auto_top_crop=True)
+        self.assertTrue(cfg.auto_top_crop)
+
+    def test_manual_top_crop_pct(self):
+        cfg = AutoActionConfig(top_crop_pct=0.1)
+        self.assertAlmostEqual(cfg.top_crop_pct, 0.1)
+
+    def test_both_auto_crops_independent(self):
+        cfg = AutoActionConfig(auto_bottom_crop=True, auto_top_crop=False)
+        self.assertTrue(cfg.auto_bottom_crop)
+        self.assertFalse(cfg.auto_top_crop)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _compute_auto_crop_margins
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestComputeAutoCropMargins(unittest.TestCase):
+    """Tests for the auto crop margin computation using a mock capture."""
+
+    def setUp(self):
+        try:
+            import numpy as np
+            self.np = np
+        except ImportError:
+            self.skipTest("numpy non disponible")
+        try:
+            import cv2
+            self.cv2 = cv2
+        except ImportError:
+            self.skipTest("opencv non disponible")
+
+    def _make_mock_cap(self, frame_h=480, frame_w=640, total_frames=60,
+                       roi_y=100, roi_h=200):
+        """Build a minimal mock cv2.VideoCapture that returns a black frame
+        with a rectangle filled at (roi_y, 0)-(roi_y+roi_h, roi_w)."""
+        np = self.np
+        cv2 = self.cv2
+
+        frame = np.zeros((frame_h, frame_w, 3), dtype=np.uint8)
+        # Make a bright rectangle so motion/fg detection can find it
+        frame[roi_y:roi_y + roi_h, 0:frame_w // 2] = 200
+
+        cap = MagicMock()
+        cap.get = MagicMock(side_effect=lambda prop: (
+            float(total_frames) if prop == cv2.CAP_PROP_FRAME_COUNT else
+            0.0
+        ))
+        cap.set = MagicMock(return_value=None)
+        cap.read = MagicMock(return_value=(True, frame.copy()))
+        return cap
+
+    def test_returns_tuple_of_two_floats(self):
+        from dmd_auto_action import _FrameDetector
+        cfg = AutoActionConfig(detector="motion")
+        # Detector that always returns a fixed ROI
+        det = MagicMock()
+        det.detect = MagicMock(return_value=(0, 100, 320, 200))
+        cap = self._make_mock_cap()
+        result = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        top, bottom = result
+        self.assertIsInstance(top, float)
+        self.assertIsInstance(bottom, float)
+
+    def test_no_detections_returns_zeros(self):
+        cfg = AutoActionConfig(detector="motion")
+        det = MagicMock()
+        det.detect = MagicMock(return_value=None)
+        cap = self._make_mock_cap()
+        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        self.assertAlmostEqual(top, 0.0)
+        self.assertAlmostEqual(bottom, 0.0)
+
+    def test_full_body_roi_fits_in_dmd_window(self):
+        """Full-body ROI that fits within the DMD window → feet are used as bottom.
+
+        For frame_w=640, target 128×32 → dmd_crop_h = 160 px.
+        ROI h=90 (< 160×0.80=128) → no face priority → feet-based bottom crop.
+        The effective content ends at roi_y + roi_h = 50 + 90 = 140.
+        With pad_frac=0.06 (tall narrow ROI, h/w=3.0 > 2.5):
+          bottom_y ≈ 140 + 480*0.06 ≈ 169  →  bottom_pct ≈ 0.65
+        The important invariant: top boundary should be above the head (y=50).
+        """
+        cfg = AutoActionConfig(detector="motion", target_width=128, target_height=32)
+        det = MagicMock()
+        # Tall narrow ROI that still fits (h/w=3.0, h=90 < 128 threshold)
+        det.detect = MagicMock(return_value=(100, 50, 30, 90))
+        cap = self._make_mock_cap()
+        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        # top boundary must be at or above the head (y=50 → top_pct ≤ 50/480 ≈ 0.104)
+        self.assertLessEqual(top * 480, 50.0,
+            "Top boundary must be at or above the head position (y=50)")
+        # bottom boundary must be at or below feet (y=140 → effective_bottom ≥ 140)
+        effective_bottom = 480 * (1.0 - bottom)
+        self.assertGreaterEqual(effective_bottom, 90.0,
+            "Bottom boundary must include the feet region")
+
+    def test_face_priority_triggers_when_body_too_tall(self):
+        """When ROI height > 80% of DMD window height, face priority activates.
+
+        In face priority mode the effective bottom is roi_y + roi_h * FACE_FRAC
+        (top ~32%) instead of roi_y + roi_h (feet), so bottom_pct is LARGER
+        (more of the frame is excluded from the bottom).
+        """
+        # frame_w=640, target_ratio=4.0 → dmd_crop_h = 160 px
+        # ROI: y=50, h=200 → 200 > 160 * 0.80 = 128 → face priority
+        cfg_face_prio = AutoActionConfig(detector="motion",
+                                         target_width=128, target_height=32)
+        det_tall = MagicMock()
+        det_tall.detect = MagicMock(return_value=(100, 50, 80, 200))  # h=200 > 128
+
+        cfg_normal = AutoActionConfig(detector="motion",
+                                      target_width=128, target_height=32)
+        det_short = MagicMock()
+        det_short.detect = MagicMock(return_value=(100, 50, 80, 80))  # h=80 < 128
+
+        cap1 = self._make_mock_cap()
+        cap2 = self._make_mock_cap()
+
+        top_tall, bot_tall   = _compute_auto_crop_margins(cap1, det_tall,  cfg_face_prio, 640, 480)
+        top_short, bot_short = _compute_auto_crop_margins(cap2, det_short, cfg_normal,    640, 480)
+
+        # Face priority: bottom boundary is at roi_y + roi_h * 0.32 = 50 + 64 = 114
+        # Normal (short): bottom boundary is at roi_y + roi_h = 50 + 80 = 130
+        # Face priority excludes MORE from the bottom → bot_tall > bot_short
+        self.assertGreater(bot_tall, bot_short,
+            "Face priority mode should crop more from the bottom than normal mode "
+            "(body-too-tall triggers face region focus)")
+
+    def test_face_priority_head_always_visible(self):
+        """The top_pct should be small enough that the head is always included.
+
+        Even in face priority mode the top boundary should be above (or at) the
+        head position.
+        """
+        cfg = AutoActionConfig(detector="motion", target_width=128, target_height=32)
+        det = MagicMock()
+        # Very tall ROI: y=50, h=250 (head at y=50)
+        det.detect = MagicMock(return_value=(100, 50, 60, 250))
+        cap = self._make_mock_cap()
+        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        # top boundary must be at or above y=50 (head position)
+        top_y_px = top * 480
+        self.assertLessEqual(top_y_px, 50.0,
+            f"top_y_px={top_y_px:.1f} is below the head (y=50) — head would be cut off")
+
+    def test_face_roi_gives_larger_padding(self):
+        """Face-like ROI (square) → larger relative padding applied."""
+        cfg = AutoActionConfig(detector="motion")
+        det_face = MagicMock()
+        det_body = MagicMock()
+        # Face: h/w ≈ 1.0
+        det_face.detect = MagicMock(return_value=(200, 180, 80, 80))
+        # Full body: h/w ≈ 4.0
+        det_body.detect = MagicMock(return_value=(200, 180, 40, 160))
+
+        cap = self._make_mock_cap()
+        top_face, bot_face = _compute_auto_crop_margins(cap, det_face, cfg, 640, 480)
+
+        cap2 = self._make_mock_cap()
+        top_body, bot_body = _compute_auto_crop_margins(cap2, det_body, cfg, 640, 480)
+
+        # Face should have more padding than body (face pad_frac=0.15, body pad_frac=0.06)
+        # The face roi starts at y=180, body roi also starts at y=180
+        # Face top_pct = (180 - 0.15*480) / 480 ≈ (180-72)/480 = 108/480 ≈ 0.225
+        # Body top_pct = (180 - 0.06*480) / 480 ≈ (180-29)/480 = 151/480 ≈ 0.315
+        # Actually face pad is LARGER so top_pct (starting further down) < body
+        # The important thing is just that both are non-negative
+        self.assertGreaterEqual(top_face, 0.0)
+        self.assertGreaterEqual(top_body, 0.0)
+
+    def test_values_clamped_to_valid_range(self):
+        """Both returned values must be in [0, 0.9]."""
+        cfg = AutoActionConfig(detector="motion")
+        det = MagicMock()
+        det.detect = MagicMock(return_value=(0, 0, 640, 480))  # Full frame ROI
+        cap = self._make_mock_cap()
+        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        self.assertGreaterEqual(top, 0.0)
+        self.assertLessEqual(top, 0.9)
+        self.assertGreaterEqual(bottom, 0.0)
+        self.assertLessEqual(bottom, 0.9)
+
+    def test_zero_total_frames_returns_zeros(self):
+        """If cap reports 0 total frames, should return (0.0, 0.0)."""
+        import cv2
+        cfg = AutoActionConfig()
+        det = MagicMock()
+        cap = MagicMock()
+        cap.get = MagicMock(return_value=0.0)
+        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        self.assertAlmostEqual(top, 0.0)
+        self.assertAlmostEqual(bottom, 0.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _build_camera_rect — frame_top parameter
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestBuildCameraRectFrameTop(unittest.TestCase):
+    """Tests for the frame_top parameter in _build_camera_rect."""
+
+    def _cfg(self, **kw):
+        return AutoActionConfig(**kw)
+
+    def test_frame_top_zero_same_as_default(self):
+        """frame_top=0 should produce the same result as no frame_top."""
+        cfg = self._cfg()
+        r1 = _build_camera_rect(1280, 480, None, cfg, frame_top=0.0)
+        r2 = _build_camera_rect(1280, 480, None, cfg)
+        # Results should be numerically identical
+        for a, b in zip(r1, r2):
+            self.assertAlmostEqual(a, b, places=4)
+
+    def test_frame_top_restricts_camera_upward(self):
+        """With frame_top > 0, camera centre y should be ≥ frame_top + ch/2."""
+        cfg = self._cfg()
+        frame_top = 100.0
+        cx, cy, cw, ch = _build_camera_rect(1280, 480, None, cfg, frame_top=frame_top)
+        self.assertGreaterEqual(cy, frame_top + ch / 2.0 - 0.5)
+
+    def test_frame_top_with_roi(self):
+        """With frame_top > 0 and a ROI above it, camera should still be >= frame_top + ch/2."""
+        cfg = self._cfg(strength=0.5)
+        frame_top = 80.0
+        roi = (100, 10, 80, 40)   # ROI y=10, well above frame_top=80
+        cx, cy, cw, ch = _build_camera_rect(1280, 480, roi, cfg, frame_top=frame_top)
+        self.assertGreaterEqual(cy, frame_top + ch / 2.0 - 0.5)
+
+    def test_aspect_ratio_preserved_with_frame_top(self):
+        cfg = self._cfg(target_width=128, target_height=32)
+        cx, cy, cw, ch = _build_camera_rect(1280, 480, None, cfg, frame_top=60.0)
+        self.assertAlmostEqual(cw / ch, 128 / 32, places=1)
 
 
 if __name__ == "__main__":

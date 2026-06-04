@@ -34,6 +34,12 @@ def main() -> int:
     p.add_argument("--padding", type=float, default=0.20)
     p.add_argument("--bottom-crop", type=float, default=0.0,
                    help="Fraction of image bottom to exclude from framing (0=disabled, e.g. 0.15)")
+    p.add_argument("--auto-bottom-crop", action="store_true", default=False,
+                   help="Auto-detect bottom crop boundary from ROI analysis (overrides --bottom-crop)")
+    p.add_argument("--top-crop", type=float, default=0.0,
+                   help="Fraction of image top to exclude from framing (0=disabled, e.g. 0.10)")
+    p.add_argument("--auto-top-crop", action="store_true", default=False,
+                   help="Auto-detect top crop boundary from ROI analysis (overrides --top-crop)")
     p.add_argument("--vertical-bias", type=float, default=0.0,
                    help="Shift camera center: +1.0=down (show floor/platformer), -1.0=up (show sky)")
     p.add_argument("--auto-floor-detect", action="store_true", default=False,
@@ -49,6 +55,9 @@ def main() -> int:
         zoom_max=args.zoom_max,
         padding=args.padding,
         bottom_crop_pct=args.bottom_crop,
+        auto_bottom_crop=args.auto_bottom_crop,
+        top_crop_pct=args.top_crop,
+        auto_top_crop=args.auto_top_crop,
         vertical_bias=args.vertical_bias,
         auto_vertical_bias=args.auto_floor_detect,
         start_s=args.start,
