@@ -357,6 +357,9 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             padding=float(p.get("action_padding", 0.20)),
             intro_duration=float(p.get("action_intro", 1.5)),
             bg_sub_enable=bool(p.get("bg_sub_enable", False)),
+            bottom_crop_pct=float(p.get("action_bottom_crop", 0.0)),
+            vertical_bias=float(p.get("action_vertical_bias", 0.0)),
+            auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None,
             target_width=target_width, # Pass target dimensions to auto_action
