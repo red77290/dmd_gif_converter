@@ -21,6 +21,10 @@ is already hand-tuned for LED panels.  Smart Color Boost uses those values as a
 Normal well-exposed content receives small adjustments around the baseline,
 so the result is always at least as good as the standard pixel_art preset.
 
+Delta functions use **continuous piecewise-linear interpolation** instead of
+step-wise if/elif chains.  This ensures that structurally similar sources always
+produce consistent, smoothly-varying parameters — no abrupt jumps at thresholds.
+
 Relies exclusively on OpenCV and NumPy — no additional dependencies.
 
 Public API
@@ -37,6 +41,34 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
+# ── Smooth piecewise-linear interpolation (no NumPy required) ────────────────
+
+def _linear_interp(x: float, xp: "list[float]", fp: "list[float]") -> float:
+    """Piecewise linear interpolation between (xp[i], fp[i]) knot pairs.
+
+    Replaces step-wise if/elif chains with a continuous mapping:
+    structurally similar inputs always produce consistent, smoothly-varying
+    output values — no abrupt jumps at threshold boundaries.
+
+    Parameters
+    ----------
+    x  : query value
+    xp : sorted list of x knot positions (must be strictly increasing)
+    fp : list of f(x) values at each knot
+
+    Returns f(x) clamped to [fp[0], fp[-1]] range at extrapolation boundaries.
+    """
+    if x <= xp[0]:
+        return float(fp[0])
+    if x >= xp[-1]:
+        return float(fp[-1])
+    for i in range(len(xp) - 1):
+        if xp[i] <= x < xp[i + 1]:
+            t = (x - xp[i]) / (xp[i + 1] - xp[i])
+            return float(fp[i]) + t * float(fp[i + 1] - fp[i])
+    return float(fp[-1])
+
+
 # ── LED baseline (= pixel_art preset) ────────────────────────────────────────
 # These are the hand-tuned defaults for LED rendering.  The heuristic only
 # moves away from these when the source clearly needs it.
@@ -48,36 +80,31 @@ _BASE_SHARPEN_L  = 1.80
 _BASE_SHARPEN_C  = 0.50
 
 
-# ── Delta helpers (extracted to keep analyze_and_compensate concise) ──────────
+# ── Delta helpers — continuous piecewise-linear mappings ─────────────────────
 
 def _gamma_delta(mean_lum: float) -> float:
-    """Luminance → gamma correction delta relative to _BASE_GAMMA."""
-    if   mean_lum < 40:  return +0.40   # very dark  (night, dungeon)
-    elif mean_lum < 75:  return +0.20   # dark
-    elif mean_lum < 100: return +0.08   # slightly dark
-    elif mean_lum < 140: return  0.00   # normal — keep base
-    elif mean_lum < 175: return -0.10   # slightly bright
-    elif mean_lum < 210: return -0.20   # bright / washed-out
-    else:                return -0.30   # very bright / over-exposed
+    """Luminance → gamma correction delta (continuous interpolation).
+
+    Knots are placed at the original if/elif threshold boundaries so the
+    curve passes through the same anchor values while being smooth in between.
+    """
+    xp = [  0,  40,  75, 100, 140, 175, 210, 255]
+    fp = [+0.40, +0.40, +0.20, +0.08, 0.00, -0.10, -0.20, -0.30]
+    return _linear_interp(mean_lum, xp, fp)
 
 
 def _contrast_delta(std_lum: float) -> float:
-    """Dynamic range → contrast correction delta relative to _BASE_CONTRAST."""
-    if   std_lum < 20: return +0.70    # very flat  (fog, haze, low-contrast anim)
-    elif std_lum < 35: return +0.45    # dull
-    elif std_lum < 50: return +0.20    # slightly below average
-    elif std_lum < 70: return  0.00    # good — keep base
-    else:              return -0.15    # already high contrast → slight reduction
+    """Dynamic range → contrast correction delta (continuous interpolation)."""
+    xp = [  0,  20,  35,  50,  70, 255]
+    fp = [+0.70, +0.70, +0.45, +0.20, 0.00, -0.15]
+    return _linear_interp(std_lum, xp, fp)
 
 
 def _saturation_delta(mean_sat: float) -> float:
-    """Colour vibrancy → saturation correction delta relative to _BASE_SATURATION."""
-    if   mean_sat < 10:  return +1.10   # near-greyscale / B&W
-    elif mean_sat < 40:  return +0.70   # low saturation
-    elif mean_sat < 80:  return +0.30   # slightly muted
-    elif mean_sat < 130: return  0.00   # normal colour — keep base
-    elif mean_sat < 180: return -0.30   # vivid → small reduction
-    else:                return -0.60   # very saturated → avoid over-saturation on LED
+    """Colour vibrancy → saturation correction delta (continuous interpolation)."""
+    xp = [  0,  10,  40,  80, 130, 180, 255]
+    fp = [+1.10, +1.10, +0.70, +0.30, 0.00, -0.30, -0.60]
+    return _linear_interp(mean_sat, xp, fp)
 
 
 def _sample_frames(src_str: str, is_gif: bool, cv2) -> list:
