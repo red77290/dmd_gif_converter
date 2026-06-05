@@ -126,12 +126,12 @@ sys.modules["PIL.ImageTk"] = _pil_imgtk
 _pil_stub.Image   = _pil_image
 _pil_stub.ImageTk = _pil_imgtk
 
-_led_sim_stub = types.ModuleType("dmd_led_sim")
+_led_sim_stub = types.ModuleType("src.ui.dmd_led_sim")
 _led_sim_stub.LED_SIM_SCALE = 4
 _led_sim_stub.LED_SIM_GAP   = 1
 _led_sim_stub.LED_SIM_MAX_W = 640
 _led_sim_stub.apply_led_grid = MagicMock(side_effect=lambda img, *a, **kw: img)
-sys.modules["dmd_led_sim"] = _led_sim_stub
+sys.modules["src.ui.dmd_led_sim"] = _led_sim_stub
 
 _conv_stub = types.ModuleType("dmd_gif_converter")
 _conv_stub.DEFAULT_PARAMS = {
@@ -156,7 +156,7 @@ for _mod in ("dmd_auto_action", "dmd_auto_color"):
 # ── 6. Import de dmd_gif_converter_ui MAINTENANT (stubs actifs) ───────────────
 # On importe ici une seule fois pour que DMDConverterApp.__dict__ contienne
 # les vraies méthodes. On réutilise le cache sys.modules ensuite.
-_ui_mod = importlib.import_module("dmd_gif_converter_ui")
+_ui_mod = importlib.import_module("src.ui.app")
 _DMDConverterApp = _ui_mod.DMDConverterApp
 
 # ── 7. Restauration des modules réels ─────────────────────────────────────────
@@ -201,7 +201,7 @@ def _make_app():
     # ctk.CTk stub et retournerait un Mock au lieu de la vraie fonction).
     for _meth in ("_snapshot_params", "_restore_params",
                   "_on_per_gif_toggle", "_update_per_gif_status"):
-        fn = DMDConverterApp.__dict__[_meth]   # bypass MRO → vraie fonction
+        fn = getattr(DMDConverterApp, _meth)
         setattr(app, _meth, _types.MethodType(fn, app))
 
     import tkinter as tk
@@ -264,6 +264,7 @@ def _make_app():
     app.v_max_dur_enabled           = tk.BooleanVar(value=True)
     app.v_max_duration              = tk.DoubleVar(value=120.0)
     app.v_auto_color_enabled        = tk.BooleanVar(value=False)
+    app.v_dmd_visibility_score_enabled = tk.BooleanVar(value=False)
 
     # ── Callbacks UI factices ─────────────────────────────────────────────────
     app._update_custom_visibility  = MagicMock()
@@ -309,6 +310,7 @@ class TestSnapshotParams(unittest.TestCase):
             "text_font_size", "text_color", "text_position",
             "text_font_file", "text_style", "text_bg", "text_bg_opacity",
             "max_dur_enabled", "max_duration", "auto_color_enabled",
+            "dmd_visibility_score_enabled",
         ]
         for key in required_keys:
             self.assertIn(key, s, f"Clé manquante dans le snapshot : {key}")
@@ -369,7 +371,7 @@ class TestRestoreParams(unittest.TestCase):
             "text_font_file": "PixelMordred.ttf",
             "text_style": "bold", "text_bg": True, "text_bg_opacity": 80,
             "max_dur_enabled": False, "max_duration": 60.0,
-            "auto_color_enabled": True,
+            "auto_color_enabled": True, "dmd_visibility_score_enabled": True,
         }
         if overrides:
             base.update(overrides)
