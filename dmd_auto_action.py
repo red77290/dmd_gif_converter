@@ -70,6 +70,7 @@ class AutoActionConfig:
     auto_top_crop: bool = False        # auto-detect top crop boundary from ROI analysis
     vertical_bias: float = 0.0        # shift camera center: +1.0 = down (show floor), -1.0 = up (show sky)
     auto_vertical_bias: bool = False  # auto floor detection: places ROI bottom (floor) at ~85 % of crop height
+    smart_auto_crop: bool = False      # let the engine choose the optimal crop/tracking combination
     # out_w / out_h are no longer used for the actual output resolution.
     # The preprocessor always outputs at the source native width with a 4:1
     # crop ratio (= DMD ratio 128:32) so that ffmpeg receives full-quality input.
@@ -620,6 +621,187 @@ def _crop_frame(frame, cam_rect):
     return frame[y1:y2, x1:x2]
 
 
+def _smart_auto_crop_decision(
+    cap,
+    cfg: "AutoActionConfig",
+    frame_w: int,
+    frame_h: int,
+    sample_count: int = 25,
+) -> dict:
+    """Analyse video context and decide which crop/tracking combination to activate.
+
+    Scans ``sample_count`` evenly-spaced frames, collects ROI metrics, and returns
+    a ready-to-use decision dict.  The decision logic handles the key contradiction:
+
+    • **Tall character** (face priority zone) → **no** floor-tracking (we want the
+      face, not the floor).  auto_bottom_crop is enabled to trigger face-priority;
+      auto_vertical_bias is kept OFF so the camera stays on the head region.
+    • **Normal-height character on a floor** → auto_bottom_crop (HUD/tile exclusion)
+      + auto_vertical_bias (asymmetric EMA floor anchor).
+    • **Blank top space** (sky / ceiling / HUD) → auto_top_crop.
+
+    Parameters
+    ----------
+    cap           : cv2.VideoCapture (already open — position will be restored)
+    cfg           : AutoActionConfig
+    frame_w / frame_h : source frame dimensions
+    sample_count  : frames to analyse (default 25 — fast, ~0.3 s extra)
+
+    Returns
+    -------
+    dict with keys:
+        auto_bottom_crop   : bool
+        auto_top_crop      : bool
+        auto_vertical_bias : bool
+        reasons            : list[str]  — human-readable log entries
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return {
+            "auto_bottom_crop": False, "auto_top_crop": False,
+            "auto_vertical_bias": False,
+            "reasons": ["OpenCV/NumPy unavailable — smart auto skipped"],
+        }
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if total_frames <= 0:
+        return {
+            "auto_bottom_crop": False, "auto_top_crop": False,
+            "auto_vertical_bias": False,
+            "reasons": ["no frames available — smart auto skipped"],
+        }
+
+    # Height of the DMD crop window in source pixels (same formula as the main loop).
+    target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
+    dmd_crop_h   = frame_w / target_ratio  # pixels
+
+    step      = max(1, total_frames // sample_count)
+    saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+    detector  = _FrameDetector()
+
+    roi_tops:    list[float] = []
+    roi_bottoms: list[float] = []
+    roi_heights: list[float] = []
+
+    for i in range(0, min(total_frames - 1, sample_count * step), step):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            continue
+        roi = detector.detect(frame, cfg.detector)
+        if roi is not None:
+            _rx, ry, _rw, rh = roi
+            roi_tops.append(float(ry))
+            roi_bottoms.append(float(ry + rh))
+            roi_heights.append(float(rh))
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
+
+    if not roi_tops:
+        return {
+            "auto_bottom_crop": False, "auto_top_crop": False,
+            "auto_vertical_bias": False,
+            "reasons": ["no detections in scan — all manual"],
+        }
+
+    arr_tops    = np.array(roi_tops)
+    arr_bottoms = np.array(roi_bottoms)
+    arr_heights = np.array(roi_heights)
+
+    median_top    = float(np.median(arr_tops))
+    median_bottom = float(np.median(arr_bottoms))
+    median_height = float(np.median(arr_heights))
+    std_bottom    = float(np.std(arr_bottoms))
+
+    # ── Decision thresholds ───────────────────────────────────────────────────
+    # TOP_SPACE: fraction of frame height blank above the subject → auto-top-crop.
+    TOP_SPACE_THRESH  = 0.08   # 8 % blank at top
+    # BOTTOM_GAP: fraction below feet → HUD / floor tiles → auto-bottom-crop.
+    BOTTOM_GAP_THRESH = 0.08   # 8 % blank below feet
+    # TALL_FACTOR: char height / dmd_crop_h — above = face priority needed.
+    TALL_FACTOR       = 0.70
+    # FLOOR_LOWER: subject bottom must be in the lower 50 % for floor-tracking.
+    FLOOR_LOWER       = 0.50
+    # FLOOR_VAR: std(floor_y) / frame_h — above = very dynamic (lots of jumping),
+    # still trackable thanks to the asymmetric EMA.
+    FLOOR_VAR_MAX     = 0.25   # above 25 % variance = extremely chaotic → skip
+
+    # ── Derived signals ───────────────────────────────────────────────────────
+    top_space       = median_top    / frame_h
+    bottom_gap      = (frame_h - median_bottom) / frame_h
+    tall_ratio      = median_height / max(1.0, dmd_crop_h)
+    floor_in_lower  = (median_bottom / frame_h) > FLOOR_LOWER
+    floor_var_score = std_bottom / frame_h
+
+    # ── Decision ──────────────────────────────────────────────────────────────
+    reasons:     list[str] = []
+    auto_bottom  = False
+    auto_top     = False
+    auto_floor   = False
+
+    # 1. Top space → auto-top-crop
+    if top_space > TOP_SPACE_THRESH:
+        auto_top = True
+        reasons.append(
+            f"top-space {top_space*100:.0f}% > {TOP_SPACE_THRESH*100:.0f}% "
+            f"→ auto-top-crop ✓"
+        )
+
+    # 2a. Tall character (face priority zone)
+    #     Contradiction: floor-tracking anchors to feet; face-priority needs the
+    #     camera on the head → disable floor-tracking when face priority triggers.
+    if tall_ratio > TALL_FACTOR:
+        auto_bottom = True
+        reasons.append(
+            f"tall-char {tall_ratio*100:.0f}% of DMD window "
+            f"→ auto-bottom-crop + face-priority ✓  /  floor-track ✗ (contradictory)"
+        )
+        # auto_floor intentionally stays False
+
+    else:
+        # 2b. Normal-height subject: bottom clutter → auto-bottom-crop
+        if bottom_gap > BOTTOM_GAP_THRESH:
+            auto_bottom = True
+            reasons.append(
+                f"bottom-gap {bottom_gap*100:.0f}% > {BOTTOM_GAP_THRESH*100:.0f}% "
+                f"(floor/HUD) → auto-bottom-crop ✓"
+            )
+
+        # 3. Floor is in the lower half and variance is manageable → floor-tracking.
+        #    Asymmetric EMA resists upward jumps and follows landings — works for
+        #    both stable floors and dynamic platformers.
+        if floor_in_lower and floor_var_score <= FLOOR_VAR_MAX:
+            auto_floor = True
+            stability = "stable" if floor_var_score < 0.10 else "dynamic"
+            reasons.append(
+                f"floor@{median_bottom/frame_h*100:.0f}% "
+                f"var={floor_var_score*100:.0f}% ({stability}) "
+                f"→ auto-floor-tracking ✓"
+            )
+        elif floor_in_lower and floor_var_score > FLOOR_VAR_MAX:
+            reasons.append(
+                f"floor@{median_bottom/frame_h*100:.0f}% "
+                f"var={floor_var_score*100:.0f}% (too chaotic) "
+                f"→ floor-track ✗ (high variance)"
+            )
+
+    if not reasons:
+        reasons.append(
+            f"centered subject — no clutter detected "
+            f"(top={top_space*100:.0f}% bot={bottom_gap*100:.0f}% "
+            f"h={tall_ratio*100:.0f}%) → all manual"
+        )
+
+    return {
+        "auto_bottom_crop":   auto_bottom,
+        "auto_top_crop":      auto_top,
+        "auto_vertical_bias": auto_floor,
+        "reasons":            reasons,
+    }
+
+
 def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     """Create an auto-framed temporary MP4 and return (ok, out_path, message).
 
@@ -670,6 +852,21 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # full body), then override the manual crop percentages.
     _auto_bc = getattr(cfg, "auto_bottom_crop", False)
     _auto_tc = getattr(cfg, "auto_top_crop", False)
+    _smart_reasons: list[str] = []
+
+    # ── Smart Auto Crop decision (overrides individual flags) ─────────────────
+    # When smart_auto_crop=True the engine analyses 25 frames to decide which
+    # combination of auto_bottom_crop / auto_top_crop / auto_vertical_bias to
+    # activate.  The decision handles the tall-character contradiction: face
+    # priority and floor-tracking are mutually exclusive; the engine picks the
+    # correct one automatically.
+    if getattr(cfg, "smart_auto_crop", False):
+        _decision = _smart_auto_crop_decision(cap, cfg, frame_w, frame_h)
+        _auto_bc                  = _decision["auto_bottom_crop"]
+        _auto_tc                  = _decision["auto_top_crop"]
+        cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
+        _smart_reasons            = _decision["reasons"]
+
     _face_priority_mode = False  # will be set True if face priority was triggered
     if _auto_bc or _auto_tc:
         detector_for_scan = _FrameDetector()
@@ -933,8 +1130,11 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             f" bot={_bcp:.0%}{auto_suffix_b}{face_info}"
         )
     onnx_tag = " [ONNX]" if detector._onnx_session is not None else " [motion]"
+    smart_tag = ""
+    if getattr(cfg, "smart_auto_crop", False) and _smart_reasons:
+        smart_tag = " [smart:" + " / ".join(_smart_reasons) + "]"
     return True, out_path, (
         f"Auto action OK ({frame_idx} frames{intro_info}{tail_info}, "
-        f"{out_w}×{out_h}, detector={cfg.detector}{onnx_tag}{crop_info})."
+        f"{out_w}×{out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag})."
     )
 

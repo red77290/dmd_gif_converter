@@ -249,6 +249,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_auto_top_crop = tk.BooleanVar(value=False)
         self.v_action_vertical_bias = tk.DoubleVar(value=0.0)
         self.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
+        self.v_action_smart_auto_crop    = tk.BooleanVar(value=False)
         self.v_bg_sub_enable       = tk.BooleanVar(value=False) # New background subtraction checkbox
 
         # ── Tkinter vars — Multi-dalle / Tiling ───────────────────────────────
@@ -312,7 +313,8 @@ class DMDConverterApp(ctk.CTk):
             self.v_action_intro, self.v_action_bottom_crop, self.v_action_auto_bottom_crop,
             self.v_action_top_crop, self.v_action_auto_top_crop,
             self.v_action_vertical_bias,
-            self.v_action_auto_vertical_bias, self.v_bg_sub_enable,
+            self.v_action_auto_vertical_bias, self.v_action_smart_auto_crop,
+            self.v_bg_sub_enable,
             self.v_target_width, self.v_target_height, self.v_target_preset,
             self.v_text_overlay_enabled, self.v_text_content, # Added text overlay vars
             self.v_text_font_size, self.v_text_color, self.v_text_position, # Added text overlay vars
@@ -1297,19 +1299,51 @@ class DMDConverterApp(ctk.CTk):
         adv_slider(parent, "Intro panoramic", self.v_action_intro, 0.0, 5.0,
                    "{:.1f}", " s", steps=50)
 
+        # ════════════════════════════════════════════════════════════════════
+        # SECTION: Crop & Vertical Bias
+        # ════════════════════════════════════════════════════════════════════
+        ctk.CTkLabel(
+            parent, text="━━  📐  Crop & Vertical Bias",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).pack(fill="x", padx=10, pady=(10, 2), anchor="w")
+
+        # ── 🧠 Smart Auto Crop — single toggle that replaces the 3 checkboxes ──
+        smart_row = ctk.CTkFrame(parent, fg_color="transparent")
+        smart_row.pack(fill="x", padx=14, pady=(2, 0))
+        self._cb_smart_auto_crop = ctk.CTkCheckBox(
+            smart_row,
+            text="🧠 Smart Auto Crop  —  engine analyses context & activates the optimal combination",
+            variable=self.v_action_smart_auto_crop,
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#88ddff",
+        )
+        self._cb_smart_auto_crop.pack(side="left")
+
+        ctk.CTkLabel(
+            parent,
+            text="    When ON: engine scans 25 frames, detects floor / blank space / character height\n"
+                 "    and enables auto-bottom-crop, auto-top-crop and/or auto-floor-tracking\n"
+                 "    automatically.  Handles the face-priority contradiction (tall character =\n"
+                 "    no floor-tracking; normal character = floor-tracking enabled).\n"
+                 "    When OFF: activate each option individually below — or use the sliders.",
+            text_color="#557799", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
+
         # ── Bottom crop row (slider + Auto toggle) ────────────────────────────
         self._slider_bottom_crop = adv_slider(parent, "Bottom crop (%)", self.v_action_bottom_crop, 0.0, 0.5,
                    "{:.0%}", "", steps=50)
         bottom_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
         bottom_auto_row.pack(fill="x", padx=14, pady=(0, 2))
-        ctk.CTkCheckBox(
+        self._cb_auto_bottom_crop = ctk.CTkCheckBox(
             bottom_auto_row,
-            text="Auto bottom crop  (overrides manual slider · detects floor / feet)",
+            text="Auto bottom crop  (overrides slider · detects floor / feet / face priority)",
             variable=self.v_action_auto_bottom_crop,
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
-        ).pack(side="left")
+        )
+        self._cb_auto_bottom_crop.pack(side="left")
 
         def _toggle_auto_bottom_crop(*_):
+            if self.v_action_smart_auto_crop.get():
+                return  # smart auto manages this — ignore individual toggle
             state = "disabled" if self.v_action_auto_bottom_crop.get() else "normal"
             self._slider_bottom_crop.configure(state=state)
 
@@ -1320,14 +1354,17 @@ class DMDConverterApp(ctk.CTk):
                    "{:.0%}", "", steps=50)
         top_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
         top_auto_row.pack(fill="x", padx=14, pady=(0, 2))
-        ctk.CTkCheckBox(
+        self._cb_auto_top_crop = ctk.CTkCheckBox(
             top_auto_row,
-            text="Auto top crop  (overrides manual slider · detects head / sky)",
+            text="Auto top crop  (overrides slider · detects head / sky / ceiling)",
             variable=self.v_action_auto_top_crop,
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
-        ).pack(side="left")
+        )
+        self._cb_auto_top_crop.pack(side="left")
 
         def _toggle_auto_top_crop(*_):
+            if self.v_action_smart_auto_crop.get():
+                return
             state = "disabled" if self.v_action_auto_top_crop.get() else "normal"
             self._slider_top_crop.configure(state=state)
 
@@ -1339,18 +1376,44 @@ class DMDConverterApp(ctk.CTk):
         # ── Auto floor detect checkbox ──────────────────────────────────────
         auto_floor_row = ctk.CTkFrame(parent, fg_color="transparent")
         auto_floor_row.pack(fill="x", padx=14, pady=(0, 2))
-        ctk.CTkCheckBox(
+        self._cb_auto_floor = ctk.CTkCheckBox(
             auto_floor_row,
-            text="Auto floor detect (overrides Vertical bias)",
+            text="Auto floor detect (asymmetric EMA · overrides Vertical bias · ⚠ contradicts face priority)",
             variable=self.v_action_auto_vertical_bias,
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
-        ).pack(side="left")
+        )
+        self._cb_auto_floor.pack(side="left")
 
         def _toggle_auto_floor(*_):
+            if self.v_action_smart_auto_crop.get():
+                return
             state = "disabled" if self.v_action_auto_vertical_bias.get() else "normal"
             self._slider_vertical_bias.configure(state=state)
 
         self.v_action_auto_vertical_bias.trace_add("write", _toggle_auto_floor)
+
+        # ── Smart Auto Crop toggle logic ──────────────────────────────────────
+        # When Smart Auto is ON: disable the 3 individual auto checkboxes
+        # (the engine decides at render time — the sliders remain active as
+        # manual fallback values if the engine decides NOT to enable a mode).
+        def _toggle_smart_auto(*_):
+            smart_on  = self.v_action_smart_auto_crop.get()
+            cb_state  = "disabled" if smart_on else "normal"
+            self._cb_auto_bottom_crop.configure(state=cb_state)
+            self._cb_auto_top_crop.configure(state=cb_state)
+            self._cb_auto_floor.configure(state=cb_state)
+            if not smart_on:
+                # Restore slider states based on each individual checkbox
+                _toggle_auto_bottom_crop()
+                _toggle_auto_top_crop()
+                _toggle_auto_floor()
+            else:
+                # Smart auto ON: sliders remain editable (manual fallback values)
+                self._slider_bottom_crop.configure(state="normal")
+                self._slider_top_crop.configure(state="normal")
+                self._slider_vertical_bias.configure(state="normal")
+
+        self.v_action_smart_auto_crop.trace_add("write", _toggle_smart_auto)
 
         ctk.CTkLabel(
             parent,
@@ -1711,6 +1774,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_auto_top_crop.set(False)
         self.v_action_vertical_bias.set(0.0)
         self.v_action_auto_vertical_bias.set(False)
+        self.v_action_smart_auto_crop.set(False)
         self.v_bg_sub_enable.set(False) # Reset background subtraction
         self.v_target_preset.set("128x32 (1x1)") # Reset tiling preset
         self.v_target_width.set(DEFAULT_PARAMS["target_width"])
@@ -2200,6 +2264,7 @@ class DMDConverterApp(ctk.CTk):
             auto_top_crop=bool(self.v_action_auto_top_crop.get()),
             vertical_bias=float(self.v_action_vertical_bias.get()),
             auto_vertical_bias=bool(self.v_action_auto_vertical_bias.get()),
+            smart_auto_crop=bool(self.v_action_smart_auto_crop.get()),
             start_s=start_s,
             end_s=end_s,
             target_width=self.v_target_width.get(),
@@ -2667,6 +2732,7 @@ class DMDConverterApp(ctk.CTk):
             "action_auto_top_crop":       self.v_action_auto_top_crop.get(),
             "action_vertical_bias":       self.v_action_vertical_bias.get(),
             "action_auto_vertical_bias":  self.v_action_auto_vertical_bias.get(),
+            "action_smart_auto_crop":     self.v_action_smart_auto_crop.get(),
             "bg_sub_enable":              self.v_bg_sub_enable.get(),
             "target_width":               self.v_target_width.get(),
             "target_height":              self.v_target_height.get(),
@@ -2723,6 +2789,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_auto_top_crop.set(s.get("action_auto_top_crop", False))
         self.v_action_vertical_bias.set(s.get("action_vertical_bias", 0.0))
         self.v_action_auto_vertical_bias.set(s.get("action_auto_vertical_bias", False))
+        self.v_action_smart_auto_crop.set(s.get("action_smart_auto_crop", False))
         self.v_bg_sub_enable.set(s.get("bg_sub_enable", False))
         self.v_target_width.set(s.get("target_width", 128))
         self.v_target_height.set(s.get("target_height", 32))
@@ -2921,6 +2988,7 @@ class DMDConverterApp(ctk.CTk):
             "action_auto_top_crop": self.v_action_auto_top_crop.get(),
             "action_vertical_bias": self.v_action_vertical_bias.get(),
             "action_auto_vertical_bias": self.v_action_auto_vertical_bias.get(),
+            "action_smart_auto_crop":    self.v_action_smart_auto_crop.get(),
             "bg_sub_enable": self.v_bg_sub_enable.get(),
             "target_width": self.v_target_width.get(),
             "target_height": self.v_target_height.get(),

@@ -64,12 +64,57 @@ OpenCV → cv2.VideoWriter → [mp4v temp.mp4 on disk] → FFmpeg reads it
 
 ## Auto Crop Features
 
-Two new **auto crop** modes let the system automatically find where the subject starts and ends vertically, eliminating manual guesswork.
+Three independent crop / vertical-bias options are grouped under the **📐 Crop & Vertical Bias** section.  Each can be activated manually or left to the **Smart Auto Crop** engine.
+
+### 🧠 Smart Auto Crop — context-aware combination selector
+
+**Replaces the manual trial-and-error of enabling the right combination.**
+
+When enabled, the engine scans **25 evenly-spaced frames** and analyses four signals:
+
+| Signal | How it is detected | Result |
+|--------|--------------------|--------|
+| **Blank space at top** | `median(roi_top) > 8 % of frame_h` | → `auto_top_crop ✓` |
+| **Tall character** | `median(roi_h) > 70 % of DMD window height` | → `auto_bottom_crop ✓` (face priority mode) · **floor-tracking ✗** (contradiction) |
+| **Bottom clutter / HUD** | `(frame_h − median(roi_bottom)) > 8 %` | → `auto_bottom_crop ✓` |
+| **Stable / dynamic floor** | `median(roi_bottom) > 50 % of frame_h` AND `std < 25 %` | → `auto_vertical_bias ✓` (asymmetric EMA floor tracker) |
+
+#### Contradiction handling — face priority vs floor tracking
+
+The engine automatically resolves the key contradiction:
+
+> **Tall character** = face-priority mode is active → camera must stay on the **head region**.  
+> **Floor tracking** = camera follows the **feet / ground** via asymmetric EMA.  
+> These are **mutually exclusive** — the engine picks face-priority and **suppresses** floor-tracking.
+
+#### Decision examples
+
+| Content | Activated options |
+|---------|-------------------|
+| 2D platformer (normal char, HUD at bottom) | `auto_bottom_crop` + `auto_floor_track` |
+| Very tall character (full-screen sprite) | `auto_bottom_crop` (face priority) only |
+| Aerial shot / floating character | `auto_bottom_crop` (clutter below) |
+| Wide shot, subject centered with sky + HUD | `auto_top_crop` + `auto_bottom_crop` + `auto_floor_track` |
+| All options unnecessary (well-framed source) | none (all manual) |
+
+#### When Smart Auto is ON
+
+- The 3 individual auto-checkboxes are **disabled** in the UI (managed by the engine at render time)
+- The 3 sliders remain **editable** — they serve as manual fallback values if the engine decides NOT to activate a mode for that dimension
+- Decision reasons appear in the conversion log: `[smart: top-space 15% -> auto-top-crop / floor@83% var=3% (stable) -> floor-tracking ✓]`
+
+#### When Smart Auto is OFF
+
+- All 3 individual toggles and sliders are fully interactive
+- The user activates each option manually as before
+
+---
 
 ### Auto Bottom Crop (`auto_bottom_crop`)
 
 Samples the video to find where the subject **ends at the bottom** (feet, floor line).
 Crops out everything below — HUD elements, floor tiles, subtitle bars.
+Also activates **Face Priority** automatically when the character is too tall for the DMD window.
 
 ### Auto Top Crop (`auto_top_crop`)
 
@@ -94,7 +139,13 @@ When the detected character is **taller than the DMD window** (body height > 80 
 - The padding switches to face-mode (12 % — generous, prevents forehead clipping)
 - A `[face priority 👤]` tag appears in the conversion log when this mode activates
 
-### Manual vs Auto toggle
+### Manual vs Smart Auto vs Individual Auto
+
+| Mode | How to use | Sliders | Auto checkboxes |
+|------|-----------|---------|-----------------|
+| **Smart Auto Crop ON** | One checkbox at the top — engine decides everything | Active (manual fallback) | Disabled (engine manages) |
+| **Individual auto ON** | Toggle each checkbox independently | Disabled (auto takes over) | Active |
+| **All manual** | Just use the sliders | Active | Unchecked |
 
 Both crops have an **independent toggle** (checkbox) and a manual slider:
 
@@ -109,12 +160,10 @@ Both crops have an **independent toggle** (checkbox) and a manual slider:
 2. Enable `Auto Action Framing (pre-ffmpeg)`
 3. Keep detector at `person` (default) or choose another mode
 4. Tune strength / smoothness / zoom max / padding
-5. **Bottom crop:**
-   - Tick `Auto bottom crop` to detect feet / floor automatically, **or**
-   - Leave unticked and drag the `Bottom crop (%)` slider manually
-6. **Top crop:**
-   - Tick `Auto top crop` to detect head / ceiling automatically, **or**
-   - Leave unticked and drag the `Top crop (%)` slider manually
+5. **Crop & Vertical Bias** section — choose one of three modes:
+   - **🧠 Smart Auto Crop** ← tick this box and let the engine decide everything (recommended)
+   - **Individual auto** ← tick each box separately (`Auto bottom crop`, `Auto top crop`, `Auto floor detect`)
+   - **All manual** ← leave all boxes unchecked and drag the sliders directly
 
 ---
 
@@ -149,6 +198,7 @@ python auto_action_cli.py input.mp4 --top-crop 0.05 --bottom-crop 0.15 --out pre
 | `--auto-top-crop` | off | Auto-detect top crop from ROI analysis |
 | `--vertical-bias` | `0.0` | Camera bias: `+1.0` = down, `-1.0` = up |
 | `--auto-floor-detect` | off | Dynamic floor tracking (overrides `--vertical-bias`) |
+| `--smart-auto-crop` | off | Engine analyses context & picks the optimal crop/tracking combination |
 | `--start` | — | Clip start time in seconds |
 | `--end` | — | Clip end time in seconds |
 

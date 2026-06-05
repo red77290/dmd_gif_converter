@@ -254,6 +254,19 @@ DEFAULT_PARAMS = {
     "action_padding":      0.20,       # ROI padding before aspect crop
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
     "bg_sub_enable":       False,      # enable background subtraction (replaces background with black)
+    # ── Crop & vertical bias (individual manual/auto controls) ────────────
+    "action_bottom_crop":         0.0,
+    "action_auto_bottom_crop":    False,
+    "action_top_crop":            0.0,
+    "action_auto_top_crop":       False,
+    "action_vertical_bias":       0.0,
+    "action_auto_vertical_bias":  False,
+    # ── Smart Auto Crop — engine-driven combination selector ──────────────
+    # When True the engine scans 25 frames and decides which of the 3 options
+    # above (auto_bottom, auto_top, auto_vertical) to activate based on the
+    # detected context (floor, clutter, character height).  All individual
+    # flags above are ignored while this is ON.
+    "action_smart_auto_crop":     False,
     # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
     "target_width":  128,
     "target_height": 32,
@@ -363,6 +376,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             auto_top_crop=bool(p.get("action_auto_top_crop", False)),
             vertical_bias=float(p.get("action_vertical_bias", 0.0)),
             auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
+            smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None,
             target_width=target_width, # Pass target dimensions to auto_action
@@ -783,8 +797,15 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         padding=float(p.get("action_padding", 0.20)),
         intro_duration=float(p.get("action_intro", 1.5)),
         bg_sub_enable=bool(p.get("bg_sub_enable", False)),
-        target_width=p["target_width"], # Pass target dimensions to auto_action
-        target_height=p["target_height"], # Pass target dimensions to auto_action
+        bottom_crop_pct=float(p.get("action_bottom_crop", 0.0)),
+        auto_bottom_crop=bool(p.get("action_auto_bottom_crop", False)),
+        top_crop_pct=float(p.get("action_top_crop", 0.0)),
+        auto_top_crop=bool(p.get("action_auto_top_crop", False)),
+        vertical_bias=float(p.get("action_vertical_bias", 0.0)),
+        auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
+        smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
+        target_width=p["target_width"],
+        target_height=p["target_height"],
     )
 
     def _preprocess(filename):
@@ -797,8 +818,15 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
             padding=action_cfg.padding,
             intro_duration=action_cfg.intro_duration,
             bg_sub_enable=action_cfg.bg_sub_enable,
-            target_width=action_cfg.target_width, # Pass target dimensions to auto_action
-            target_height=action_cfg.target_height, # Pass target dimensions to auto_action
+            bottom_crop_pct=action_cfg.bottom_crop_pct,
+            auto_bottom_crop=action_cfg.auto_bottom_crop,
+            top_crop_pct=action_cfg.top_crop_pct,
+            auto_top_crop=action_cfg.auto_top_crop,
+            vertical_bias=action_cfg.vertical_bias,
+            auto_vertical_bias=action_cfg.auto_vertical_bias,
+            smart_auto_crop=action_cfg.smart_auto_crop,
+            target_width=action_cfg.target_width,
+            target_height=action_cfg.target_height,
         )
         ok, pre_src, msg = preprocess_video_for_dmd(src, cfg)
         if ok and pre_src:
@@ -968,6 +996,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--bg-sub-enable", action="store_true", default=DEFAULT_PARAMS["bg_sub_enable"],
         help="Enable background subtraction (replaces background with black) (default: disabled).",
     )
+    ag.add_argument(
+        "--smart-auto-crop", action="store_true", default=DEFAULT_PARAMS["action_smart_auto_crop"],
+        help="Smart Auto Crop: engine analyses context and activates the optimal combination of "
+             "auto-bottom-crop, auto-top-crop and auto-floor-tracking (default: disabled).",
+    )
 
     # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
     mg = p.add_argument_group("Multi-dalle / Tiling")
@@ -1053,6 +1086,7 @@ if __name__ == "__main__":
         "action_zoom_max": args.action_zoom_max,
         "action_padding": args.action_padding,
         "bg_sub_enable": args.bg_sub_enable,
+        "action_smart_auto_crop": args.smart_auto_crop,
         "max_duration": args.max_duration,
         "target_width": args.target_width,
         "target_height": args.target_height,

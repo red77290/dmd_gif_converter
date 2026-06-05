@@ -175,6 +175,7 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Automatically** detect where the subject starts at the top (head / sky) — adapts padding to face vs full-body content |
 | `action_vertical_bias` | Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings. Overrides the manual vertical bias. Ideal for 2-D platformers. |
+| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Engine analyses 25 frames and activates the optimal combination** of auto-bottom-crop, auto-top-crop and auto-floor-tracking. Handles face-priority vs floor-tracking contradiction automatically. Recommended over manual individual options. |
 
 ### Detector modes
 
@@ -729,6 +730,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_auto_top_crop` | `False` | Auto-detect top crop from ROI analysis |
 | `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
 | `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
+| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — engine scans 25 frames and activates the optimal combination of the 3 options above; resolves the face-priority ↔ floor-tracking contradiction automatically |
 | `target_width` | `128` | Output width in pixels (multi-panel tiling) |
 | `target_height` | `32` | Output height in pixels (multi-panel tiling) |
 | `text_overlay_enabled` | `False` | 💬 Burn a text label into the output GIF |
@@ -809,6 +811,8 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Auto Action preview is slow to appear | Normal — AI analysis takes a few seconds per video; progress shown in the AUTO ACTION canvas |
 | Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
 | Auto Action: "model download failed" | No internet access — place `yolov8n.onnx` manually in `~/.cache/dmd_gif_converter/`. Falls back to motion detection automatically |
+| Smart Auto Crop gives wrong results | Disable it and activate each option individually — use `Auto bottom crop`, `Auto top crop`, `Auto floor detect` independently |
+| Smart Auto Crop activates nothing | Not enough detections in the 25-frame scan — try a different detector mode (`motion` or `hybrid`) |
 | Floor not visible in 2-D platformer | Enable **Auto floor detect** in the Auto Action advanced settings — it anchors the camera to the detected ground level |
 | Camera pans up during jumps | Enable **Auto floor detect** — it uses an asymmetric EMA that resists upward movement during airtime |
 | Auto floor detect still not showing floor | Increase **Bottom crop %** to hide the HUD/floor area from the main detector, then re-enable Auto floor detect |
