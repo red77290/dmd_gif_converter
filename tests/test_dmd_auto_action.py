@@ -27,6 +27,7 @@ from dmd_auto_action import (
     _clamp,
     _compute_auto_crop_margins,
     _crop_frame,
+    _smart_auto_crop_decision,
     _smooth,
     available_detectors,
     preprocess_video_for_dmd,
@@ -758,6 +759,93 @@ class TestBuildCameraRectFrameTop(unittest.TestCase):
         cfg = self._cfg(target_width=128, target_height=32)
         cx, cy, cw, ch = _build_camera_rect(1280, 480, None, cfg, frame_top=60.0)
         self.assertAlmostEqual(cw / ch, 128 / 32, places=1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _smart_auto_crop_decision
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSmartAutoCropDecision(unittest.TestCase):
+    """Tests for _smart_auto_crop_decision using a mock cv2.VideoCapture."""
+
+    def _make_cap(self, total_frames: int = 30, frame_w: int = 640, frame_h: int = 480):
+        """Return a mock VideoCapture that yields blank black frames."""
+        import numpy as np
+        cap = MagicMock()
+        cap.get.side_effect = lambda prop: {
+            0: 0.0,               # CAP_PROP_POS_FRAMES
+            7: float(total_frames),  # CAP_PROP_FRAME_COUNT
+        }.get(prop, 0.0)
+        blank = np.zeros((frame_h, frame_w, 3), dtype="uint8")
+        cap.read.return_value = (True, blank)
+        return cap
+
+    def _cfg(self, **kw):
+        defaults = dict(detector="motion", target_width=128, target_height=32)
+        defaults.update(kw)
+        return AutoActionConfig(**defaults)
+
+    def test_returns_required_keys(self):
+        cap = self._make_cap()
+        cfg = self._cfg()
+        result = _smart_auto_crop_decision(cap, cfg, 640, 480)
+        for key in ("auto_bottom_crop", "auto_top_crop", "auto_vertical_bias",
+                    "top_pct", "bottom_pct", "reasons"):
+            self.assertIn(key, result, f"Missing key: {key}")
+
+    def test_no_detections_returns_all_false(self):
+        """Blank frames produce no detections → all auto flags False."""
+        cap = self._make_cap()
+        cfg = self._cfg()
+        result = _smart_auto_crop_decision(cap, cfg, 640, 480)
+        self.assertFalse(result["auto_bottom_crop"])
+        self.assertFalse(result["auto_top_crop"])
+        self.assertFalse(result["auto_vertical_bias"])
+
+    def test_pct_values_are_floats_in_range(self):
+        cap = self._make_cap()
+        cfg = self._cfg()
+        result = _smart_auto_crop_decision(cap, cfg, 640, 480)
+        for key in ("top_pct", "bottom_pct"):
+            self.assertIsInstance(result[key], float)
+            self.assertGreaterEqual(result[key], 0.0)
+            self.assertLessEqual(result[key], 0.9)
+
+    def test_reasons_is_nonempty_list(self):
+        cap = self._make_cap()
+        cfg = self._cfg()
+        result = _smart_auto_crop_decision(cap, cfg, 640, 480)
+        self.assertIsInstance(result["reasons"], list)
+        self.assertGreater(len(result["reasons"]), 0)
+
+    def test_zero_frames_returns_safe_defaults(self):
+        cap = self._make_cap(total_frames=0)
+        cfg = self._cfg()
+        result = _smart_auto_crop_decision(cap, cfg, 640, 480)
+        self.assertFalse(result["auto_bottom_crop"])
+        self.assertFalse(result["auto_top_crop"])
+        self.assertEqual(result["top_pct"], 0.0)
+        self.assertEqual(result["bottom_pct"], 0.0)
+
+    def test_detector_init_failure_returns_safe_defaults(self):
+        """If _FrameDetector() raises, the function should return safe defaults."""
+        cap = self._make_cap()
+        cfg = self._cfg()
+        with patch("dmd_auto_action._FrameDetector", side_effect=RuntimeError("mock fail")):
+            result = _smart_auto_crop_decision(cap, cfg, 640, 480)
+        self.assertFalse(result["auto_bottom_crop"])
+        self.assertFalse(result["auto_top_crop"])
+        self.assertIn("reasons", result)
+
+    def test_preprocess_smart_crop_exception_degrades_gracefully(self):
+        """If _smart_auto_crop_decision raises, preprocess falls back without crashing."""
+        with patch("dmd_auto_action._smart_auto_crop_decision",
+                   side_effect=RuntimeError("boom")):
+            cfg = AutoActionConfig(smart_auto_crop=True)
+            ok, out, msg = preprocess_video_for_dmd("/nonexistent_file_xyz.mp4", cfg)
+        # Should fail gracefully (no crash), not because of the smart scan
+        self.assertFalse(ok)
+        self.assertIsNone(out)
 
 
 if __name__ == "__main__":
