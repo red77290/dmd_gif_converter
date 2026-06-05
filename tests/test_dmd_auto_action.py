@@ -585,17 +585,18 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         cap = self._make_mock_cap()
         result = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
         self.assertIsInstance(result, tuple)
-        self.assertEqual(len(result), 2)
-        top, bottom = result
+        self.assertEqual(len(result), 3)
+        top, bottom, face_prio = result
         self.assertIsInstance(top, float)
         self.assertIsInstance(bottom, float)
+        self.assertIsInstance(face_prio, bool)
 
     def test_no_detections_returns_zeros(self):
         cfg = AutoActionConfig(detector="motion")
         det = MagicMock()
         det.detect = MagicMock(return_value=None)
         cap = self._make_mock_cap()
-        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        top, bottom, _ = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
         self.assertAlmostEqual(top, 0.0)
         self.assertAlmostEqual(bottom, 0.0)
 
@@ -614,7 +615,7 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         # Tall narrow ROI that still fits (h/w=3.0, h=90 < 128 threshold)
         det.detect = MagicMock(return_value=(100, 50, 30, 90))
         cap = self._make_mock_cap()
-        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        top, bottom, _ = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
         # top boundary must be at or above the head (y=50 → top_pct ≤ 50/480 ≈ 0.104)
         self.assertLessEqual(top * 480, 50.0,
             "Top boundary must be at or above the head position (y=50)")
@@ -645,8 +646,8 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         cap1 = self._make_mock_cap()
         cap2 = self._make_mock_cap()
 
-        top_tall, bot_tall   = _compute_auto_crop_margins(cap1, det_tall,  cfg_face_prio, 640, 480)
-        top_short, bot_short = _compute_auto_crop_margins(cap2, det_short, cfg_normal,    640, 480)
+        top_tall, bot_tall, _   = _compute_auto_crop_margins(cap1, det_tall,  cfg_face_prio, 640, 480)
+        top_short, bot_short, _ = _compute_auto_crop_margins(cap2, det_short, cfg_normal,    640, 480)
 
         # Face priority: bottom boundary is at roi_y + roi_h * 0.32 = 50 + 64 = 114
         # Normal (short): bottom boundary is at roi_y + roi_h = 50 + 80 = 130
@@ -666,7 +667,7 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         # Very tall ROI: y=50, h=250 (head at y=50)
         det.detect = MagicMock(return_value=(100, 50, 60, 250))
         cap = self._make_mock_cap()
-        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        top, bottom, _ = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
         # top boundary must be at or above y=50 (head position)
         top_y_px = top * 480
         self.assertLessEqual(top_y_px, 50.0,
@@ -683,10 +684,10 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         det_body.detect = MagicMock(return_value=(200, 180, 40, 160))
 
         cap = self._make_mock_cap()
-        top_face, bot_face = _compute_auto_crop_margins(cap, det_face, cfg, 640, 480)
+        top_face, bot_face, _ = _compute_auto_crop_margins(cap, det_face, cfg, 640, 480)
 
         cap2 = self._make_mock_cap()
-        top_body, bot_body = _compute_auto_crop_margins(cap2, det_body, cfg, 640, 480)
+        top_body, bot_body, _ = _compute_auto_crop_margins(cap2, det_body, cfg, 640, 480)
 
         # Face should have more padding than body (face pad_frac=0.15, body pad_frac=0.06)
         # The face roi starts at y=180, body roi also starts at y=180
@@ -703,7 +704,7 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         det = MagicMock()
         det.detect = MagicMock(return_value=(0, 0, 640, 480))  # Full frame ROI
         cap = self._make_mock_cap()
-        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        top, bottom, _ = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
         self.assertGreaterEqual(top, 0.0)
         self.assertLessEqual(top, 0.9)
         self.assertGreaterEqual(bottom, 0.0)
@@ -716,7 +717,7 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         det = MagicMock()
         cap = MagicMock()
         cap.get = MagicMock(return_value=0.0)
-        top, bottom = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
+        top, bottom, _ = _compute_auto_crop_margins(cap, det, cfg, 640, 480)
         self.assertAlmostEqual(top, 0.0)
         self.assertAlmostEqual(bottom, 0.0)
 

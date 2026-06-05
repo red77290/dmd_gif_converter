@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.2.0
+# 🎞️ DMD GIF Converter — v3.3.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -7,6 +7,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 ---
 
 ## Table of Contents
+- [🚀 Let Me Handle It — one-click full-auto mode](#-let-me-handle-it--one-click-full-auto-mode-new-in-v330)
 - [🔍 GIF Search — download GIFs directly from the UI](#-gif-search--download-gifs-directly-from-the-ui--new-in-v300)
 - [🎞️ Per-GIF Config — independent settings per file](#️-per-gif-config--independent-settings-per-file)
 - [🤖 Auto Action Framing — AI-powered cinematic camera](#-auto-action-framing--ai-powered-cinematic-camera)
@@ -22,6 +23,59 @@ Now ships with a **full cross-platform graphical interface** — no command line
 - [❓ Troubleshooting](#-troubleshooting)
 - [📄 License](#-license)
 - [🙏 Credits](#-credits)
+
+---
+
+## 🚀 Let Me Handle It — one-click full-auto mode *(new in v3.3.0)*
+
+> **TL;DR — one checkbox and the converter makes every decision for you.**  
+> Located at the **top of the ⚙️ Parameters panel**, above all other settings.
+
+**"Let Me Handle It"** is the ultimate zero-config mode. When enabled, it activates all four AI systems simultaneously and grays out every setting you don't need to touch — leaving only the controls that remain meaningful to you:
+
+```
+Let Me Handle It ✓
+    ├── 🎨 Smart Color Boost          ← auto-activated (ON)
+    ├── 🤖 Auto Action Framing        ← auto-activated (ON)
+    ├── 🧠 Smart Auto Crop            ← auto-activated (ON)
+    ├── 🔲 Background Subtraction     ← auto-activated (ON)
+    │
+    ├── 💬 Text Overlay               ← still editable (your content)
+    ├── 🎞️ Per-GIF Config             ← still editable (per-file settings)
+    └── 🖼️ Dimensions Preset          ← still editable (your hardware)
+```
+
+All other sliders (colorimetry, scroll speed, FPS, crop values, camera params…) are **grayed out** — you can't accidentally break anything.
+
+### What gets activated
+
+| Feature | What it does |
+|---|---|
+| 🎨 **Smart Color Boost** | Heuristic keyframe analysis — perfect brightness, contrast and saturation for your specific source |
+| 🤖 **Auto Action Framing** | AI cinematic camera — detects the subject and frames it like a professional camera operator |
+| 🧠 **Smart Auto Crop** | Scans 60 frames and picks the best crop/tracking combination for the content type |
+| 🔲 **Background Subtraction** | Removes static background → isolates the moving subject against black |
+
+### How to use
+
+1. Open the UI with `./launch_ui.sh`
+2. Add your files to the list
+3. Check **"🚀 Let Me Handle It"** at the top of the Parameters panel
+4. Hit **▶ Convert** — the engine handles everything
+
+### When to use it
+
+- You have a heterogeneous batch and don't want to tune settings per file
+- You're converting live footage, clips, or anime for the first time
+- You want consistent, professional results without learning the full toolset
+
+### When to turn it off
+
+- You need precise control over specific parameters
+- You're converting simple pixel-art sprites that don't need AI (use standard scroll pipeline)
+- You're using per-GIF config to tune individual files
+
+> **Restore:** Toggling OFF restores all four flags to their previous state before "Let Me Handle It" was enabled.
 
 ---
 
@@ -170,12 +224,12 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_zoom_max` | Zoom max | `1.8×` | Maximum dynamic zoom the AI camera can apply |
 | `action_padding` | ROI padding | `0.20` | Extra space added around the detected subject |
 | `action_bottom_crop` | Bottom crop % | `0 %` | Exclude the bottom N % of the frame from detection (manual — overridden when auto is active) |
-| `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Automatically** detect where the subject ends at the bottom (feet / floor). Activates **Face Priority** mode 👤 when the body is taller than the DMD window — crops to the head/face region so the face is always fully visible |
+| `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Automatically** detect where the subject ends at the bottom (feet / floor). Activates **Face Priority** mode 👤 when the body is taller than the DMD window — crops to the estimated chin region (top ~20 % of body height) with asymmetric padding so the **face is centred, not cut at the shoulders** |
 | `action_top_crop` | Top crop % | `0 %` | Exclude the top N % of the frame from detection (manual — overridden when auto is active) |
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Automatically** detect where the subject starts at the top (head / sky) — adapts padding to face vs full-body content |
 | `action_vertical_bias` | Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings. Overrides the manual vertical bias. Ideal for 2-D platformers. |
-| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Engine analyses 25 frames and activates the optimal combination** of auto-bottom-crop, auto-top-crop and auto-floor-tracking. Handles face-priority vs floor-tracking contradiction automatically. Recommended over manual individual options. |
+| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Engine analyses 60 frames and activates the optimal combination** of auto-bottom-crop, auto-top-crop and auto-floor-tracking using 3 mutually exclusive groups. GROUP 1 (tall character > 80 % of DMD window) → face priority (top+bottom crop, no floor). GROUP 2 (trackable stable floor) → floor tracking + optional bottom. GROUP 3 (normal) → top+bottom together. Resolves the face-priority ↔ floor-tracking contradiction automatically. Recommended over manual individual options. |
 
 ### Detector modes
 
@@ -360,6 +414,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
 | **⏱ Max Duration** | Cap clip length + place the window anywhere in the source |
+| **🚀 Let Me Handle It** | One-click full-auto mode — activates all 4 AI systems (Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction) and grays out unrelated settings |
 | **🎨 Smart Color Boost** | One-click AI colorimetry — auto-adjusts contrast, saturation and gamma per source |
 | **🎞️ Per-GIF Config** | Global toggle — when ON each file stores its own independent copy of all ~50 parameters · config saved instantly on selection change |
 | **All standard parameters** | Sliders and drop-downs for mode, scroll, FPS, colorimetry |
@@ -373,6 +428,15 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 
 Expand the **🔧 Advanced Settings ▼** button at the bottom of the Parameters panel.  
 All values default to "no effect" — standard output is 100% identical to v2.0.
+
+#### 🚀 Let Me Handle It — one-click full-auto *(new in v3.3.0)*
+
+> See the [full dedicated section](#-let-me-handle-it--one-click-full-auto-mode-new-in-v330) at the top of this README.
+
+- Toggle at the **very top** of the Parameters panel — above all sliders
+- Activates 4 AI systems: Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction
+- Grays out everything except Text Overlay, Per-GIF Config, and Dimensions Preset
+- Restores all previous values when toggled OFF
 
 #### 🎞️ Per-GIF Config
 
@@ -730,7 +794,8 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_auto_top_crop` | `False` | Auto-detect top crop from ROI analysis |
 | `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
 | `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
-| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — engine scans 25 frames and activates the optimal combination of the 3 options above; resolves the face-priority ↔ floor-tracking contradiction automatically |
+| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — engine scans 60 frames and activates the optimal combination of the 3 options above using 3 mutually exclusive groups; resolves the face-priority ↔ floor-tracking contradiction automatically |
+| `let_me_handle_it` | `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction simultaneously and grays out all unrelated settings |
 | `target_width` | `128` | Output width in pixels (multi-panel tiling) |
 | `target_height` | `32` | Output height in pixels (multi-panel tiling) |
 | `text_overlay_enabled` | `False` | 💬 Burn a text label into the output GIF |
@@ -812,7 +877,10 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
 | Auto Action: "model download failed" | No internet access — place `yolov8n.onnx` manually in `~/.cache/dmd_gif_converter/`. Falls back to motion detection automatically |
 | Smart Auto Crop gives wrong results | Disable it and activate each option individually — use `Auto bottom crop`, `Auto top crop`, `Auto floor detect` independently |
-| Smart Auto Crop activates nothing | Not enough detections in the 25-frame scan — try a different detector mode (`motion` or `hybrid`) |
+| Smart Auto Crop activates nothing | Not enough detections in the 60-frame scan — try a different detector mode (`motion` or `hybrid`) |
+| Face cut off at shoulder level | Known issue fixed in v3.3.0 — update to the latest version; the engine now uses chin-level detection (20 % of body height) with asymmetric padding |
+| Auto Action fails with GIF source | Fixed in v3.3.0 — GIFs are now pre-converted via FFmpeg before OpenCV processing to avoid BGRA transparency issues |
+| `[ACTION] … FFmpeg pipe encoding failed` | Check the log for the full FFmpeg stderr message (now included). Most likely cause: GIF with transparency palette — update to v3.3.0 which pre-converts GIFs automatically |
 | Floor not visible in 2-D platformer | Enable **Auto floor detect** in the Auto Action advanced settings — it anchors the camera to the detected ground level |
 | Camera pans up during jumps | Enable **Auto floor detect** — it uses an asymmetric EMA that resists upward movement during airtime |
 | Auto floor detect still not showing floor | Increase **Bottom crop %** to hide the HUD/floor area from the main detector, then re-enable Auto floor detect |
@@ -829,6 +897,8 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Per-GIF Config: params seem to bleed between files | Make sure to **click** the new file (not just hover) — the save triggers on the selection-change event |
 | Per-GIF Config: toggle OFF reverts to wrong params | Expected — it restores the exact state at the moment you toggled ON, not the current GIF's config |
 | Per-GIF Config: configs lost after restart | Configs are session-only (RAM) — export is not yet supported |
+| "Let Me Handle It" grays out sliders I need | Toggle it OFF to get full manual control again — all previous values are restored |
+| "Let Me Handle It" ON but Auto Action not running | Check that OpenCV and onnxruntime are installed (`pip install opencv-python onnxruntime`) |
 
 ---
 

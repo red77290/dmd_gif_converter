@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.2.0
+# 🎞️ DMD GIF Converter — v3.3.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
@@ -7,6 +7,7 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 ---
 
 ## Table des matières
+- [🚀 Laisse-moi gérer ça — mode tout-automatique](#-laisse-moi-gerer-ca--mode-tout-automatique-nouveau-en-v330)
 - [🔍 Recherche de GIFs — téléchargez des GIFs directement depuis l'UI](#-recherche-de-gifs--telechargez-des-gifs-directement-depuis-lui--nouveau-en-v300)
 - [🎞️ Config par GIF — réglages indépendants par fichier](#️-config-par-gif--reglages-independants-par-fichier)
 - [🤖 Auto Action Framing — caméra cinématique par IA](#-auto-action-framing--camera-cinematique-par-ia)
@@ -25,7 +26,56 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ---
 
-## 🔍 Recherche de GIFs — téléchargez des GIFs directement depuis l'UI  *(nouveau en v3.0.0)*
+## 🚀 Laisse-moi gérer ça — mode tout-automatique *(nouveau en v3.3.0)*
+
+> **En bref — une seule case à cocher et le convertisseur prend toutes les décisions à votre place.**  
+> Situé tout en **haut du panneau ⚙️ Paramètres**, au-dessus de tous les autres réglages.
+
+**"Let Me Handle It"** est le mode zéro-config ultime. Lorsqu'il est activé, il active les quatre systèmes IA simultanément et grise tous les réglages dont vous n'avez pas besoin — ne laissant que les contrôles qui restent pertinents :
+
+```
+Let Me Handle It ✓
+    ├── 🎨 Smart Color Boost          ← auto-activé (ON)
+    ├── 🤖 Auto Action Framing        ← auto-activé (ON)
+    ├── 🧠 Smart Auto Crop            ← auto-activé (ON)
+    ├── 🔲 Soustraction de fond       ← auto-activé (ON)
+    │
+    ├── 💬 Texte Overlay              ← toujours modifiable (votre contenu)
+    ├── 🎞️ Config par GIF             ← toujours modifiable (réglages par fichier)
+    └── 🖼️ Preset de dimensions       ← toujours modifiable (votre matériel)
+```
+
+Tous les autres curseurs (colorimétrie, vitesse de défilement, FPS, valeurs de crop, paramètres caméra…) sont **grisés** — impossible de casser quelque chose par accident.
+
+### Ce qui est activé
+
+| Fonctionnalité | Ce qu'elle fait |
+|---|---|
+| 🎨 **Smart Color Boost** | Analyse heuristique d'image-clé — luminosité, contraste et saturation parfaits pour votre source spécifique |
+| 🤖 **Auto Action Framing** | Caméra IA cinématique — détecte le sujet et le cadre comme un caméraman professionnel |
+| 🧠 **Smart Auto Crop** | Analyse 60 images et choisit la meilleure combinaison crop/tracking selon le type de contenu |
+| 🔲 **Soustraction de fond** | Supprime le fond statique → isole le sujet en mouvement sur fond noir |
+
+### Comment l'utiliser
+
+1. Ouvrez l'interface avec `./launch_ui.sh`
+2. Ajoutez vos fichiers dans la liste
+3. Cochez **"🚀 Let Me Handle It"** en haut du panneau Paramètres
+4. Cliquez sur **▶ Convert** — le moteur gère tout
+
+### Quand l'utiliser
+
+- Vous avez un lot hétérogène et ne voulez pas régler chaque fichier individuellement
+- Vous convertissez des vidéos live, clips ou anime pour la première fois
+- Vous voulez des résultats professionnels cohérents sans apprendre tous les paramètres
+
+### Quand le désactiver
+
+- Vous avez besoin d'un contrôle précis sur des paramètres spécifiques
+- Vous convertissez des sprites pixel-art simples qui n'ont pas besoin d'IA (utilisez le pipeline standard)
+- Vous utilisez Config par GIF pour régler chaque fichier individuellement
+
+> **Restauration :** désactiver le toggle restaure les quatre flags à leur état d'avant l'activation de "Let Me Handle It".
 
 > **En bref — tapez un mot-clé, choisissez une quantité, appuyez sur ⬇ DL, et les GIFs apparaissent dans la liste prêts à convertir.**  
 > Disponible dans le panneau **📁 Fichiers source** à gauche, entre les boutons de fichiers et la liste.
@@ -170,12 +220,13 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_zoom_max` | Zoom max | `1,8×` | Zoom dynamique maximum que la caméra IA peut appliquer |
 | `action_padding` | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
 | `action_bottom_crop` | Bottom crop % | `0 %` | Exclut les N % inférieurs du frame de la détection (manuel — ignoré si auto actif) |
-| `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Détecte automatiquement** la limite basse du sujet. Active le mode **Face Priority** 👤 quand le corps est plus grand que la fenêtre DMD — recadre sur la région tête/visage pour que le visage soit toujours entièrement visible |
+| `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Détecte automatiquement** la limite basse du sujet. Active le mode **Face Priority** 👤 quand le corps est plus grand que la fenêtre DMD — recadre sur la région menton (~20 % du corps depuis le haut) avec un rembourrage asymétrique pour que **le visage soit centré, pas coupé aux épaules** |
 | `action_top_crop` | Top crop % | `0 %` | Exclut les N % supérieurs du frame de la détection (manuel — ignoré si auto actif) |
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Détecte automatiquement** la limite haute du sujet (tête / ciel) — adapte la marge selon face ou corps entier |
 | `action_vertical_bias` | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol visible), `-1,0` = caméra vers le haut |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Détecte automatiquement** le niveau du sol via un EMA asymétrique — résiste aux sauts, suit les atterrissages. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
-| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Le moteur analyse 25 images et active la combinaison optimale** d'auto-bottom-crop, auto-top-crop et auto-floor-tracking. Résout automatiquement la contradiction face-priority ↔ floor-tracking. Recommandé par rapport aux options individuelles. |
+| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Le moteur analyse 60 images et active la combinaison optimale** via 3 groupes mutuellement exclusifs. GROUPE 1 (personnage très grand > 80 %) → face priority (top+bottom, pas de sol). GROUPE 2 (sol stable et détectable) → suivi du sol + bottom optionnel. GROUPE 3 (normal) → top+bottom ensemble. Résout automatiquement la contradiction face-priority ↔ floor-tracking. |
+| `let_me_handle_it` | `False` | 🚀 Laisse-moi gérer ça — active simultanément Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond, et grise tous les réglages non pertinents |
 
 ### Modes de détection
 
@@ -219,15 +270,15 @@ python auto_action_cli.py input.mp4 --auto-floor-detect
 Analyse un échantillon de frames (~40) et détecte où **le sujet se termine en bas** (pieds, sol, ligne de sol).
 Élimine automatiquement le HUD, les barres de sous-titres et les dalles de sol vides qui feraient descendre la caméra.
 
-##### 👤 Mode Face Priority (automatique)
+##### 👤 Mode Face Priority (automatique) — amélioré en v3.3.0
 
 Quand le personnage détecté est **plus grand que la fenêtre DMD** (hauteur ROI > 80 % de `largeur_frame / ratio_cible`), le système bascule automatiquement en **mode Face Priority** :
 
-- La limite basse effective est recalculée sur les **~32 % supérieurs du ROI** (tête + cou + épaules) au lieu des pieds
-- La caméra est **contrainte à la région tête** pour toute la phase de tracking → le visage est toujours entièrement visible à l'écran
+- La limite basse effective est calculée au niveau du **menton** (~20 % de la hauteur du corps depuis le haut de la tête — et non 32 % au niveau des épaules comme dans les versions précédentes)
+- Le rembourrage est **asymétrique** : `+10 % de marge au-dessus` (front) + `+3 % tampon sous le menton` — le visage est centré avec de l'espace naturel
+- **La caméra utilise les limites complètes de la frame** (pas la zone de détection restreinte) — empêche la caméra d'être bloquée au niveau des épaules
 - Le tag `[face priority 👤]` apparaît dans le journal de conversion quand ce mode s'active
 
-Ce mode s'active quand la **majorité (> 50 %) des frames** échantillonnées ont un corps trop grand — il ne se déclenche pas sur une seule frame outlier.
 
 #### Auto top crop
 
@@ -390,6 +441,15 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 
 Cliquer sur le bouton **🔧 Advanced Settings ▼** en bas du panneau Paramètres.  
 Toutes les valeurs par défaut = « aucun effet » — la sortie standard est identique à v2.0.
+
+#### 🚀 Laisse-moi gérer ça — mode tout-automatique *(nouveau en v3.3.0)*
+
+> Voir la [section dédiée complète](#-laisse-moi-gerer-ca--mode-tout-automatique-nouveau-en-v330) en tête de ce README.
+
+- Toggle tout en **haut** du panneau Paramètres — au-dessus de tous les curseurs
+- Active 4 systèmes IA : Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond
+- Grise tout sauf Texte Overlay, Config par GIF et Preset de dimensions
+- Restaure toutes les valeurs précédentes au désactivation
 
 #### 🎞️ Config par GIF
 
@@ -758,7 +818,8 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `action_auto_top_crop` | `False` | Détecte auto la limite haute du sujet (tête / ciel) |
 | `action_vertical_bias` | `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
 | `action_auto_vertical_bias` | `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
-| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — moteur analyse le contexte et active la combinaison optimale des 3 options ci-dessus |
+| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — moteur analyse 60 images et active la combinaison optimale via 3 groupes mutuellement exclusifs ; résout la contradiction face-priority ↔ floor-tracking |
+| `let_me_handle_it` | `False` | 🚀 Laisse-moi gérer ça — mode tout-automatique : active Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond et grise tous les réglages non pertinents |
 | `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
 | `target_height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
 | `text_overlay_enabled` | `False` | 💬 Graver un texte dans le GIF de sortie |
@@ -854,6 +915,13 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Config par GIF : les params semblent se mélanger entre fichiers | Vérifiez que vous **cliquez** sur le nouveau fichier (la sauvegarde se déclenche sur l'événement de sélection) |
 | Config par GIF : le toggle OFF revient aux mauvais params | Comportement attendu — il restaure l'état exact au moment du toggle ON, pas la config du GIF courant |
 | Config par GIF : configs perdues après redémarrage | Les configs sont uniquement en session (RAM) — l'export n'est pas encore supporté |
+| Smart Auto Crop donne de mauvais résultats | Désactivez-le et activez chaque option individuellement — utilisez `Auto bottom crop`, `Auto top crop`, `Auto floor detect` indépendamment |
+| Smart Auto Crop n'active rien | Pas assez de détections dans le scan de 60 images — essayez un autre mode de détection (`motion` ou `hybrid`) |
+| Visage coupé au niveau des épaules | Problème corrigé en v3.3.0 — mettez à jour vers la dernière version ; le moteur utilise désormais la détection au niveau du menton (20 % de la hauteur du corps) avec un rembourrage asymétrique |
+| Auto Action échoue avec une source GIF | Corrigé en v3.3.0 — les GIFs sont maintenant pré-convertis via FFmpeg avant le traitement OpenCV pour éviter les problèmes de transparence BGRA |
+| `[ACTION] … FFmpeg pipe encoding failed` | Consultez le message complet dans le log (stderr FFmpeg inclus désormais). Cause probable : GIF avec palette de transparence — mettez à jour vers v3.3.0 |
+| "Let Me Handle It" grise des curseurs dont j'ai besoin | Désactivez-le pour récupérer le contrôle manuel complet — toutes les valeurs précédentes sont restaurées |
+| "Let Me Handle It" activé mais Auto Action ne tourne pas | Vérifiez que OpenCV et onnxruntime sont installés (`pip install opencv-python onnxruntime`) |
 
 ---
 

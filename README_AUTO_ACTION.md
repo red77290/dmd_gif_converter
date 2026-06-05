@@ -1,7 +1,14 @@
-# Auto Action Framing (Experimental)
+# Auto Action Framing
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
+
+**v3.3.0 improvements:**
+- **GIF pre-conversion**: GIF sources are now transcoded to a clean H.264 MP4 via FFmpeg before OpenCV processing — eliminates `FFmpeg pipe encoding failed` errors caused by BGRA transparency palettes in GIF files.
+- **BGRA safety net**: OpenCV frames are normalised to BGR (3-channel) before being piped to FFmpeg, even if the GIF pre-conversion fallback path is taken.
+- **FFmpeg stderr capture**: In case of encoding failure, the last 300 characters of FFmpeg's stderr are included in the log for easier diagnosis.
+- **Smart Auto Crop 3-group logic**: The decision engine now uses three **mutually exclusive groups** instead of evaluating all signals simultaneously — resolving the face-priority ↔ floor-tracking architectural contradiction.
+- **Face Priority improvements**: Detection zone is now at **chin level** (20 % of body height from head top, not 32 % shoulder level). Camera uses **full frame bounds** in face-priority mode, not the restricted detection zone, preventing the camera from being locked at shoulder level.
 
 **v3.2.0 architectural improvements:**
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
@@ -40,7 +47,24 @@ The HOG/SVM detector has been replaced with **YOLOv8n** exported to ONNX format 
 
 ---
 
-## Intermediate Encoding — rawvideo pipe
+## Intermediate Encoding — rawvideo pipe + GIF pre-conversion
+
+### GIF sources — automatic pre-conversion *(new in v3.3.0)*
+
+GIF files are pre-converted to a clean H.264 MP4 via FFmpeg **before** OpenCV processes them:
+
+```
+GIF source  ──[FFmpeg GIF→MP4]──▶  clean BGR24 MP4  ──[OpenCV]──▶  rawvideo pipe  ──▶  H.264 temp.mp4
+```
+
+This solves a class of failures specific to GIF files on macOS/AVFoundation:
+- GIF transparency palettes decode as **BGRA (4-channel)** in OpenCV — mismatching the `bgr24` pipe format
+- Sub-frame delta GIFs produce garbled frames after the first one
+- FPS metadata in GIF files may be wrong — FFmpeg decodes timing correctly
+
+If FFmpeg is unavailable or the conversion fails, the original GIF is used with BGRA→BGR normalisation as a safety net.
+
+### Standard sources — rawvideo pipe
 
 Frames processed by OpenCV are piped **directly to FFmpeg via stdin** as BGR24 rawvideo.
 FFmpeg encodes them to H.264/MP4 (ultrafast preset) without writing any intermediate raw data to disk:
@@ -70,38 +94,65 @@ Three independent crop / vertical-bias options are grouped under the **📐 Crop
 
 **Replaces the manual trial-and-error of enabling the right combination.**
 
-When enabled, the engine scans **25 evenly-spaced frames** and analyses four signals:
+When enabled, the engine scans **60 evenly-spaced frames** and classifies the content into one of **three mutually exclusive groups**:
 
-| Signal | How it is detected | Result |
-|--------|--------------------|--------|
-| **Blank space at top** | `median(roi_top) > 8 % of frame_h` | → `auto_top_crop ✓` |
-| **Tall character** | `median(roi_h) > 70 % of DMD window height` | → `auto_bottom_crop ✓` (face priority mode) · **floor-tracking ✗** (contradiction) |
-| **Bottom clutter / HUD** | `(frame_h − median(roi_bottom)) > 8 %` | → `auto_bottom_crop ✓` |
-| **Stable / dynamic floor** | `median(roi_bottom) > 50 % of frame_h` AND `std < 25 %` | → `auto_vertical_bias ✓` (asymmetric EMA floor tracker) |
+#### GROUP 1 — Face Priority (tall character)
 
-#### Contradiction handling — face priority vs floor tracking
+**Trigger:** `median(roi_h) > 80 % of DMD window height`
 
-The engine automatically resolves the key contradiction:
+The character body is taller than the DMD strip. The camera must zoom onto the face.
 
-> **Tall character** = face-priority mode is active → camera must stay on the **head region**.  
-> **Floor tracking** = camera follows the **feet / ground** via asymmetric EMA.  
-> These are **mutually exclusive** — the engine picks face-priority and **suppresses** floor-tracking.
+| Action | Reason |
+|--------|--------|
+| `auto_top_crop = ON` (forced) | Restricts YOLO detection zone to the head region only |
+| `auto_bottom_crop = ON` | Marks content bottom at chin level (20 % of body height from top) |
+| `auto_floor_track = OFF` | **Explicitly suppressed** — tracking the floor while face-priority is active would pan the camera down to feet |
+
+> **Camera bounds fix (v3.3.0):** in face-priority mode the camera is allowed to travel over the **full source frame height** (not the restricted detection zone). This prevents the camera from being forced to shoulder level when the effective zone is smaller than the DMD window.
+
+#### GROUP 2 — Floor Tracking (platformer / ground level)
+
+**Trigger:** `median(roi_bottom) > 50 % of frame_h` AND `floor_variance ≤ 25 %` AND NOT GROUP 1
+
+The floor is visible, stable, and the character fits on screen.
+
+| Action | Reason |
+|--------|--------|
+| `auto_floor_track = ON` | Asymmetric EMA anchors camera to ground — resists jumps, follows landings |
+| `auto_top_crop` skipped | No top-crop needed when character fits and floor is the reference |
+| `auto_bottom_crop` | Optional — only if there is significant clutter below the floor line |
+
+#### GROUP 3 — Normal (default)
+
+**Trigger:** all other content
+
+| Action | Reason |
+|--------|--------|
+| `auto_top_crop` | Activated only when `top_space > 8 %` of frame_h (blank sky / ceiling above) |
+| `auto_bottom_crop` | Activated when `bottom_gap > 8 %` of frame_h, **or forced ON** whenever `auto_top_crop` is active (the two work together to centre the subject) |
+| `auto_floor_track = OFF` | Not applicable for general content |
+
+#### Why mutually exclusive groups?
+
+The old approach evaluated all signals simultaneously — leading to contradictions like enabling floor-tracking AND face-priority at the same time. A floor-tracking camera follows feet; a face-priority camera must follow the head. Enabling both produced chaotic results.
+
+The three-group architecture ensures only one coherent strategy is activated per source.
 
 #### Decision examples
 
-| Content | Activated options |
-|---------|-------------------|
-| 2D platformer (normal char, HUD at bottom) | `auto_bottom_crop` + `auto_floor_track` |
-| Very tall character (full-screen sprite) | `auto_bottom_crop` (face priority) only |
-| Aerial shot / floating character | `auto_bottom_crop` (clutter below) |
-| Wide shot, subject centered with sky + HUD | `auto_top_crop` + `auto_bottom_crop` + `auto_floor_track` |
-| All options unnecessary (well-framed source) | none (all manual) |
+| Content | Group | Activated options |
+|---------|-------|-------------------|
+| Very tall character (full-screen sprite) | **GROUP 1** | `auto_top_crop` + `auto_bottom_crop` (face) |
+| 2D platformer (normal char, stable floor) | **GROUP 2** | `auto_floor_track` + optional `auto_bottom_crop` |
+| 2D platformer + tall boss | **GROUP 1** | `auto_top_crop` + `auto_bottom_crop` (face) |
+| Aerial / sky battle, no floor | **GROUP 3** | `auto_top_crop` + `auto_bottom_crop` |
+| Well-framed close-up | **GROUP 3** | none (manual) |
 
 #### When Smart Auto is ON
 
 - The 3 individual auto-checkboxes are **disabled** in the UI (managed by the engine at render time)
 - The 3 sliders remain **editable** — they serve as manual fallback values if the engine decides NOT to activate a mode for that dimension
-- Decision reasons appear in the conversion log: `[smart: top-space 15% -> auto-top-crop / floor@83% var=3% (stable) -> floor-tracking ✓]`
+- Decision reasons appear in the conversion log: `[smart: face-priority → auto-top+bottom / floor-tracking suppressed]`
 
 #### When Smart Auto is OFF
 
@@ -131,12 +182,14 @@ The algorithm infers whether the subject is a **face/close-up** or **full body**
 | 1.3 – 2.5 | Bust / upper body | 10 % of frame height |
 | > 2.5 | Full body (fits on screen) | 6 % of frame height |
 
-#### 👤 Face Priority mode (automatic)
+#### 👤 Face Priority mode (automatic) — v3.3.0 improvements
 
 When the detected character is **taller than the DMD window** (body height > 80 % of `frame_width / target_ratio`), the system automatically switches to **Face Priority** mode:
 
-- The effective "content bottom" is set to **the estimated face/head region** (top ~32 % of the body ROI height) instead of the feet
-- The padding switches to face-mode (12 % — generous, prevents forehead clipping)
+- The effective "content bottom" is set to **the estimated chin region** — top **20 %** of the body ROI height from the head (≈ chin level, **not shoulder level** which was the old 32 % value)
+- Padding is **asymmetric**: `+10 % forehead headroom` above + `+3 % chin buffer` below — so the face is centred with natural breathing room and the detection zone doesn't extend to the shoulders
+- **Camera travel uses full frame bounds**: In face-priority mode, `_cam_frame_h = frame_h` and `_cam_frame_top = 0.0` (independent of the restricted YOLO detection zone). This prevents the camera from being mathematically forced to shoulder level when `_cy_min > _cy_max`.
+- YOLO still detects in the restricted zone (head ROI only) — the camera is free to follow that small ROI across the full frame height
 - A `[face priority 👤]` tag appears in the conversion log when this mode activates
 
 ### Manual vs Smart Auto vs Individual Auto
@@ -210,4 +263,6 @@ python auto_action_cli.py input.mp4 --top-crop 0.05 --bottom-crop 0.15 --out pre
 - The YOLOv8n model (~6 MB) is downloaded automatically to `~/.cache/dmd_gif_converter/` on first use. Subsequent runs use the cached model.
 - If `onnxruntime` is installed but the model download fails (no internet), the motion detector is used as a silent fallback.
 - Default settings keep this feature **disabled** — existing behaviour is unchanged.
-- Auto crop performs a quick **pre-scan** (~40 evenly-spaced frames) before the main pass.
+- Smart Auto Crop scans **60 evenly-spaced frames** (handles sources with long intros before the character appears).
+- Individual Auto Crop (bottom / top) scans **80 evenly-spaced frames** for the margin calculation pass.
+- **GIF sources** are automatically pre-converted to a clean MP4 via FFmpeg before OpenCV processing — no manual intervention needed.
