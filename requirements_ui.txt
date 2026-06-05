@@ -1,12 +1,14 @@
-# DMD GIF Converter UI — Dépendances Python
+# DMD GIF Converter UI — Python Dependencies
 customtkinter>=5.2.2
 Pillow>=10.0.0
-# darkdetect 0.8.0 a un bug de détection de version sur macOS 15+ / 26+
-# pinned à 0.7.1 pour éviter le crash "macOS XX or later required"
+# darkdetect 0.8.0 has a version-detection bug on macOS 15+ / 26+
+# pinned to 0.7.1 to avoid the "macOS XX or later required" crash
 darkdetect==0.7.1
 opencv-python>=4.9.0
+# Auto Action person detector — ONNX YOLOv8n runtime (CPU-only, ~6 MB model)
+# Falls back gracefully to motion detection when absent
+onnxruntime>=1.16.0
 # GIF Search (v3.0.0)
-# 'duckduckgo_search' a été renommé en 'ddgs' — on installe les deux pour compatibilité
+# 'duckduckgo_search' was renamed to 'ddgs' — install both for compatibility
 ddgs>=7.0.0
 requests>=2.31.0
-
