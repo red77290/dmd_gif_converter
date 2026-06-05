@@ -149,6 +149,97 @@ _MODE_DESC = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  _InfoBadge — compact ℹ icon with hover tooltip
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _InfoBadge:
+    """
+    Replaces a plain CTkLabel info row with a small ℹ icon.
+    The full text is shown in a popup tooltip when the user hovers over the icon.
+    API-compatible with CTkLabel: supports .configure(text=...) and .pack(**kw).
+    """
+
+    _TIP_BG   = "#1a1a2e"
+    _TIP_FG   = "#aaccee"
+    _TIP_FONT = ("Helvetica", 10)
+
+    def __init__(self, parent, width: int = 40):
+        self._text = ""
+        self._tip_win = None
+        self._lbl = ctk.CTkLabel(
+            parent,
+            text="",
+            width=width,
+            font=ctk.CTkFont(size=11),
+            text_color="#4f7bd9",
+            cursor="question_arrow",
+        )
+        self._lbl.bind("<Enter>",  self._on_enter)
+        self._lbl.bind("<Leave>",  self._on_leave)
+        self._lbl.bind("<Motion>", self._on_motion)
+
+    # ── Public API ──────────────────────────────────────────────────────────────
+    def pack(self, **kw):
+        self._lbl.pack(**kw)
+
+    def configure(self, text: str = "", **_kw):
+        """Update tooltip content.  Shows ℹ when text is non-empty."""
+        self._text = text or ""
+        self._lbl.configure(text="ℹ" if self._text else "")
+        # Refresh live tooltip if already open
+        if self._tip_win and self._text:
+            self._refresh_tip_text()
+
+    # ── Tooltip ─────────────────────────────────────────────────────────────────
+    def _on_enter(self, event):
+        if self._text:
+            self._show_tip(event.x_root, event.y_root)
+
+    def _on_motion(self, event):
+        if self._tip_win:
+            self._tip_win.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 14}")
+
+    def _on_leave(self, _event):
+        self._hide_tip()
+
+    def _show_tip(self, rx: int, ry: int):
+        if self._tip_win:
+            return
+        tw = tk.Toplevel(self._lbl)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{rx + 14}+{ry + 14}")
+        tw.configure(bg=self._TIP_BG)
+        self._tip_label = tk.Label(
+            tw,
+            text=self._text,
+            justify="left",
+            bg=self._TIP_BG,
+            fg=self._TIP_FG,
+            relief="solid",
+            bd=1,
+            font=self._TIP_FONT,
+            wraplength=560,
+            padx=8, pady=5,
+        )
+        self._tip_label.pack()
+        self._tip_win = tw
+
+    def _refresh_tip_text(self):
+        try:
+            self._tip_label.configure(text=self._text)
+        except Exception:
+            pass
+
+    def _hide_tip(self):
+        if self._tip_win:
+            try:
+                self._tip_win.destroy()
+            except Exception:
+                pass
+            self._tip_win = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  DMDConverterApp — main window
 # ─────────────────────────────────────────────────────────────────────────────
 class DMDConverterApp(ctk.CTk):
@@ -239,7 +330,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_auto_action_enabled = tk.BooleanVar(value=False)
         self.v_action_detector     = tk.StringVar(value="person")
         self.v_action_strength     = tk.DoubleVar(value=0.65)
-        self.v_action_smoothness   = tk.DoubleVar(value=0.85)
+        self.v_action_smoothness   = tk.DoubleVar(value=0.98)
         self.v_action_zoom_max     = tk.DoubleVar(value=2.0)
         self.v_action_padding      = tk.DoubleVar(value=0.20)
         self.v_action_intro        = tk.DoubleVar(value=1.5)
@@ -278,6 +369,11 @@ class DMDConverterApp(ctk.CTk):
         # Smart Color Boost — save/restore state when toggling
         self._auto_color_analyzing: bool = False
         self._pre_auto_color_values: dict = {}  # saved custom-mode slider values
+
+        # ── Tkinter vars — "Let me handle it" ─────────────────────────────────
+        self.v_let_me_handle_it = tk.BooleanVar(value=False)
+        self._lmh_widgets: list = []          # widgets to gray in LMH mode
+        self._lmh_saved_state: dict = {}      # saved 4-flag state before LMH
 
         # ── Folder refresh state ──────────────────────────────────────────────
         self._last_source_folder: str = ""
@@ -795,9 +891,7 @@ class DMDConverterApp(ctk.CTk):
             bg=BG_CANVAS, highlightthickness=0
         )
         self._src_canvas.pack(padx=2, pady=(2, 2))
-        self._src_info = ctk.CTkLabel(
-            src_wrap, text="", text_color="#888899", font=ctk.CTkFont(size=10)
-        )
+        self._src_info = _InfoBadge(src_wrap, width=SRC_CANVAS_W)
         self._src_info.pack(pady=(0, 4))
 
         # Auto-action canvas (middle)
@@ -812,9 +906,7 @@ class DMDConverterApp(ctk.CTk):
             bg=BG_CANVAS, highlightthickness=0
         )
         self._auto_canvas.pack(padx=2, pady=(2, 2))
-        self._auto_info = ctk.CTkLabel(
-            auto_wrap, text="", text_color="#888899", font=ctk.CTkFont(size=10)
-        )
+        self._auto_info = _InfoBadge(auto_wrap, width=AUTO_CANVAS_W)
         self._auto_info.pack(pady=(0, 4))
 
         # DMD canvas (right)
@@ -833,8 +925,9 @@ class DMDConverterApp(ctk.CTk):
             bg=BG_CANVAS, highlightthickness=0
         )
         self._dmd_canvas.pack(padx=2, pady=(2, 2))
-        self._dmd_info = ctk.CTkLabel(
-            dmd_wrap, text="", text_color="#888899", font=ctk.CTkFont(size=10)
+        self._dmd_info = _InfoBadge(
+            dmd_wrap,
+            width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR),
         )
         self._dmd_info.pack(pady=(0, 4))
 
@@ -911,6 +1004,8 @@ class DMDConverterApp(ctk.CTk):
 
     # ── Params panel ──────────────────────────────────────────────────────────
     def _build_params_panel(self, parent):
+        # Reset LMH widget list each time this panel is built
+        self._lmh_widgets = []
 
         def section(text):
             ctk.CTkLabel(
@@ -963,6 +1058,7 @@ class DMDConverterApp(ctk.CTk):
             entry.bind("<FocusIn>",  _on_focus_in)
             entry.bind("<FocusOut>", _commit)
             entry.bind("<Return>",   _commit)
+            self._lmh_widgets.extend([sl, entry])
             return sl
 
         # ── Per-GIF config toggle ─────────────────────────────────────────────
@@ -983,6 +1079,28 @@ class DMDConverterApp(ctk.CTk):
         )
         self._per_gif_status_lbl.pack(side="left", padx=(0, 8))
 
+        # ── 🤖 Let me handle it ───────────────────────────────────────────────
+        lmh_frame = ctk.CTkFrame(parent, fg_color="#1a1200", corner_radius=8,
+                                 border_width=2, border_color="#ffaa22")
+        lmh_frame.pack(fill="x", padx=8, pady=(6, 4))
+        lmh_frame.grid_columnconfigure(1, weight=1)
+        self._lmh_cb = ctk.CTkCheckBox(
+            lmh_frame,
+            text="🤖  Let me handle it  —  full auto, zero config",
+            variable=self.v_let_me_handle_it,
+            command=self._on_let_me_handle_toggle,
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#ffaa22",
+            fg_color="#cc7700", hover_color="#ff9900",
+            checkmark_color="#ffffff",
+        )
+        self._lmh_cb.pack(side="left", padx=12, pady=8)
+        ctk.CTkLabel(
+            lmh_frame,
+            text="Activates: Smart Color Boost · Auto-framing · Smart Auto-Crop · BG Subtraction\n"
+                 "Locks all other settings (overlay, per-GIF config & dimension preset remain free)",
+            text_color="#886622", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(side="left", padx=(0, 12), pady=6)
+
         # Mode
         section("🎨  Content mode")
         mr = ctk.CTkFrame(parent, fg_color="transparent")
@@ -996,6 +1114,7 @@ class DMDConverterApp(ctk.CTk):
             command=self._on_mode_change, width=180
         )
         self._mode_menu.grid(row=0, column=1, padx=4, sticky="w")
+        self._lmh_widgets.append(self._mode_menu)
 
         self._mode_desc_lbl = ctk.CTkLabel(
             parent, text=_MODE_DESC["pixel_art"],
@@ -1014,6 +1133,7 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#88dd88",
         )
         self._auto_color_cb.pack(side="left", padx=12, pady=8)
+        self._lmh_widgets.append(self._auto_color_cb)
         self._auto_color_info = ctk.CTkLabel(
             ac_row, text="",
             text_color="#557755", font=ctk.CTkFont(size=10)
@@ -1053,6 +1173,7 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
         )
         self._max_dur_cb.pack(side="left")
+        self._lmh_widgets.append(self._max_dur_cb)
 
         dur_row = ctk.CTkFrame(parent, fg_color="transparent")
         dur_row.pack(fill="x", padx=8, pady=2)
@@ -1064,6 +1185,7 @@ class DMDConverterApp(ctk.CTk):
             number_of_steps=118,
         )
         self._max_dur_slider.grid(row=0, column=1, sticky="ew", padx=4)
+        self._lmh_widgets.append(self._max_dur_slider)
         self._max_dur_lbl = ctk.CTkLabel(
             dur_row, text=_fmt_dur(self.v_max_duration.get()),
             width=72, anchor="e", font=ctk.CTkFont(size=11)
@@ -1162,6 +1284,7 @@ class DMDConverterApp(ctk.CTk):
         )
         self._dither_menu.pack(side="left")
         self._colorimetry_widgets.append(self._dither_menu)
+        self._lmh_widgets.append(self._dither_menu)
 
         self._update_custom_visibility()
 
@@ -1197,7 +1320,7 @@ class DMDConverterApp(ctk.CTk):
 
     def _build_advanced_content(self, parent):
         def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
-                       steps=None, is_int=False):
+                       steps=None, is_int=False, lmh=True):
             f = ctk.CTkFrame(par, fg_color="transparent")
             f.pack(fill="x", padx=10, pady=2)
             f.grid_columnconfigure(1, weight=1)
@@ -1245,6 +1368,8 @@ class DMDConverterApp(ctk.CTk):
             entry.bind("<FocusIn>",  _on_focus_in)
             entry.bind("<FocusOut>", _commit)
             entry.bind("<Return>",   _commit)
+            if lmh:
+                self._lmh_widgets.extend([sl, entry])
             return sl
 
         ctk.CTkLabel(
@@ -1262,24 +1387,28 @@ class DMDConverterApp(ctk.CTk):
 
         auto_row = ctk.CTkFrame(parent, fg_color="transparent")
         auto_row.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkCheckBox(
+        self._cb_auto_action_enabled = ctk.CTkCheckBox(
             auto_row,
             text="Enable cinematic auto-framing before ffmpeg (default OFF)",
             variable=self.v_auto_action_enabled,
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
-        ).pack(side="left")
+        )
+        self._cb_auto_action_enabled.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_action_enabled)
 
         mode_row = ctk.CTkFrame(parent, fg_color="transparent")
         mode_row.pack(fill="x", padx=10, pady=2)
         mode_row.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(mode_row, text="Detection mode", width=145, anchor="w",
                      font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        ctk.CTkOptionMenu(
+        self._action_detector_menu = ctk.CTkOptionMenu(
             mode_row,
             variable=self.v_action_detector,
             values=["person", "motion", "hybrid", "center"],
             width=200,
-        ).grid(row=0, column=1, sticky="w", padx=4)
+        )
+        self._action_detector_menu.grid(row=0, column=1, sticky="w", padx=4)
+        self._lmh_widgets.append(self._action_detector_menu)
 
         ctk.CTkLabel(
             parent,
@@ -1317,10 +1446,11 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#88ddff",
         )
         self._cb_smart_auto_crop.pack(side="left")
+        self._lmh_widgets.append(self._cb_smart_auto_crop)
 
         ctk.CTkLabel(
             parent,
-            text="    When ON: engine scans 25 frames, detects floor / blank space / character height\n"
+            text="    When ON: engine scans 60 frames, detects floor / blank space / character height\n"
                  "    and enables auto-bottom-crop, auto-top-crop and/or auto-floor-tracking\n"
                  "    automatically.  Handles the face-priority contradiction (tall character =\n"
                  "    no floor-tracking; normal character = floor-tracking enabled).\n"
@@ -1340,6 +1470,7 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_bottom_crop.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_bottom_crop)
 
         def _toggle_auto_bottom_crop(*_):
             if self.v_action_smart_auto_crop.get():
@@ -1361,6 +1492,7 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_top_crop.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_top_crop)
 
         def _toggle_auto_top_crop(*_):
             if self.v_action_smart_auto_crop.get():
@@ -1383,6 +1515,7 @@ class DMDConverterApp(ctk.CTk):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_floor.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_floor)
 
         def _toggle_auto_floor(*_):
             if self.v_action_smart_auto_crop.get():
@@ -1433,12 +1566,14 @@ class DMDConverterApp(ctk.CTk):
         # New: Background Subtraction Checkbox
         bg_sub_row = ctk.CTkFrame(parent, fg_color="transparent")
         bg_sub_row.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkCheckBox(
+        self._cb_bg_sub = ctk.CTkCheckBox(
             bg_sub_row,
             text="Enable Background Subtraction (replaces background with black)",
             variable=self.v_bg_sub_enable,
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
-        ).pack(side="left")
+        )
+        self._cb_bg_sub.pack(side="left")
+        self._lmh_widgets.append(self._cb_bg_sub)
         ctk.CTkLabel(
             parent,
             text="    This will replace the detected background with black (0,0,0).\n"
@@ -1518,7 +1653,7 @@ class DMDConverterApp(ctk.CTk):
         self._text_content_entry.grid(row=0, column=1, sticky="ew", padx=4)
 
         adv_slider(self._text_overlay_frame, "Font Size", self.v_text_font_size, 4, 32,
-                   "{:.0f}", " px", steps=28, is_int=True)
+                   "{:.0f}", " px", steps=28, is_int=True, lmh=False)
 
         text_color_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
         text_color_row.pack(fill="x", padx=10, pady=2)
@@ -1636,13 +1771,15 @@ class DMDConverterApp(ctk.CTk):
 
         scroll_row = ctk.CTkFrame(parent, fg_color="transparent")
         scroll_row.pack(fill="x", padx=14, pady=(0, 4))
-        ctk.CTkCheckBox(
+        self._cb_scroll_enabled = ctk.CTkCheckBox(
             scroll_row,
             text="Auto vertical scroll  (default — matches standard behaviour)",
             variable=self.v_scroll_enabled,
             command=self._on_scroll_enabled_change,
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
-        ).pack(side="left")
+        )
+        self._cb_scroll_enabled.pack(side="left")
+        self._lmh_widgets.append(self._cb_scroll_enabled)
 
         # Manual positioning frame (hidden when scroll is on)
         self._manual_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=6)
@@ -1687,11 +1824,13 @@ class DMDConverterApp(ctk.CTk):
 
         vig_row = ctk.CTkFrame(parent, fg_color="transparent")
         vig_row.pack(fill="x", padx=14, pady=(4, 8))
-        ctk.CTkCheckBox(
+        self._cb_vignette = ctk.CTkCheckBox(
             vig_row,
             text="Vignette  (darkens edges — default OFF)",
             variable=self.v_vignette, font=ctk.CTkFont(size=12),
-        ).pack(side="left")
+        )
+        self._cb_vignette.pack(side="left")
+        self._lmh_widgets.append(self._cb_vignette)
 
         ctk.CTkButton(
             parent, text="↺  Reset all advanced to default",
@@ -1733,6 +1872,42 @@ class DMDConverterApp(ctk.CTk):
         else:
             self._text_bg_opacity_frame.pack_forget()
 
+    # ── "Let Me Handle It" master toggle ─────────────────────────────────────
+    def _on_let_me_handle_toggle(self):
+        enabled = self.v_let_me_handle_it.get()
+        if enabled:
+            # Save current state of the 4 managed flags
+            self._lmh_saved_state = {
+                "auto_color_enabled":    self.v_auto_color_enabled.get(),
+                "auto_action_enabled":   self.v_auto_action_enabled.get(),
+                "action_smart_auto_crop": self.v_action_smart_auto_crop.get(),
+                "bg_sub_enable":         self.v_bg_sub_enable.get(),
+            }
+            # Force all 4 flags ON (visual feedback)
+            self.v_auto_color_enabled.set(True)
+            self.v_auto_action_enabled.set(True)
+            self.v_action_smart_auto_crop.set(True)
+            self.v_bg_sub_enable.set(True)
+            # Grey out every registered widget
+            for w in self._lmh_widgets:
+                try:
+                    w.configure(state="disabled")
+                except Exception:
+                    pass
+        else:
+            # Restore saved state
+            saved = self._lmh_saved_state
+            self.v_auto_color_enabled.set(saved.get("auto_color_enabled", False))
+            self.v_auto_action_enabled.set(saved.get("auto_action_enabled", False))
+            self.v_action_smart_auto_crop.set(saved.get("action_smart_auto_crop", False))
+            self.v_bg_sub_enable.set(saved.get("bg_sub_enable", False))
+            # Re-enable all registered widgets
+            for w in self._lmh_widgets:
+                try:
+                    w.configure(state="normal")
+                except Exception:
+                    pass
+
     def _compute_led_sim_display_size(self):
         """Return (display_w, display_h, scale) for LED sim mode, clamped to LED_SIM_MAX_W."""
         w = self.v_target_width.get()
@@ -1764,7 +1939,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_auto_action_enabled.set(False)
         self.v_action_detector.set("person")
         self.v_action_strength.set(0.65)
-        self.v_action_smoothness.set(0.85)
+        self.v_action_smoothness.set(0.98)
         self.v_action_zoom_max.set(2.0)
         self.v_action_padding.set(0.20)
         self.v_action_intro.set(1.5)
@@ -2407,29 +2582,17 @@ class DMDConverterApp(ctk.CTk):
         current_dmd_width  = int(self.v_target_width.get()  * DMD_DISPLAY_SCALE_FACTOR)
         current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
 
-        if self._dmd_pil_frames:
-            # ── A preview is already visible — keep it playing while the new render
-            # runs in the background.  Overlay a subtle "↻ refreshing" tag so the
-            # user knows something is happening without the canvas going blank.
-            # (This is the main fix for the "preview disappears when auto-crop is
-            #  enabled" regression: auto-crop scans take several extra seconds, so
-            #  the canvas used to stay blank/loading for a noticeably long time.)
-            self._dmd_canvas.delete("refresh_tag")
-            self._dmd_canvas.create_text(
-                current_dmd_width - 4, 4,
-                text="↻", fill="#f39c12",
-                font=("Helvetica", 10, "bold"),
-                anchor="ne", tags="refresh_tag",
-            )
-        else:
-            # No previous preview — show the normal "generating" placeholder.
-            self._stop_dmd_preview()
-            self._dmd_canvas.delete("all")
-            self._dmd_canvas.create_text(
-                current_dmd_width // 2, current_dmd_height // 2,
-                text="⏳  Generating DMD…\n  (a few seconds)",
-                fill="#f39c12", font=("Helvetica", 11), justify="center"
-            )
+        # ── Keep the canvas visible during re-render in ALL cases ────────────────
+        # Never blank the canvas while a render is in progress: the old content
+        # (animation or idle text) remains visible.  A subtle ↻ badge signals
+        # activity without wiping the preview.
+        self._dmd_canvas.delete("refresh_tag")
+        self._dmd_canvas.create_text(
+            current_dmd_width - 4, 4,
+            text="↻", fill="#f39c12",
+            font=("Helvetica", 10, "bold"),
+            anchor="ne", tags="refresh_tag",
+        )
 
         params  = self._collect_params()
         start_s, end_s = self._get_trim()
@@ -2486,32 +2649,39 @@ class DMDConverterApp(ctk.CTk):
             self.after(0, lambda: self._on_dmd_ready(pil_frames, delays, tmpdir, out_gif))
 
         except Exception as exc:
+            import traceback as _tb
+            _detail = _tb.format_exc()
             # Safety net: always unblock the rendering flag even on unexpected errors
-            self.after(0, lambda: self._on_dmd_fail(f"Unexpected error: {exc}", tmpdir))
+            self.after(0, lambda: self._on_dmd_fail(
+                f"Unexpected error: {exc}\n{_detail}", tmpdir
+            ))
 
     def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif):
-        self._dmd_rendering = False
-        self._btn_dmd.configure(state="normal", text="🔬 DMD")
-        self._stop_dmd_preview()      # cancels animation, cleans up old tmpdir
-        self._dmd_tmpdir = tmpdir
-        # Store PIL Images; PhotoImages are created lazily in _animate_dmd (main thread, one per tick)
-        self._dmd_pil_frames = pil_frames
-        self._dmd_frames = [None] * len(pil_frames)
-        self._dmd_delays = delays
-        self._dmd_idx    = 0
-        size_kb = os.path.getsize(out_gif) // 1024
-        self._dmd_info.configure(
-            text=f"✅  {self.v_target_width.get()}×{self.v_target_height.get()}  ·  {len(pil_frames)} frames  ·  {size_kb} KB"
-        )
-        self._animate_dmd()
-        # Start the pending render (if any new settings changed while we were busy)
-        self._flush_dmd_pending()
+        try:
+            self._dmd_rendering = False
+            self._btn_dmd.configure(state="normal", text="🔬 DMD")
+            self._stop_dmd_preview()      # cancels animation, cleans up old tmpdir
+            self._dmd_tmpdir = tmpdir
+            self._dmd_pil_frames = pil_frames
+            self._dmd_frames = [None] * len(pil_frames)
+            self._dmd_delays = delays
+            self._dmd_idx    = 0
+            size_kb = os.path.getsize(out_gif) // 1024
+            self._dmd_info.configure(
+                text=f"✅  {self.v_target_width.get()}×{self.v_target_height.get()}  ·  {len(pil_frames)} frames  ·  {size_kb} KB"
+            )
+            self._animate_dmd()
+            # Start the pending render (if any new settings changed while we were busy)
+            self._flush_dmd_pending()
+        except Exception as _e:
+            logger.exception("_on_dmd_ready exception: %s", _e)
 
     def _on_dmd_fail(self, msg, tmpdir):
         self._dmd_rendering = False
         self._btn_dmd.configure(state="normal", text="🔬 DMD")
         shutil.rmtree(tmpdir, ignore_errors=True)
-        self._dmd_canvas.delete("refresh_tag")  # remove refresh indicator if present
+        # Stop any ongoing animation so it cannot overwrite the error message
+        self._stop_dmd_preview()
         self._dmd_canvas.delete("all")
         # Use current target dimensions for idle text positioning
         current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
@@ -2571,15 +2741,18 @@ class DMDConverterApp(ctk.CTk):
     def _animate_dmd(self):
         if not self._dmd_pil_frames:
             return
-        idx = self._dmd_idx % len(self._dmd_pil_frames)
-        # Lazy PhotoImage creation — one frame at a time on the main thread
-        if self._dmd_frames[idx] is None:
-            self._dmd_frames[idx] = ImageTk.PhotoImage(self._dmd_pil_frames[idx])
-        self._dmd_canvas.delete("all")
-        self._dmd_canvas.create_image(0, 0, anchor="nw", image=self._dmd_frames[idx])
-        self._dmd_idx = idx + 1
-        delay = self._dmd_delays[idx] if self._dmd_delays else 80
-        self._dmd_job = self.after(delay, self._animate_dmd)
+        try:
+            idx = self._dmd_idx % len(self._dmd_pil_frames)
+            # Lazy PhotoImage creation — one frame at a time on the main thread
+            if self._dmd_frames[idx] is None:
+                self._dmd_frames[idx] = ImageTk.PhotoImage(self._dmd_pil_frames[idx])
+            self._dmd_canvas.delete("all")
+            self._dmd_canvas.create_image(0, 0, anchor="nw", image=self._dmd_frames[idx])
+            self._dmd_idx = idx + 1
+            delay = self._dmd_delays[idx] if self._dmd_delays else 80
+            self._dmd_job = self.after(delay, self._animate_dmd)
+        except Exception as _exc:
+            logger.exception("_animate_dmd exception: %s", _exc)
 
     # ── Auto-refresh debounce ─────────────────────────────────────────────────
     def _schedule_pipeline_refresh(self, *_):
@@ -2798,7 +2971,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_auto_action_enabled.set(s.get("auto_action_enabled", False))
         self.v_action_detector.set(s.get("action_detector", "person"))
         self.v_action_strength.set(s.get("action_strength", 0.65))
-        self.v_action_smoothness.set(s.get("action_smoothness", 0.85))
+        self.v_action_smoothness.set(s.get("action_smoothness", 0.98))
         self.v_action_zoom_max.set(s.get("action_zoom_max", 2.0))
         self.v_action_padding.set(s.get("action_padding", 0.20))
         self.v_action_intro.set(s.get("action_intro", 1.5))
@@ -3024,7 +3197,15 @@ class DMDConverterApp(ctk.CTk):
             "max_duration": self.v_max_duration.get() if self.v_max_dur_enabled.get() else 0.0,
             # auto-colorimetry
             "auto_color_enabled": self.v_auto_color_enabled.get(),
-        }
+        } | (
+            # "Let Me Handle It" overrides — force the 4 managed params ON
+            {
+                "auto_color_enabled":     True,
+                "auto_action_enabled":    True,
+                "action_smart_auto_crop": True,
+                "bg_sub_enable":          True,
+            } if self.v_let_me_handle_it.get() else {}
+        )
 
     # ══════════════════════════════════════════════════════════════════════════
     #  CONVERSION
