@@ -1142,7 +1142,7 @@ class DMDConverterApp(ctk.CTk):
 
         # Parallelism
         section("⚡  Parallelism")
-        slider_row("Workers (CPU)", self.v_workers, 1, 16, "{:.0f}", " workers", steps=15)
+        slider_row("Workers (CPU)", self.v_workers, 1, 16, "{:.0f}", " workers", steps=15, lmh=False)
 
         # Scroll
         section("📜  Scroll")
