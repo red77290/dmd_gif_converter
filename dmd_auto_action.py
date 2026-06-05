@@ -301,13 +301,13 @@ class _FloorEstimator:
         return self._floor_y
 
 
-def _compute_auto_crop_margins(
+def _compute_auto_crop_margins(  # noqa: C901
     cap,
     detector: "_FrameDetector",
     cfg: "AutoActionConfig",
     frame_w: int,
     frame_h: int,
-    sample_count: int = 40,
+    sample_count: int = 80,
 ) -> Tuple[float, float]:
     """Sample frames to compute optimal top/bottom crop percentages.
 
@@ -340,11 +340,11 @@ def _compute_auto_crop_margins(
     try:
         import numpy as np
     except ImportError:
-        return 0.0, 0.0
+        return 0.0, 0.0, False
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     if total_frames <= 0:
-        return 0.0, 0.0
+        return 0.0, 0.0, False
 
     # Height of the DMD crop window in source pixels (at native source width).
     # If the ROI is taller than this, the whole body cannot fit in one frame.
@@ -356,10 +356,22 @@ def _compute_auto_crop_margins(
     # before face priority kicks in.  0.80 means "at least 80 % as tall as the
     # DMD window" — catches characters that would be cropped even slightly.
     DMD_CROP_H_FACTOR: float = 0.80
-    # FACE_FRAC: fraction of body height estimated to contain the face + head
-    # (head + neck + upper shoulders).  0.32 works well for both realistic and
-    # anime/game characters where the head is relatively large.
-    FACE_FRAC: float = 0.32
+    # FACE_FRAC: fraction of body height (measured from the bounding-box top, which
+    # is the hair tip) down to the approximate chin level.
+    #
+    # Why 0.28 instead of 0.20 (old value):
+    #   Realistic characters: head ≈ 1/7 body height, hair above forehead ≈ 3 %.
+    #     0.20 ≈ just below the chin for realistic → OK
+    #   Anime / game characters: hair above forehead can be 20-35 % of bounding box.
+    #     0.20 → detection zone ends IN THE HAIR, above the actual face.
+    #     YOLO within this zone sees mostly hair → ROI centred on hair top →
+    #     camera follows hair → face ends up at the very bottom of the output strip
+    #     → bottom half of the face is cut off.
+    #   0.28 pushes the reference point to ~chin level for anime characters with
+    #   moderate hairstyles (25 % hair overhead), and into the upper-face area for
+    #   more extreme hairstyles — combined with the larger pad_bottom below this is
+    #   enough for the detection zone to cover the full face in most cases.
+    FACE_FRAC: float = 0.28
 
     step = max(1, total_frames // sample_count)
     roi_tops: list[float]    = []
@@ -396,7 +408,7 @@ def _compute_auto_crop_margins(
     cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
     if not roi_tops:
-        return 0.0, 0.0
+        return 0.0, 0.0, False
 
     # ── Face priority mode decision ───────────────────────────────────────────
     # Activated when the majority of sampled frames have a body that is too
@@ -413,27 +425,35 @@ def _compute_auto_crop_margins(
     # Padding multiplier
     # Face priority mode → treat as face content regardless of raw aspect ratio
     # (the effective content is now the head region).
+    # CRITICAL: use ASYMMETRIC padding for face priority.
+    #   • Top padding (above forehead): generous — ensure even the tallest anime
+    #     hairstyle (spiky, voluminous) has headroom above the detection zone.
+    #     0.15 gives ≈ 60 px on a 400 px frame, safe for extreme hairstyles.
+    #   • Bottom padding (below chin): was 0.03 (too tight for anime).
+    #     Increased to 0.10: for a 400 px frame this adds 40 px below the computed
+    #     "chin" reference, which extends the detection zone far enough that YOLO
+    #     can see the full face even when FACE_FRAC lands in the hair.
+    #     Result: YOLO's bounding box covers hair+face → ROI centre ≈ face level →
+    #     camera follows face → full face visible in output strip.
     if face_priority:
-        # Generous head-region padding — ensure forehead is not clipped.
-        pad_frac = 0.12
-    elif aspect < 1.3:
-        # Close-up / face-like ROI
-        pad_frac = 0.15
-    elif aspect < 2.5:
-        # Intermediate (bust / upper body)
-        pad_frac = 0.10
+        pad_top_px    = frame_h * 0.15   # generous headroom above extreme hairstyles
+        pad_bottom_px = frame_h * 0.10   # enough buffer to cover anime face below hair
     else:
-        # Full body (very tall ROI) that still fits in DMD window
-        pad_frac = 0.06
-
-    pad_px = frame_h * pad_frac
+        if aspect < 1.3:
+            pad_frac = 0.15
+        elif aspect < 2.5:
+            pad_frac = 0.10
+        else:
+            pad_frac = 0.06
+        pad_top_px    = frame_h * pad_frac
+        pad_bottom_px = frame_h * pad_frac
 
     # ── Percentile boundaries ─────────────────────────────────────────────────
     # 5th percentile of tops → where the subject reliably starts (head).
     # 95th percentile of bottoms → where the effective content ends.
-    #   In face priority mode "bottom" is the estimated face-bottom, not the feet.
-    top_y    = float(np.percentile(roi_tops,    5)) - pad_px
-    bottom_y = float(np.percentile(roi_bottoms, 95)) + pad_px
+    #   In face priority mode "bottom" is the estimated chin level, not the feet.
+    top_y    = float(np.percentile(roi_tops,    5)) - pad_top_px
+    bottom_y = float(np.percentile(roi_bottoms, 95)) + pad_bottom_px
 
     top_y    = max(0.0, top_y)
     bottom_y = min(float(frame_h), bottom_y)
@@ -441,7 +461,13 @@ def _compute_auto_crop_margins(
     top_pct    = _clamp(top_y / frame_h, 0.0, 0.9)
     bottom_pct = _clamp((frame_h - bottom_y) / frame_h, 0.0, 0.9)
 
-    return top_pct, bottom_pct
+    # Return face_priority flag so the caller can set _cam_frame_h = frame_h
+    # directly, without having to re-infer it from the crop percentages.
+    # The re-inference used a threshold comparison (_effective_h < 0.75*dmd_h)
+    # that was unreliable when FACE_FRAC placed the reference point in the hair:
+    # effective_frame_h would then be LARGER than expected, the threshold would
+    # not trigger, and the camera would be wrongly constrained to the hair zone.
+    return top_pct, bottom_pct, face_priority
 
 
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
@@ -510,8 +536,14 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # No ROI — full-frame overview centered.
         cx = frame_w / 2.0
         cy = (frame_top + frame_h) / 2.0
-        crop_h = min(float(frame_h) - frame_top, float(frame_w) / target_ratio)
-        crop_w = crop_h * target_ratio
+        # Always use the full source width and the corresponding strip height to
+        # guarantee crop_w == frame_w and cw/ch == target_ratio.
+        # DO NOT cap crop_h to the effective zone height: doing so makes crop_w
+        # smaller than frame_w, and the subsequent cv2.resize(→ frame_w × out_h)
+        # stretches the content horizontally (image appears wider than original).
+        # The cy clamp below keeps the camera inside the frame regardless.
+        crop_w = float(frame_w)
+        crop_h = float(frame_w) / target_ratio
         if _auto:
             if floor_y_est is not None:
                 # We have a memorised floor level: use it even without a live ROI
@@ -626,7 +658,7 @@ def _smart_auto_crop_decision(
     cfg: "AutoActionConfig",
     frame_w: int,
     frame_h: int,
-    sample_count: int = 25,
+    sample_count: int = 60,
 ) -> dict:
     """Analyse video context and decide which crop/tracking combination to activate.
 
@@ -650,7 +682,7 @@ def _smart_auto_crop_decision(
     cap           : cv2.VideoCapture (already open — position will be restored)
     cfg           : AutoActionConfig
     frame_w / frame_h : source frame dimensions
-    sample_count  : frames to analyse (default 25 — fast, ~0.3 s extra)
+    sample_count  : frames to analyse (default 60 — thorough, handles long intros)
 
     Returns
     -------
@@ -695,7 +727,7 @@ def _smart_auto_crop_decision(
 
     # ── Face-priority constants (same as _compute_auto_crop_margins) ──────────
     DMD_CROP_H_FACTOR: float = 0.80   # body must be ≥ 80 % of dmd window to trigger
-    FACE_FRAC:         float = 0.32   # top fraction of body estimated to be head/face
+    FACE_FRAC:         float = 0.28   # see _compute_auto_crop_margins for full rationale
 
     for i in range(0, min(total_frames - 1, sample_count * step), step):
         cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
@@ -737,7 +769,10 @@ def _smart_auto_crop_decision(
     # BOTTOM_GAP: fraction below feet → HUD / floor tiles → auto-bottom-crop.
     BOTTOM_GAP_THRESH = 0.08   # 8 % blank below feet
     # TALL_FACTOR: char height / dmd_crop_h — above = face priority needed.
-    TALL_FACTOR       = 0.70
+    # Aligned with DMD_CROP_H_FACTOR (0.80) used inside _compute_auto_crop_margins
+    # so that GROUP 1 activates exactly when the face-priority margin calc would
+    # trigger: any character taller than 80 % of the DMD window needs face focus.
+    TALL_FACTOR       = 0.80
     # FLOOR_LOWER: subject bottom must be in the lower 50 % for floor-tracking.
     FLOOR_LOWER       = 0.50
     # FLOOR_VAR: std(floor_y) / frame_h — above = very dynamic (lots of jumping),
@@ -751,59 +786,143 @@ def _smart_auto_crop_decision(
     floor_in_lower  = (median_bottom / frame_h) > FLOOR_LOWER
     floor_var_score = std_bottom / frame_h
 
-    # ── Decision ──────────────────────────────────────────────────────────────
-    reasons:     list[str] = []
-    auto_bottom  = False
-    auto_top     = False
-    auto_floor   = False
+    # ── Decision — 3 mutually-exclusive priority groups ───────────────────────
+    #
+    # The three crop/tracking modes interact as follows:
+    #
+    #   auto_bottom_crop  — excludes clutter below subject (HUD, floor tiles,
+    #                        OR restricts to face/upper-body region when tall_ratio
+    #                        is high enough to trigger face-priority in the margin calc).
+    #   auto_top_crop     — excludes blank space above subject (sky, title bar).
+    #                        ⚠  Top crop alone is not enough to focus the camera on the
+    #                        face: it only prevents upward panning.  The camera still
+    #                        follows the ROI centre (mid-body) unless bottom crop is
+    #                        ALSO enabled to restrict the lower boundary toward the
+    #                        face/upper body region.
+    #                        Rule → auto_top_crop must ALWAYS be paired with
+    #                        auto_bottom_crop so that together they frame the face.
+    #   auto_vertical_bias (floor) — anchors camera so the floor appears at ~93 %
+    #                        of the 32-px crop strip; the strip itself already
+    #                        excludes everything above that line.
+    #
+    # Incompatibilities
+    # -----------------
+    #   • TALL CHARACTER + floor tracking: floor anchor pulls the camera toward
+    #     the feet, but face-priority needs the head in frame → MUTUALLY EXCLUSIVE.
+    #   • FLOOR TRACKING + top crop: the 32-px camera strip anchored to the floor
+    #     already excludes the top by construction → top crop is REDUNDANT.
+    #   • FLOOR TRACKING + bottom crop: the floor line IS the natural "bottom of
+    #     interest"; bottom crop simply removes extra HUD/tiles below it → COMPLEMENTARY.
+    #   • TOP CROP alone (GROUP 3): without bottom crop the camera centres on the body
+    #     mid-point and the face can end up at the top edge → INCOMPLETE without pairing.
+    #
+    # Priority order
+    # --------------
+    #   1. Tall character  → top+bottom crop (face priority); no floor.
+    #      auto_top is ALWAYS on to force the detection zone to start at the head,
+    #      ensuring the tracker zooms on the face rather than the shoulders.
+    #   2. Trackable floor → floor tracking + optional bottom crop; no top crop.
+    #   3. Everything else → top+bottom crop together for face focus; no floor.
+    #
+    reasons:    list[str] = []
+    auto_bottom = False
+    auto_top    = False
+    auto_floor  = False
 
-    # 1. Top space → auto-top-crop
-    if top_space > TOP_SPACE_THRESH:
-        auto_top = True
-        reasons.append(
-            f"top-space {top_space*100:.0f}% > {TOP_SPACE_THRESH*100:.0f}% "
-            f"→ auto-top-crop ✓"
-        )
-
-    # 2a. Tall character (face priority zone)
-    #     Contradiction: floor-tracking anchors to feet; face-priority needs the
-    #     camera on the head → disable floor-tracking when face priority triggers.
+    # ── GROUP 1: Tall character — face priority ───────────────────────────────
+    # Character fills most of the DMD window → camera must stay on the head/face.
+    # Floor tracking would pull the camera to the feet, directly contradicting
+    # face priority.
+    #
+    # CRITICAL: auto_top_crop must be UNCONDITIONALLY enabled here (not gated by
+    # top_space threshold).  Here is why:
+    #
+    #   Without auto_top  → detection zone = [0 : face_bottom]  (wide, includes
+    #                        blank space + head + upper body up to shoulder level)
+    #                        YOLO detects the full visible upper body → ROI centre
+    #                        lands at chest/shoulder → camera follows SHOULDERS,
+    #                        face ends up at the top edge of the crop. ✗
+    #
+    #   With auto_top     → detection zone = [head_top : face_bottom]  (tight,
+    #                        only the face/head is visible to the detector)
+    #                        YOLO detects a small head ROI → _build_camera_rect
+    #                        zooms in on this small ROI → face fills the frame. ✓
+    #
+    # When there is no blank space above (top_space ≈ 0 %), the margin calc will
+    # return top_pct ≈ 0, so enabling it unconditionally has no harmful effect.
     if tall_ratio > TALL_FACTOR:
-        auto_bottom = True
+        auto_bottom = True   # face-priority margin calc restricts bottom to head region
+        auto_floor  = False  # INCOMPATIBLE: floor anchor would show feet, not face
+        auto_top    = True   # ALWAYS ON: narrows detection zone to head only → face zoom
         reasons.append(
-            f"tall-char {tall_ratio*100:.0f}% of DMD window "
-            f"→ auto-bottom-crop + face-priority ✓  /  floor-track ✗ (contradictory)"
+            f"GROUP 1 — tall-char {tall_ratio*100:.0f}% of DMD window "
+            f"→ bottom-crop+face-priority ✓ / top-crop ✓ (narrows to head) "
+            f"/ floor-track ✗ (contradictory)"
         )
-        # auto_floor intentionally stays False
+        if top_space <= TOP_SPACE_THRESH:
+            reasons.append(
+                f"  top-space {top_space*100:.0f}% ≤ threshold but top-crop forced "
+                f"(detection zone must start at head, not frame top)"
+            )
+        else:
+            reasons.append(
+                f"  + top-space {top_space*100:.0f}% (blank sky also eliminated)"
+            )
 
+    # ── GROUP 2: Trackable floor — 2D / platformer content ───────────────────
+    # Floor is consistently in the lower half of the frame and its variance is
+    # manageable.  The asymmetric EMA follows landings while ignoring jumps.
+    # The 32-px strip anchored to the floor already covers the head: adding a
+    # top crop would be REDUNDANT — the camera window takes care of it.
+    # Bottom crop is COMPLEMENTARY: it excludes HUD tiles below the actual floor.
+    elif floor_in_lower and floor_var_score <= FLOOR_VAR_MAX:
+        auto_floor  = True
+        auto_top    = False   # REDUNDANT: floor-anchored strip already excludes the top
+        auto_bottom = bottom_gap > BOTTOM_GAP_THRESH   # exclude HUD/tiles below floor
+        stability   = "stable" if floor_var_score < 0.10 else "dynamic"
+        reasons.append(
+            f"GROUP 2 — floor@{median_bottom/frame_h*100:.0f}% "
+            f"var={floor_var_score*100:.0f}% ({stability}) "
+            f"→ floor-tracking ✓ / top-crop ✗ (redundant)"
+        )
+        if auto_bottom:
+            reasons.append(
+                f"  + bottom-gap {bottom_gap*100:.0f}% → bottom-crop ✓ (complementary)"
+            )
+
+    # ── GROUP 3: Normal / non-floor content ──────────────────────────────────
+    # No consistent floor (3D game, close-up, centered subject, chaotic floor).
+    # auto_top_crop restricts the upper boundary to the head level, but the camera
+    # would still follow the body centre if bottom crop is absent — the face would
+    # end up at the top edge.  Pairing with auto_bottom_crop ensures the margin
+    # calculation restricts the lower boundary to the face/upper-body region
+    # (face-priority kicks in automatically when the subject is tall enough).
     else:
-        # 2b. Normal-height subject: bottom clutter → auto-bottom-crop
-        if bottom_gap > BOTTOM_GAP_THRESH:
-            auto_bottom = True
-            reasons.append(
-                f"bottom-gap {bottom_gap*100:.0f}% > {BOTTOM_GAP_THRESH*100:.0f}% "
-                f"(floor/HUD) → auto-bottom-crop ✓"
-            )
+        auto_floor  = False
+        auto_top    = top_space > TOP_SPACE_THRESH
+        # bottom crop: always ON when top crop is active (face/upper-body focus),
+        # also ON independently when there is bottom clutter.
+        auto_bottom = (bottom_gap > BOTTOM_GAP_THRESH) or auto_top
 
-        # 3. Floor is in the lower half and variance is manageable → floor-tracking.
-        #    Asymmetric EMA resists upward jumps and follows landings — works for
-        #    both stable floors and dynamic platformers.
-        if floor_in_lower and floor_var_score <= FLOOR_VAR_MAX:
-            auto_floor = True
-            stability = "stable" if floor_var_score < 0.10 else "dynamic"
+        if floor_in_lower and floor_var_score > FLOOR_VAR_MAX:
             reasons.append(
-                f"floor@{median_bottom/frame_h*100:.0f}% "
-                f"var={floor_var_score*100:.0f}% ({stability}) "
-                f"→ auto-floor-tracking ✓"
+                f"GROUP 3 — floor@{median_bottom/frame_h*100:.0f}% "
+                f"var={floor_var_score*100:.0f}% (too chaotic) → floor-track ✗"
             )
-        elif floor_in_lower and floor_var_score > FLOOR_VAR_MAX:
+        else:
             reasons.append(
-                f"floor@{median_bottom/frame_h*100:.0f}% "
-                f"var={floor_var_score*100:.0f}% (too chaotic) "
-                f"→ floor-track ✗ (high variance)"
+                f"GROUP 3 — no trackable floor "
+                f"(floor@{median_bottom/frame_h*100:.0f}% lower={floor_in_lower})"
             )
+        if auto_top:
+            reasons.append(
+                f"  + top-space {top_space*100:.0f}% → top-crop ✓ "
+                f"+ bottom-crop forced for face/upper-body focus ✓"
+            )
+        elif auto_bottom:
+            reasons.append(f"  + bottom-gap {bottom_gap*100:.0f}% → bottom-crop ✓")
 
-    if not reasons:
+    if not (auto_bottom or auto_top or auto_floor):
         reasons.append(
             f"centered subject — no clutter detected "
             f"(top={top_space*100:.0f}% bot={bottom_gap*100:.0f}% "
@@ -812,23 +931,26 @@ def _smart_auto_crop_decision(
 
     # ── Pre-compute crop percentages (same percentile logic as _compute_auto_crop_margins)
     # This lets the caller skip the second scan entirely when smart_auto_crop=True.
-    # Aspect-ratio-based padding (mirrors _compute_auto_crop_margins).
-    median_w   = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
-    aspect     = median_height / max(1.0, median_w)
+    # Aspect-ratio-based padding — ASYMMETRIC for face priority (see _compute_auto_crop_margins).
+    median_w      = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
+    aspect        = median_height / max(1.0, median_w)
     face_priority = tall_ratio > TALL_FACTOR
     if face_priority:
-        pad_frac = 0.12
-    elif aspect < 1.3:
-        pad_frac = 0.15
-    elif aspect < 2.5:
-        pad_frac = 0.10
+        pad_top_px    = frame_h * 0.15   # generous headroom above extreme hairstyles
+        pad_bottom_px = frame_h * 0.10   # enough buffer to cover anime face below hair
     else:
-        pad_frac = 0.06
-    pad_px = frame_h * pad_frac
+        if aspect < 1.3:
+            pad_frac = 0.15
+        elif aspect < 2.5:
+            pad_frac = 0.10
+        else:
+            pad_frac = 0.06
+        pad_top_px    = frame_h * pad_frac
+        pad_bottom_px = frame_h * pad_frac
 
     # Use face-priority-adjusted bottoms for margin computation.
-    top_y    = float(np.percentile(arr_tops,    5))  - pad_px
-    bottom_y = float(np.percentile(arr_btm_fp, 95))  + pad_px
+    top_y    = float(np.percentile(arr_tops,    5))  - pad_top_px
+    bottom_y = float(np.percentile(arr_btm_fp, 95))  + pad_bottom_px
     top_y    = max(0.0,          top_y)
     bottom_y = min(float(frame_h), bottom_y)
 
@@ -841,6 +963,7 @@ def _smart_auto_crop_decision(
         "auto_vertical_bias": auto_floor,
         "top_pct":            pre_top_pct,
         "bottom_pct":         pre_bottom_pct,
+        "face_priority":      face_priority,   # caller must set _cam_frame_h = frame_h
         "reasons":            reasons,
     }
 
@@ -865,8 +988,51 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     if cfg.detector.lower() not in available_detectors():
         cfg.detector = "person"
 
+    # ── GIF pre-conversion ────────────────────────────────────────────────────
+    # cv2.VideoCapture decodes GIF files inconsistently on macOS/AVFoundation:
+    # - Frames may be BGRA (4-channel) due to GIF transparency palettes.
+    # - Actual FPS returned may be 10 fps even if the GIF header says otherwise.
+    # - Sub-frame delta GIFs produce garbled frames after the first one.
+    # Workaround: transcode any .gif to a clean BGR24 H.264 MP4 via FFmpeg
+    # before feeding it to OpenCV.  The temp MP4 is placed in a separate dir
+    # that is cleaned up at the end of this function.
+    _gif_pre_tmpdir: Optional[str] = None
+    if src_path.lower().endswith(".gif"):
+        try:
+            _gif_pre_tmpdir = tempfile.mkdtemp(prefix="dmd_gifpre_")
+            _gif_mp4 = os.path.join(_gif_pre_tmpdir, "src.mp4")
+            _gif_conv_cmd = [
+                "ffmpeg", "-y",
+                "-i", src_path,
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-pix_fmt", "yuv420p",
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # ensure even dims
+                _gif_mp4,
+            ]
+            _gif_result = subprocess.run(
+                _gif_conv_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=120,
+            )
+            if _gif_result.returncode == 0 and os.path.isfile(_gif_mp4):
+                src_path = _gif_mp4
+            else:
+                # Keep original path; BGR normalization below will act as safety net
+                import shutil as _shutil
+                _shutil.rmtree(_gif_pre_tmpdir, ignore_errors=True)
+                _gif_pre_tmpdir = None
+        except Exception:
+            if _gif_pre_tmpdir:
+                import shutil as _shutil
+                _shutil.rmtree(_gif_pre_tmpdir, ignore_errors=True)
+                _gif_pre_tmpdir = None
+
     cap = cv2.VideoCapture(src_path)
     if not cap.isOpened():
+        if _gif_pre_tmpdir:
+            import shutil as _shutil
+            _shutil.rmtree(_gif_pre_tmpdir, ignore_errors=True)
         return False, None, "Could not open source for action preprocessing."
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
@@ -882,9 +1048,12 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # Keeping the native resolution here means ffmpeg receives full-quality input
     # and performs the final downscale to target_width x target_height with all its colour filters.
     out_w = frame_w
-    # Calculate out_h based on the desired target aspect ratio
+    # Calculate out_h based on the desired target aspect ratio.
+    # Use proper float division (not int truncation) so non-integer ratios like
+    # 128×48 (≈2.667) or 256×48 (≈5.333) produce the correct height.
+    # The //2*2 guarantees an even number as required by H.264/YUV420 encoding.
     target_aspect_ratio = float(cfg.target_width) / cfg.target_height
-    out_h = max(8, (frame_w // int(target_aspect_ratio) // 2) * 2)  # even number, matching target aspect ratio
+    out_h = max(8, int(round(frame_w / target_aspect_ratio / 2)) * 2)
     # This avoids framing being dragged down by feet/floor/subtitles/HUD elements.
     _bcp = _clamp(getattr(cfg, "bottom_crop_pct", 0.0), 0.0, 0.9)
     _tcp = _clamp(getattr(cfg, "top_crop_pct", 0.0), 0.0, 0.9)
@@ -907,6 +1076,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # (ONNX load failure, network timeout, OpenCV issue) degrades gracefully to
     # "all manual" instead of propagating an exception to the preview thread.
     _smart_crop_margins: Optional[tuple] = None   # (top_pct, bottom_pct) or None
+    _smart_face_priority: bool = False             # face_priority from smart scan
     if getattr(cfg, "smart_auto_crop", False):
         try:
             _decision = _smart_auto_crop_decision(cap, cfg, frame_w, frame_h)
@@ -915,7 +1085,8 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
             _smart_reasons            = _decision["reasons"]
             # Use pre-computed margins from the smart scan — no second pass needed.
-            _smart_crop_margins = (_decision["top_pct"], _decision["bottom_pct"])
+            _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
+            _smart_face_priority = _decision.get("face_priority", False)
         except Exception as _e:
             # Graceful fallback: smart scan failed — keep individual manual flags.
             _smart_reasons = [f"smart scan error ({_e!r}) → all manual"]
@@ -926,23 +1097,23 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             if _smart_crop_margins is not None:
                 # Smart scan already computed the margins — reuse them directly.
                 computed_top, computed_bottom = _smart_crop_margins
+                # Trust the face_priority flag from the scan directly.
+                # The old heuristic (_effective_h < 0.75*dmd_h) was unreliable:
+                # when FACE_FRAC placed roi_bottoms in the hair, effective_frame_h
+                # was larger than expected → threshold not reached → flag stayed False
+                # → camera constrained to hair zone → face cut in half.
+                _face_priority_mode = _smart_face_priority
             else:
                 # Individual auto flags (no smart scan): run the dedicated margin scan.
                 detector_for_scan = _FrameDetector()
-                computed_top, computed_bottom = _compute_auto_crop_margins(
-                    cap, detector_for_scan, cfg, frame_w, frame_h
-                )
+                computed_top, computed_bottom, _face_priority_mode = \
+                    _compute_auto_crop_margins(
+                        cap, detector_for_scan, cfg, frame_w, frame_h
+                    )
             if _auto_tc:
                 _tcp = computed_top
             if _auto_bc:
                 _bcp = computed_bottom
-                # Face priority detection: if the effective visible height is
-                # significantly smaller than the DMD window height, the auto-scan
-                # must have applied face priority (body was too tall to fit).
-                _target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
-                _dmd_window_h = frame_w / _target_ratio
-                _effective_h  = frame_h * (1.0 - _bcp) - frame_h * _tcp
-                _face_priority_mode = _effective_h < _dmd_window_h * 0.75
         except Exception as _e:
             # Graceful fallback: crop margin scan failed — use manual values.
             pass
@@ -980,7 +1151,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             _pipe_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
     except Exception as exc:
         cap.release()
@@ -996,11 +1167,32 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
 
     detector = _FrameDetector()
 
+    # ── Camera bounds for _build_camera_rect ──────────────────────────────────
+    # In face-priority mode the effective zone (effective_frame_top / effective_frame_h)
+    # is intentionally smaller than one DMD strip (crop_h = frame_w/ratio).
+    # Passing it as the camera's frame bounds causes _cy_min > _cy_max, so the
+    # camera is forced to _cy_min = effective_frame_top + crop_h/2 = shoulder level,
+    # which places the face at the very top edge of the visible strip — cut off.
+    #
+    # Fix: in face-priority mode the effective zone is used for DETECTION ONLY
+    # (to show YOLO a tight face region so it detects a small ROI).  The camera
+    # must be free to follow that small ROI over the FULL source frame height,
+    # which lets _build_camera_rect centre the camera naturally on the detected face.
+    #
+    # In all other modes (floor tracking, normal crop) keep the effective bounds
+    # so the camera does not pan into excluded HUD / sky areas.
+    if _face_priority_mode:
+        _cam_frame_h   = frame_h        # full source height — no artificial bottom cap
+        _cam_frame_top = 0.0            # no artificial top floor
+    else:
+        _cam_frame_h   = effective_frame_h
+        _cam_frame_top = float(effective_frame_top)
+
     # Full-frame overview rect: widest target_width:target_height crop centred on the source.
     # Uses effective_frame_h so the intro never pans into the bottom-cropped region.
     # Uses effective_frame_top so the intro never pans above the top-cropped region.
-    cam_full_view = _build_camera_rect(frame_w, effective_frame_h, None, cfg,
-                                       frame_top=float(effective_frame_top))
+    cam_full_view = _build_camera_rect(frame_w, _cam_frame_h, None, cfg,
+                                       frame_top=_cam_frame_top)
 
     # ── Intro frame count — capped relative to source length ─────────────────
     # A fixed intro_duration can dominate very short sources (e.g. a 0.5 s GIF
@@ -1028,6 +1220,15 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         except Exception:
             pass
         return False, None, "Could not read first frame for intro."
+
+    # Safety: normalise to BGR (3-channel).  cv2.VideoCapture may return BGRA
+    # (4-channel) for GIFs with transparency even after the pre-conversion step
+    # (e.g. if FFmpeg was not available and we fell back to reading the raw GIF).
+    # Sending 4-byte pixels to a bgr24 pipe would corrupt the stream silently.
+    if first_frame_for_intro.ndim == 3 and first_frame_for_intro.shape[2] == 4:
+        first_frame_for_intro = cv2.cvtColor(first_frame_for_intro, cv2.COLOR_BGRA2BGR)
+    elif first_frame_for_intro.ndim == 2:
+        first_frame_for_intro = cv2.cvtColor(first_frame_for_intro, cv2.COLOR_GRAY2BGR)
 
     # ── Background subtractor warm-up ─────────────────────────────────────────
     # MOG2 starts with no background model: the very first frames it processes
@@ -1087,8 +1288,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     src_idx  = 0
 
     # Dynamic floor estimator: active only when auto_vertical_bias is on.
+    # Use _cam_frame_h so the estimator works over the same vertical range as the camera.
     _floor_est: Optional[_FloorEstimator] = (
-        _FloorEstimator(effective_frame_h) if cfg.auto_vertical_bias else None
+        _FloorEstimator(_cam_frame_h) if cfg.auto_vertical_bias else None
     )
 
     while _pipe_alive:
@@ -1096,18 +1298,45 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         if not ok:
             break
 
+        # Safety: normalise to BGR (same as for first_frame_for_intro above).
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        elif frame.ndim == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
         t = src_idx / fps
         if cfg.end_s is not None and (initial_start_s + t) >= float(cfg.end_s):
             break
 
-        # Detect ROI on the original frame, restricted to the non-cropped area.
-        detect_frame = frame[effective_frame_top:effective_frame_h, :]
-        roi = detector.detect(detect_frame, cfg.detector)
-
-        # Translate ROI y-coordinate back into original frame space.
-        if roi is not None and effective_frame_top > 0:
-            rx, ry, rw, rh = roi
-            roi = (rx, ry + effective_frame_top, rw, rh)
+        # Detect ROI for camera framing.
+        #
+        # FACE PRIORITY MODE: detect on the FULL FRAME so YOLO receives a
+        # proper-aspect-ratio image.  The restricted slice (effective zone)
+        # would typically be a very wide, short region (e.g. 800×120 for the
+        # head-only zone).  Resizing a 6:1 aspect ratio slice to 640×640
+        # squishes the person severely → YOLO misses the face or returns a
+        # wrong bounding box centred on the hair rather than the face.
+        # After detection on the full frame, we adjust the ROI to focus on
+        # the face region (top FACE_FRAC_CAM of the bounding box), so the
+        # camera centres on the face rather than on the mid-body.
+        #
+        # NORMAL MODE: restrict to effective_frame_top:effective_frame_h so the
+        # camera ignores HUD bars, sky, and other cropped-out areas.
+        if _face_priority_mode:
+            roi = detector.detect(frame, cfg.detector)
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                # Keep only the head region of the bounding box (top ~28 %).
+                # This moves the camera centre from mid-body to face level.
+                _face_h = max(8, int(rh * 0.28))
+                roi = (rx, ry, rw, _face_h)
+        else:
+            detect_frame = frame[effective_frame_top:effective_frame_h, :]
+            roi = detector.detect(detect_frame, cfg.detector)
+            # Translate ROI y-coordinate back into original frame space.
+            if roi is not None and effective_frame_top > 0:
+                rx, ry, rw, rh = roi
+                roi = (rx, ry + effective_frame_top, rw, rh)
 
         # Update floor estimate (asymmetric EMA) and forward it to the camera.
         floor_y_est: Optional[float] = None
@@ -1115,9 +1344,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             roi_bottom = float(roi[1] + roi[3]) if roi is not None else None
             floor_y_est = _floor_est.update(roi_bottom)
 
-        cam_now = _build_camera_rect(frame_w, effective_frame_h, roi, cfg,
+        cam_now = _build_camera_rect(frame_w, _cam_frame_h, roi, cfg,
                                      floor_y_est=floor_y_est,
-                                     frame_top=float(effective_frame_top))
+                                     frame_top=_cam_frame_top)
         cam = _smooth(cam_prev, cam_now, cfg.smoothness)
         cam_prev = cam
         last_frame = frame
@@ -1177,8 +1406,21 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     ffmpeg_rc = ffmpeg_proc.wait()
     cap.release()
 
+    # Clean up GIF pre-conversion temp dir (no longer needed after cap.release).
+    if _gif_pre_tmpdir:
+        import shutil as _shutil
+        _shutil.rmtree(_gif_pre_tmpdir, ignore_errors=True)
+
     if ffmpeg_rc != 0 or frame_idx <= 0 or not os.path.isfile(out_path):
-        return False, None, "FFmpeg pipe encoding failed during action preprocessing."
+        _stderr_hint = ""
+        try:
+            _se = ffmpeg_proc.stderr.read().decode(errors="replace").strip()
+            if _se:
+                # Keep only the last 300 chars to avoid flooding the log
+                _stderr_hint = " | ffmpeg: " + _se[-300:]
+        except Exception:
+            pass
+        return False, None, f"FFmpeg pipe encoding failed during action preprocessing.{_stderr_hint}"
 
     tail_info  = f" +{extra}t"     if extra > 0       else ""
     intro_info = f" +{intro_frames}i" if intro_frames > 0 else ""

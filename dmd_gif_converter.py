@@ -249,7 +249,7 @@ DEFAULT_PARAMS = {
     "auto_action_enabled": False,
     "action_detector":     "person",   # person | motion | hybrid | center
     "action_strength":     0.65,       # 0..1 tighter framing around action
-    "action_smoothness":   0.85,       # 0..0.98 camera smoothing
+    "action_smoothness":   0.98,       # 0..0.98 camera smoothing
     "action_zoom_max":     2.0,        # max dynamic zoom factor (hard limit)
     "action_padding":      0.20,       # ROI padding before aspect crop
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
@@ -365,7 +365,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         cfg = AutoActionConfig(
             detector=str(p.get("action_detector", "person") or "person"),
             strength=float(p.get("action_strength", 0.65)),
-            smoothness=float(p.get("action_smoothness", 0.85)),
+            smoothness=float(p.get("action_smoothness", 0.98)),
             zoom_max=float(p.get("action_zoom_max", 1.8)),
             padding=float(p.get("action_padding", 0.20)),
             intro_duration=float(p.get("action_intro", 1.5)),
@@ -792,7 +792,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     action_cfg = AutoActionConfig(
         detector=str(p.get("action_detector", "person") or "person"),
         strength=float(p.get("action_strength", 0.65)),
-        smoothness=float(p.get("action_smoothness", 0.85)),
+        smoothness=float(p.get("action_smoothness", 0.98)),
         zoom_max=float(p.get("action_zoom_max", 1.8)),
         padding=float(p.get("action_padding", 0.20)),
         intro_duration=float(p.get("action_intro", 1.5)),
