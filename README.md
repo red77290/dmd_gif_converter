@@ -1,10 +1,14 @@
-# 🎞️ DMD GIF Converter — v3.4.0
+# 🎞️ DMD GIF Converter — v4.0.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
 ---
+
+## What is New in v4.0.0?
+- **🏗️ Under-the-hood Refactoring**: Massive architectural overhaul splitting the monolithic scripts into a modular `src/` package (`auto_action`, `converter`, `ui`) for easier debugging and maintainability.
+- **🤖 Let me handle it**: Now explicitly enforces visibility scoring for optimal framing.
 
 ## Table of Contents
 - [🚀 Let Me Handle It — one-click full-auto mode](#-let-me-handle-it--one-click-full-auto-mode-new-in-v330)
@@ -26,7 +30,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ---
 
-## 🚀 Let Me Handle It — one-click full-auto mode *(new in v3.3.0)*
+## 🚀 Let Me Handle It — one-click full-auto mode *(new in v4.0.0)*
 
 > **TL;DR — one checkbox and the converter makes every decision for you.**  
 > Located at the **top of the ⚙️ Parameters panel**, above all other settings.
@@ -80,7 +84,7 @@ All other sliders (colorimetry, scroll speed, FPS, crop values, camera params…
 
 ---
 
-## 🔍 GIF Search — download GIFs directly from the UI  *(new in v3.0.0)*
+## 🔍 GIF Search — download GIFs directly from the UI  *(new in v4.0.0)*
 
 > **TL;DR — type a keyword, set a quantity, press ⬇ DL, and GIFs appear in the list ready to convert.**  
 > Located in the **📁 Source files** panel on the left, between the file buttons and the list.
@@ -430,7 +434,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 Expand the **🔧 Advanced Settings ▼** button at the bottom of the Parameters panel.  
 All values default to "no effect" — standard output is 100% identical to v2.0.
 
-#### 🚀 Let Me Handle It — one-click full-auto *(new in v3.3.0)*
+#### 🚀 Let Me Handle It — one-click full-auto *(new in v4.0.0)*
 
 > See the [full dedicated section](#-let-me-handle-it--one-click-full-auto-mode-new-in-v330) at the top of this README.
 
@@ -880,9 +884,9 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | Auto Action: "model download failed" | No internet access — place `yolov8n.onnx` manually in `~/.cache/dmd_gif_converter/`. Falls back to motion detection automatically |
 | Smart Auto Crop gives wrong results | Disable it and activate each option individually — use `Auto bottom crop`, `Auto top crop`, `Auto floor detect` independently |
 | Smart Auto Crop activates nothing | Not enough detections in the 60-frame scan — try a different detector mode (`motion` or `hybrid`) |
-| Face cut off at shoulder level | Known issue fixed in v3.3.0 — update to the latest version; the engine now uses chin-level detection (20 % of body height) with asymmetric padding |
-| Auto Action fails with GIF source | Fixed in v3.3.0 — GIFs are now pre-converted via FFmpeg before OpenCV processing to avoid BGRA transparency issues |
-| `[ACTION] … FFmpeg pipe encoding failed` | Check the log for the full FFmpeg stderr message (now included). Most likely cause: GIF with transparency palette — update to v3.3.0 which pre-converts GIFs automatically |
+| Face cut off at shoulder level | Known issue fixed in v4.0.0 — update to the latest version; the engine now uses chin-level detection (20 % of body height) with asymmetric padding |
+| Auto Action fails with GIF source | Fixed in v4.0.0 — GIFs are now pre-converted via FFmpeg before OpenCV processing to avoid BGRA transparency issues |
+| `[ACTION] … FFmpeg pipe encoding failed` | Check the log for the full FFmpeg stderr message (now included). Most likely cause: GIF with transparency palette — update to v4.0.0 which pre-converts GIFs automatically |
 | Floor not visible in 2-D platformer | Enable **Auto floor detect** in the Auto Action advanced settings — it anchors the camera to the detected ground level |
 | Camera pans up during jumps | Enable **Auto floor detect** — it uses an asymmetric EMA that resists upward movement during airtime |
 | Auto floor detect still not showing floor | Increase **Bottom crop %** to hide the HUD/floor area from the main detector, then re-enable Auto floor detect |
