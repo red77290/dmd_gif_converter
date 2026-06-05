@@ -175,6 +175,7 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Détecte automatiquement** la limite haute du sujet (tête / ciel) — adapte la marge selon face ou corps entier |
 | `action_vertical_bias` | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol visible), `-1,0` = caméra vers le haut |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Détecte automatiquement** le niveau du sol via un EMA asymétrique — résiste aux sauts, suit les atterrissages. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
+| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Le moteur analyse 25 images et active la combinaison optimale** d'auto-bottom-crop, auto-top-crop et auto-floor-tracking. Résout automatiquement la contradiction face-priority ↔ floor-tracking. Recommandé par rapport aux options individuelles. |
 
 ### Modes de détection
 
@@ -757,6 +758,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `action_auto_top_crop` | `False` | Détecte auto la limite haute du sujet (tête / ciel) |
 | `action_vertical_bias` | `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
 | `action_auto_vertical_bias` | `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
+| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — moteur analyse le contexte et active la combinaison optimale des 3 options ci-dessus |
 | `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
 | `target_height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
 | `text_overlay_enabled` | `False` | 💬 Graver un texte dans le GIF de sortie |
