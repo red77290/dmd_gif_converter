@@ -24,7 +24,8 @@ from unittest.mock import MagicMock, patch, call
 # Assure que le répertoire parent est dans le sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import dmd_gif_converter as conv
+import src.converter as conv
+import src.converter.ffmpeg_utils as ffmpeg_utils
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,16 +56,16 @@ class TestSnapToCleanFps(unittest.TestCase):
     def test_fps_15_snaps_to_12_5_or_20(self):
         # 15 is equidistant between 12.5 and 20 — min() picks the first equal
         result = conv.snap_to_clean_fps(15.0)
-        self.assertIn(result, conv._CLEAN_GIF_FPS)
+        self.assertIn(result, ffmpeg_utils._CLEAN_GIF_FPS)
 
     def test_custom_range(self):
         # With a tighter range, fps must still land on a valid clean value
         result = conv.snap_to_clean_fps(18.0, fps_min=10.0, fps_max=20.0)
-        self.assertIn(result, conv._CLEAN_GIF_FPS)
+        self.assertIn(result, ffmpeg_utils._CLEAN_GIF_FPS)
         self.assertLessEqual(result, 20.0)
 
     def test_all_clean_values_are_idempotent(self):
-        for fps in conv._CLEAN_GIF_FPS:
+        for fps in ffmpeg_utils._CLEAN_GIF_FPS:
             self.assertEqual(conv.snap_to_clean_fps(fps), fps)
 
 
@@ -108,10 +109,10 @@ class TestConstants(unittest.TestCase):
 
     def test_text_color_map_contains_basics(self):
         for color in ("white", "yellow", "red", "green", "blue"):
-            self.assertIn(color, conv._TEXT_COLOR_MAP)
+            self.assertIn(color, ffmpeg_utils._TEXT_COLOR_MAP)
 
     def test_text_color_map_rgba_format(self):
-        for name, rgba in conv._TEXT_COLOR_MAP.items():
+        for name, rgba in ffmpeg_utils._TEXT_COLOR_MAP.items():
             self.assertEqual(len(rgba), 4, f"{name} doit être RGBA (4 composantes)")
             for ch in rgba:
                 self.assertGreaterEqual(ch, 0)
@@ -130,41 +131,41 @@ class TestCheckDrawtext(unittest.TestCase):
 
     def setUp(self):
         # Réinitialise le cache avant chaque test
-        conv._drawtext_available = None
+        ffmpeg_utils._drawtext_available = None
 
     def test_returns_true_when_drawtext_in_output(self):
         mock_result = MagicMock()
         mock_result.stdout = "Filters:\n  drawtext   V->V   Draw text on input video.\n"
         mock_result.stderr = ""
-        with patch("subprocess.run", return_value=mock_result):
-            self.assertTrue(conv._check_drawtext())
+        with patch("src.converter.ffmpeg_utils.subprocess.run", return_value=mock_result):
+            self.assertTrue(ffmpeg_utils._check_drawtext())
 
     def test_returns_false_when_drawtext_absent(self):
-        conv._drawtext_available = None
+        ffmpeg_utils._drawtext_available = None
         mock_result = MagicMock()
         mock_result.stdout = "Filters:\n  scale   V->V   Scale the input video.\n"
         mock_result.stderr = ""
-        with patch("subprocess.run", return_value=mock_result):
-            self.assertFalse(conv._check_drawtext())
+        with patch("src.converter.ffmpeg_utils.subprocess.run", return_value=mock_result):
+            self.assertFalse(ffmpeg_utils._check_drawtext())
 
     def test_returns_false_on_exception(self):
-        conv._drawtext_available = None
-        with patch("subprocess.run", side_effect=FileNotFoundError("ffmpeg not found")):
-            self.assertFalse(conv._check_drawtext())
+        ffmpeg_utils._drawtext_available = None
+        with patch("src.converter.ffmpeg_utils.subprocess.run", side_effect=FileNotFoundError("ffmpeg not found")):
+            self.assertFalse(ffmpeg_utils._check_drawtext())
 
     def test_result_is_cached(self):
-        conv._drawtext_available = None
+        ffmpeg_utils._drawtext_available = None
         mock_result = MagicMock()
         mock_result.stdout = "drawtext"
         mock_result.stderr = ""
-        with patch("subprocess.run", return_value=mock_result) as mock_sub:
-            conv._check_drawtext()
-            conv._check_drawtext()
+        with patch("src.converter.ffmpeg_utils.subprocess.run", return_value=mock_result) as mock_sub:
+            ffmpeg_utils._check_drawtext()
+            ffmpeg_utils._check_drawtext()
             # subprocess.run ne doit être appelé qu'une seule fois
             self.assertEqual(mock_sub.call_count, 1)
 
     def tearDown(self):
-        conv._drawtext_available = None
+        ffmpeg_utils._drawtext_available = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,7 +189,7 @@ class TestGetMetadata(unittest.TestCase):
     def test_normal_video(self):
         output = self._make_ffprobe_output(1920, 1080, "25/1", "10.5")
         mock_result = MagicMock(stdout=output)
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("src.converter.ffmpeg_utils.subprocess.run", return_value=mock_result):
             w, h, fps, dur = conv.get_metadata("video.mp4")
         self.assertEqual(w, 1920)
         self.assertEqual(h, 1080)
@@ -198,20 +199,20 @@ class TestGetMetadata(unittest.TestCase):
     def test_fractional_fps(self):
         output = self._make_ffprobe_output(640, 480, "30000/1001", "5.0")
         mock_result = MagicMock(stdout=output)
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("src.converter.ffmpeg_utils.subprocess.run", return_value=mock_result):
             _, _, fps, _ = conv.get_metadata("video.mp4")
         self.assertAlmostEqual(fps, 30000 / 1001, places=2)
 
     def test_duration_from_nb_frames_when_format_missing(self):
         output = self._make_ffprobe_output(640, 480, "25/1", "0", nb_frames="250")
         mock_result = MagicMock(stdout=output)
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("src.converter.ffmpeg_utils.subprocess.run", return_value=mock_result):
             _, _, fps, dur = conv.get_metadata("video.mp4")
         # 250 frames @ 25 fps = 10 s
         self.assertAlmostEqual(dur, 10.0)
 
     def test_returns_none_on_exception(self):
-        with patch("subprocess.run", side_effect=Exception("ffprobe crash")):
+        with patch("src.converter.ffmpeg_utils.subprocess.run", side_effect=Exception("ffprobe crash")):
             w, h, fps, dur = conv.get_metadata("bad.mp4")
         self.assertIsNone(w)
         self.assertIsNone(h)
@@ -227,18 +228,18 @@ class TestProcessFile(unittest.TestCase):
     """Tests de process_file avec subprocess mocké."""
 
     def _mock_metadata(self, w=640, h=480, fps=25.0, dur=4.0):
-        return patch("dmd_gif_converter.get_metadata", return_value=(w, h, fps, dur))
+        return patch("src.converter.core.get_metadata", return_value=(w, h, fps, dur))
 
     def _mock_ffmpeg_ok(self):
         mock = MagicMock()
         mock.returncode = 0
-        return patch("subprocess.run", return_value=mock)
+        return patch("src.converter.core.subprocess.run", return_value=mock)
 
     def _mock_ffmpeg_fail(self, stderr=b"some error\nlast error line"):
         mock = MagicMock()
         mock.returncode = 1
         mock.stderr = stderr
-        return patch("subprocess.run", return_value=mock)
+        return patch("src.converter.core.subprocess.run", return_value=mock)
 
     def test_success_returns_true(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -259,7 +260,7 @@ class TestProcessFile(unittest.TestCase):
     def test_metadata_failure_returns_false(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
-            with patch("dmd_gif_converter.get_metadata", return_value=(None, None, 25.0, 0.0)):
+            with patch("src.converter.core.get_metadata", return_value=(None, None, 25.0, 0.0)):
                 ok, msg = conv.process_file("input.mp4", out)
             self.assertFalse(ok)
 
@@ -286,7 +287,7 @@ class TestProcessFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
             with self._mock_metadata():
-                with patch("subprocess.run", side_effect=fake_run):
+                with patch("src.converter.core.subprocess.run", side_effect=fake_run):
                     conv.process_file(
                         "input.mp4", out,
                         params={"mode": "cinema", "target_width": 256, "target_height": 64}
@@ -306,7 +307,7 @@ class TestProcessFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
             with self._mock_metadata():
-                with patch("subprocess.run", side_effect=fake_run):
+                with patch("src.converter.core.subprocess.run", side_effect=fake_run):
                     conv.process_file("input.mp4", out, start_s=5.0)
         self.assertIn("-ss", captured_cmd)
 
@@ -322,8 +323,8 @@ class TestProcessFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
             # Durée source = 30 s, max_duration = 5 s
-            with patch("dmd_gif_converter.get_metadata", return_value=(640, 480, 25.0, 30.0)):
-                with patch("subprocess.run", side_effect=fake_run):
+            with patch("src.converter.core.get_metadata", return_value=(640, 480, 25.0, 30.0)):
+                with patch("src.converter.core.subprocess.run", side_effect=fake_run):
                     conv.process_file("input.mp4", out, params={"max_duration": 5.0})
         # La durée de sortie dans -t doit être <= 5 s (+ frames scroll)
         # On vérifie juste que l'appel ffmpeg est bien fait
@@ -350,7 +351,7 @@ class TestProcessFolder(unittest.TestCase):
                 (Path(folder_in) / "test.gif").touch()
                 (Path(folder_in) / "ignore.txt").touch()
 
-                with patch("dmd_gif_converter.process_file", return_value=(True, "[OK] test.gif")) as mock_pf:
+                with patch("src.converter.core.process_file", return_value=(True, "[OK] test.gif")) as mock_pf:
                     results = conv.process_folder(folder_in, folder_out)
 
                 # Seul test.gif doit avoir été traité (ignore.txt est ignoré)
@@ -361,7 +362,7 @@ class TestProcessFolder(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder_in:
             (Path(folder_in) / "test.mp4").touch()
             out = os.path.join(folder_in, "subdir_out")
-            with patch("dmd_gif_converter.process_file", return_value=(True, "[OK] test.mp4")):
+            with patch("src.converter.core.process_file", return_value=(True, "[OK] test.mp4")):
                 conv.process_folder(folder_in, out)
             self.assertTrue(os.path.isdir(out))
 
@@ -383,7 +384,7 @@ class TestApplyTextOverlayPillow(unittest.TestCase):
             return real_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
-            ok, msg = conv._apply_text_overlay_pillow(
+            ok, msg = ffmpeg_utils._apply_text_overlay_pillow(
                 "nonexistent.gif", "Hello", "font.ttf", 8, "white", "bottom_center"
             )
         self.assertFalse(ok)
@@ -395,7 +396,7 @@ class TestApplyTextOverlayPillow(unittest.TestCase):
         except ImportError:
             self.skipTest("Pillow non disponible")
 
-        ok, msg = conv._apply_text_overlay_pillow(
+        ok, msg = ffmpeg_utils._apply_text_overlay_pillow(
             "/nonexistent/path.gif", "Hi", "font.ttf", 8, "white", "bottom_center"
         )
         self.assertFalse(ok)

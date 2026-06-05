@@ -3,7 +3,7 @@
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
 
-**v3.4.0 engine improvements:**
+**v4.0.0 engine improvements:**
 - **DMD Visibility Score** *(Priority 1)*: Before committing to any zoom, the engine simulates both the current crop and the proposed crop at target DMD resolution and computes a composite visibility score. If the proposed zoom scores less than 95% of the current view the zoom is cancelled — preventing counterproductive crops that make the subject invisible on low-resolution LED matrices.
 - **Temporal Scene Memory** *(Priority 2)*: A sliding window (default 3 s) of past ROI detections is kept. When YOLO loses the subject for a few frames the camera continues following the estimated trajectory (weighted average biased toward the most-recent detections) instead of jumping back to centre.
 - **Scene Change Detection** *(Priority 3)*: HSV histogram correlation detects hard cuts between frames. On cut: ROI history, floor estimator, and camera smoothing are all reset so stale tracking from the previous scene never bleeds into the new scene.
@@ -14,14 +14,14 @@ It creates an intermediate video that follows action/person areas at the target 
 - **Smart Platformer Mode** *(Priority 8)*: Special mode for 2-D side-scrollers. Locks the camera vertically to a steady floor level (using the asymmetric EMA estimator) and widens the horizontal view by 50% to reveal more level ahead.
 - **ROI Confidence System** *(Priority 10)*: Replaces hardcoded YOLO thresholds with a configurable minimum. Weak/flickering detections are explicitly rejected, forcing the temporal memory system to rely on smoothed trajectory data instead of twitching.
 
-**v3.3.0 improvements:**
+**v4.0.0 improvements:**
 - **GIF pre-conversion**: GIF sources are now transcoded to a clean H.264 MP4 via FFmpeg before OpenCV processing — eliminates `FFmpeg pipe encoding failed` errors caused by BGRA transparency palettes in GIF files.
 - **BGRA safety net**: OpenCV frames are normalised to BGR (3-channel) before being piped to FFmpeg, even if the GIF pre-conversion fallback path is taken.
 - **FFmpeg stderr capture**: In case of encoding failure, the last 300 characters of FFmpeg's stderr are included in the log for easier diagnosis.
 - **Smart Auto Crop 3-group logic**: The decision engine now uses three **mutually exclusive groups** instead of evaluating all signals simultaneously — resolving the face-priority ↔ floor-tracking architectural contradiction.
 - **Face Priority improvements**: Detection zone is now at **chin level** (20 % of body height from head top, not 32 % shoulder level). Camera uses **full frame bounds** in face-priority mode, not the restricted detection zone, preventing the camera from being locked at shoulder level.
 
-**v3.2.0 architectural improvements:**
+**v4.0.0 architectural improvements:**
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
 
@@ -60,7 +60,7 @@ The HOG/SVM detector has been replaced with **YOLOv8n** exported to ONNX format 
 
 ## Intermediate Encoding — rawvideo pipe + GIF pre-conversion
 
-### GIF sources — automatic pre-conversion *(new in v3.3.0)*
+### GIF sources — automatic pre-conversion *(new in v4.0.0)*
 
 GIF files are pre-converted to a clean H.264 MP4 via FFmpeg **before** OpenCV processes them:
 
@@ -119,7 +119,7 @@ The character body is taller than the DMD strip. The camera must zoom onto the f
 | `auto_bottom_crop = ON` | Marks content bottom at chin level (20 % of body height from top) |
 | `auto_floor_track = OFF` | **Explicitly suppressed** — tracking the floor while face-priority is active would pan the camera down to feet |
 
-> **Camera bounds fix (v3.3.0):** in face-priority mode the camera is allowed to travel over the **full source frame height** (not the restricted detection zone). This prevents the camera from being forced to shoulder level when the effective zone is smaller than the DMD window.
+> **Camera bounds fix (v4.0.0):** in face-priority mode the camera is allowed to travel over the **full source frame height** (not the restricted detection zone). This prevents the camera from being forced to shoulder level when the effective zone is smaller than the DMD window.
 
 #### GROUP 2 — Floor Tracking (platformer / ground level)
 
@@ -174,7 +174,7 @@ The three-group architecture ensures only one coherent strategy is activated per
 
 ---
 
-## 🔬 DMD Visibility Score *(v3.4.0 — Priority 1)*
+## 🔬 DMD Visibility Score *(v4.0.0 — Priority 1)*
 
 ### Problem
 
@@ -219,7 +219,7 @@ On a 1080p source at 30 fps: typically **< 1 ms/frame extra** on any modern CPU.
 
 ---
 
-## 🕐 Temporal Scene Memory *(v3.4.0 — Priority 2)*
+## 🕐 Temporal Scene Memory *(v4.0.0 — Priority 2)*
 
 ### Problem
 
@@ -250,7 +250,7 @@ One `deque` push + O(N) weighted sum where N = `fps × window_s`. At 30 fps × 3
 
 ---
 
-## ✂️ Scene Change Detection *(v3.4.0 — Priority 3)*
+## ✂️ Scene Change Detection *(v4.0.0 — Priority 3)*
 
 ### Problem
 
@@ -276,7 +276,7 @@ Two 32-bin histogram compares on a 64×32 thumbnail: **< 0.2 ms/frame**.
 
 ---
 
-## 🔍 Micro-detection Rejection *(v3.4.0 — Priority 4)*
+## 🔍 Micro-detection Rejection *(v4.0.0 — Priority 4)*
 
 ### Problem
 
@@ -305,7 +305,7 @@ Two integer multiplications and a division per frame: **negligible**.
 
 ---
 
-## ➡️ Directional Look-Ahead *(v3.4.0 — Priority 5)*
+## ➡️ Directional Look-Ahead *(v4.0.0 — Priority 5)*
 
 ### Problem
 
@@ -336,7 +336,7 @@ Two velocity differences and two clamp operations per frame: **negligible**.
 
 ---
 
-## 👥 Multi-ROI Fusion *(v3.4.0 — Priority 6)*
+## 👥 Multi-ROI Fusion *(v4.0.0 — Priority 6)*
 
 ### Problem
 
@@ -367,7 +367,7 @@ One ONNX inference call (unchanged) + O(N) weighted sum where N = number of dete
 
 ---
 
-## 🔍 Minimum Useful Size After Resize *(v3.4.0 — Priority 7)*
+## 🔍 Minimum Useful Size After Resize *(v4.0.0 — Priority 7)*
 
 When zooming aggressively, the detected subject might end up occupying only a few pixels on the DMD, becoming a blurry, unrecognisable blob. This feature intercepts zoom commands that would cause the subject to drop below a hard minimum size *in the final output space* (e.g. 128×32).
 
@@ -379,7 +379,7 @@ If the estimated final dimensions are too small, the zoom is cancelled and the c
 
 ---
 
-## 🕹 Smart Platformer Mode *(v3.4.0 — Priority 8)*
+## 🕹 Smart Platformer Mode *(v4.0.0 — Priority 8)*
 
 Optimised specifically for side-scrolling 2-D games (Mario, Sonic, Metroid).
 
@@ -394,7 +394,7 @@ Standard tracking centres the subject, meaning the floor moves up and down as th
 
 ---
 
-## 🛡️ ROI Confidence System *(v3.4.0 — Priority 10)*
+## 🛡️ ROI Confidence System *(v4.0.0 — Priority 10)*
 
 Replaces the hardcoded YOLO confidence threshold (`0.30`) with a configurable minimum.
 
@@ -427,7 +427,7 @@ The algorithm infers whether the subject is a **face/close-up** or **full body**
 | 1.3 – 2.5 | Bust / upper body | 10 % of frame height |
 | > 2.5 | Full body (fits on screen) | 6 % of frame height |
 
-#### 👤 Face Priority mode (automatic) — v3.3.0 improvements
+#### 👤 Face Priority mode (automatic) — v4.0.0 improvements
 
 When the detected character is **taller than the DMD window** (body height > 80 % of `frame_width / target_ratio`), the system automatically switches to **Face Priority** mode:
 

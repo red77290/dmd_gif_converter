@@ -17,7 +17,6 @@
 # $PSScriptRoot is always the directory of the running script (PowerShell 3+)
 $ScriptDir    = $PSScriptRoot
 $Venv         = Join-Path $ScriptDir ".venv"
-$UI           = Join-Path $ScriptDir "dmd_gif_converter_ui.py"
 $Req          = Join-Path $ScriptDir "requirements_ui.txt"
 $ReqHashFile  = Join-Path $Venv ".requirements_hash"
 $VenvPy       = Join-Path $Venv "Scripts\python.exe"
@@ -109,7 +108,7 @@ if (-not (Test-Path $VenvPy)) {
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
 Write-Host "==> Starting DMD GIF Converter..." -ForegroundColor Green
-& $VenvPy $UI
+& $VenvPy -m src.ui.app
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

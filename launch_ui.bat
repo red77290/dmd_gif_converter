@@ -14,7 +14,7 @@ setlocal EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 set "VENV=%SCRIPT_DIR%.venv"
-set "UI=%SCRIPT_DIR%dmd_gif_converter_ui.py"
+set "UI=-m src.ui.app"
 set "REQ=%SCRIPT_DIR%requirements_ui.txt"
 set "REQ_HASH_FILE=%VENV%\.requirements_hash"
 
@@ -117,7 +117,7 @@ if not exist "%VENV%\Scripts\python.exe" (
 
 :: ── Launch the UI ─────────────────────────────────────────────────────────────
 echo =^> Starting DMD GIF Converter...
-"%VENV%\Scripts\python.exe" "%UI%"
+"%VENV%\Scripts\python.exe" %UI%
 
 if errorlevel 1 (
     echo.

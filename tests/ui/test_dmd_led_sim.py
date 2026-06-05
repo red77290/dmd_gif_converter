@@ -31,7 +31,7 @@ try:
 except ImportError:
     _NUMPY_AVAILABLE = False
 
-from dmd_led_sim import apply_led_grid, LED_SIM_SCALE, LED_SIM_GAP
+from src.ui.dmd_led_sim import apply_led_grid, LED_SIM_SCALE, LED_SIM_GAP
 
 
 @unittest.skipUnless(_PIL_AVAILABLE and _NUMPY_AVAILABLE,

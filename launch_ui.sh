@@ -14,7 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv"
-UI="$SCRIPT_DIR/dmd_gif_converter_ui.py"
+UI="-m src.ui.app"
 REQ="$SCRIPT_DIR/requirements_ui.txt"
 REQ_HASH_FILE="$VENV/.requirements_hash"
 
@@ -136,5 +136,5 @@ else
 fi
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
-exec "$VENV/bin/python3" "$UI"
+exec "$VENV/bin/python3"  $UI
 

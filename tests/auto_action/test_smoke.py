@@ -5,7 +5,7 @@
 This test is intentionally lightweight and works even when OpenCV is missing.
 """
 
-from dmd_auto_action import AutoActionConfig, available_detectors, preprocess_video_for_dmd
+from src.auto_action.main import AutoActionConfig, available_detectors, preprocess_video_for_dmd
 
 
 def main() -> int:
