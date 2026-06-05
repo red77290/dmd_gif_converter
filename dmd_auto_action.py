@@ -640,6 +640,11 @@ def _smart_auto_crop_decision(
       + auto_vertical_bias (asymmetric EMA floor anchor).
     • **Blank top space** (sky / ceiling / HUD) → auto_top_crop.
 
+    This function **also pre-computes the crop percentages** (top_pct, bottom_pct)
+    using the same percentile logic as ``_compute_auto_crop_margins`` so that the
+    caller can skip the second scan entirely.  The pre-computed values are only
+    meaningful when the corresponding auto flag is True.
+
     Parameters
     ----------
     cap           : cv2.VideoCapture (already open — position will be restored)
@@ -653,25 +658,22 @@ def _smart_auto_crop_decision(
         auto_bottom_crop   : bool
         auto_top_crop      : bool
         auto_vertical_bias : bool
+        top_pct            : float  — pre-computed top crop percentage   (0..0.9)
+        bottom_pct         : float  — pre-computed bottom crop percentage (0..0.9)
         reasons            : list[str]  — human-readable log entries
     """
+    _EMPTY = {"auto_bottom_crop": False, "auto_top_crop": False,
+              "auto_vertical_bias": False, "top_pct": 0.0, "bottom_pct": 0.0}
+
     try:
         import cv2
         import numpy as np
     except ImportError:
-        return {
-            "auto_bottom_crop": False, "auto_top_crop": False,
-            "auto_vertical_bias": False,
-            "reasons": ["OpenCV/NumPy unavailable — smart auto skipped"],
-        }
+        return {**_EMPTY, "reasons": ["OpenCV/NumPy unavailable — smart auto skipped"]}
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     if total_frames <= 0:
-        return {
-            "auto_bottom_crop": False, "auto_top_crop": False,
-            "auto_vertical_bias": False,
-            "reasons": ["no frames available — smart auto skipped"],
-        }
+        return {**_EMPTY, "reasons": ["no frames available — smart auto skipped"]}
 
     # Height of the DMD crop window in source pixels (same formula as the main loop).
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
@@ -679,11 +681,21 @@ def _smart_auto_crop_decision(
 
     step      = max(1, total_frames // sample_count)
     saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    detector  = _FrameDetector()
+    try:
+        detector = _FrameDetector()
+    except Exception:
+        # Detector init failed (e.g. OpenCV issue): return safe defaults.
+        return {**_EMPTY, "reasons": ["detector init failed — smart auto skipped"]}
 
-    roi_tops:    list[float] = []
-    roi_bottoms: list[float] = []
-    roi_heights: list[float] = []
+    roi_tops:         list[float] = []
+    roi_bottoms_feet: list[float] = []   # actual feet (used for floor/gap signals)
+    roi_bottoms_fp:   list[float] = []   # face-priority adjusted bottom (for crop margin)
+    roi_heights:      list[float] = []
+    roi_widths:       list[float] = []
+
+    # ── Face-priority constants (same as _compute_auto_crop_margins) ──────────
+    DMD_CROP_H_FACTOR: float = 0.80   # body must be ≥ 80 % of dmd window to trigger
+    FACE_FRAC:         float = 0.32   # top fraction of body estimated to be head/face
 
     for i in range(0, min(total_frames - 1, sample_count * step), step):
         cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
@@ -692,28 +704,32 @@ def _smart_auto_crop_decision(
             continue
         roi = detector.detect(frame, cfg.detector)
         if roi is not None:
-            _rx, ry, _rw, rh = roi
+            _rx, ry, rw, rh = roi
             roi_tops.append(float(ry))
-            roi_bottoms.append(float(ry + rh))
+            roi_bottoms_feet.append(float(ry + rh))
             roi_heights.append(float(rh))
+            roi_widths.append(float(rw))
+            # Face-priority adjusted bottom (same logic as _compute_auto_crop_margins)
+            if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
+                roi_bottoms_fp.append(float(ry + rh * FACE_FRAC))
+            else:
+                roi_bottoms_fp.append(float(ry + rh))
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
     if not roi_tops:
-        return {
-            "auto_bottom_crop": False, "auto_top_crop": False,
-            "auto_vertical_bias": False,
-            "reasons": ["no detections in scan — all manual"],
-        }
+        return {**_EMPTY, "reasons": ["no detections in scan — all manual"]}
 
-    arr_tops    = np.array(roi_tops)
-    arr_bottoms = np.array(roi_bottoms)
-    arr_heights = np.array(roi_heights)
+    arr_tops       = np.array(roi_tops)
+    arr_btm_feet   = np.array(roi_bottoms_feet)
+    arr_btm_fp     = np.array(roi_bottoms_fp)
+    arr_heights    = np.array(roi_heights)
+    arr_widths     = np.array(roi_widths) if roi_widths else arr_heights
 
     median_top    = float(np.median(arr_tops))
-    median_bottom = float(np.median(arr_bottoms))
+    median_bottom = float(np.median(arr_btm_feet))   # feet for floor/gap signals
     median_height = float(np.median(arr_heights))
-    std_bottom    = float(np.std(arr_bottoms))
+    std_bottom    = float(np.std(arr_btm_feet))
 
     # ── Decision thresholds ───────────────────────────────────────────────────
     # TOP_SPACE: fraction of frame height blank above the subject → auto-top-crop.
@@ -794,10 +810,37 @@ def _smart_auto_crop_decision(
             f"h={tall_ratio*100:.0f}%) → all manual"
         )
 
+    # ── Pre-compute crop percentages (same percentile logic as _compute_auto_crop_margins)
+    # This lets the caller skip the second scan entirely when smart_auto_crop=True.
+    # Aspect-ratio-based padding (mirrors _compute_auto_crop_margins).
+    median_w   = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
+    aspect     = median_height / max(1.0, median_w)
+    face_priority = tall_ratio > TALL_FACTOR
+    if face_priority:
+        pad_frac = 0.12
+    elif aspect < 1.3:
+        pad_frac = 0.15
+    elif aspect < 2.5:
+        pad_frac = 0.10
+    else:
+        pad_frac = 0.06
+    pad_px = frame_h * pad_frac
+
+    # Use face-priority-adjusted bottoms for margin computation.
+    top_y    = float(np.percentile(arr_tops,    5))  - pad_px
+    bottom_y = float(np.percentile(arr_btm_fp, 95))  + pad_px
+    top_y    = max(0.0,          top_y)
+    bottom_y = min(float(frame_h), bottom_y)
+
+    pre_top_pct    = _clamp(top_y    / frame_h,              0.0, 0.9)
+    pre_bottom_pct = _clamp((frame_h - bottom_y) / frame_h,  0.0, 0.9)
+
     return {
         "auto_bottom_crop":   auto_bottom,
         "auto_top_crop":      auto_top,
         "auto_vertical_bias": auto_floor,
+        "top_pct":            pre_top_pct,
+        "bottom_pct":         pre_bottom_pct,
         "reasons":            reasons,
     }
 
@@ -857,33 +900,52 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     # ── Smart Auto Crop decision (overrides individual flags) ─────────────────
     # When smart_auto_crop=True the engine analyses 25 frames to decide which
     # combination of auto_bottom_crop / auto_top_crop / auto_vertical_bias to
-    # activate.  The decision handles the tall-character contradiction: face
-    # priority and floor-tracking are mutually exclusive; the engine picks the
-    # correct one automatically.
+    # activate, AND pre-computes the crop percentages in the same pass so that
+    # the second _compute_auto_crop_margins scan is skipped entirely.
+    # This halves the scanning overhead compared to running two separate scans.
+    # The entire block is wrapped in a try/except so that any unexpected error
+    # (ONNX load failure, network timeout, OpenCV issue) degrades gracefully to
+    # "all manual" instead of propagating an exception to the preview thread.
+    _smart_crop_margins: Optional[tuple] = None   # (top_pct, bottom_pct) or None
     if getattr(cfg, "smart_auto_crop", False):
-        _decision = _smart_auto_crop_decision(cap, cfg, frame_w, frame_h)
-        _auto_bc                  = _decision["auto_bottom_crop"]
-        _auto_tc                  = _decision["auto_top_crop"]
-        cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
-        _smart_reasons            = _decision["reasons"]
+        try:
+            _decision = _smart_auto_crop_decision(cap, cfg, frame_w, frame_h)
+            _auto_bc                  = _decision["auto_bottom_crop"]
+            _auto_tc                  = _decision["auto_top_crop"]
+            cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
+            _smart_reasons            = _decision["reasons"]
+            # Use pre-computed margins from the smart scan — no second pass needed.
+            _smart_crop_margins = (_decision["top_pct"], _decision["bottom_pct"])
+        except Exception as _e:
+            # Graceful fallback: smart scan failed — keep individual manual flags.
+            _smart_reasons = [f"smart scan error ({_e!r}) → all manual"]
 
     _face_priority_mode = False  # will be set True if face priority was triggered
     if _auto_bc or _auto_tc:
-        detector_for_scan = _FrameDetector()
-        computed_top, computed_bottom = _compute_auto_crop_margins(
-            cap, detector_for_scan, cfg, frame_w, frame_h
-        )
-        if _auto_tc:
-            _tcp = computed_top
-        if _auto_bc:
-            _bcp = computed_bottom
-            # Face priority detection: if the effective visible height is
-            # significantly smaller than the DMD window height, the auto-scan
-            # must have applied face priority (body was too tall to fit).
-            _target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
-            _dmd_window_h = frame_w / _target_ratio
-            _effective_h  = frame_h * (1.0 - _bcp) - frame_h * _tcp
-            _face_priority_mode = _effective_h < _dmd_window_h * 0.75
+        try:
+            if _smart_crop_margins is not None:
+                # Smart scan already computed the margins — reuse them directly.
+                computed_top, computed_bottom = _smart_crop_margins
+            else:
+                # Individual auto flags (no smart scan): run the dedicated margin scan.
+                detector_for_scan = _FrameDetector()
+                computed_top, computed_bottom = _compute_auto_crop_margins(
+                    cap, detector_for_scan, cfg, frame_w, frame_h
+                )
+            if _auto_tc:
+                _tcp = computed_top
+            if _auto_bc:
+                _bcp = computed_bottom
+                # Face priority detection: if the effective visible height is
+                # significantly smaller than the DMD window height, the auto-scan
+                # must have applied face priority (body was too tall to fit).
+                _target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
+                _dmd_window_h = frame_w / _target_ratio
+                _effective_h  = frame_h * (1.0 - _bcp) - frame_h * _tcp
+                _face_priority_mode = _effective_h < _dmd_window_h * 0.75
+        except Exception as _e:
+            # Graceful fallback: crop margin scan failed — use manual values.
+            pass
 
     effective_frame_top = int(frame_h * _tcp)
     effective_frame_h   = max(cfg.target_height, int(frame_h * (1.0 - _bcp)))
