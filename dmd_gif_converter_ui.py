@@ -1013,7 +1013,7 @@ class DMDConverterApp(ctk.CTk):
                 text_color="#7ec8e3"
             ).pack(fill="x", padx=8, pady=(12, 2), anchor="w")
 
-        def slider_row(label, var, from_, to, fmt="{:.1f}", suffix="", steps=None):
+        def slider_row(label, var, from_, to, fmt="{:.1f}", suffix="", steps=None, lmh=True):
             f = ctk.CTkFrame(parent, fg_color="transparent")
             f.pack(fill="x", padx=8, pady=2)
             f.grid_columnconfigure(1, weight=1)
@@ -1058,7 +1058,8 @@ class DMDConverterApp(ctk.CTk):
             entry.bind("<FocusIn>",  _on_focus_in)
             entry.bind("<FocusOut>", _commit)
             entry.bind("<Return>",   _commit)
-            self._lmh_widgets.extend([sl, entry])
+            if lmh:
+                self._lmh_widgets.extend([sl, entry])
             return sl
 
         # ── Per-GIF config toggle ─────────────────────────────────────────────
