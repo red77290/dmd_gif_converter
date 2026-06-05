@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.3.0
+# 🎞️ DMD GIF Converter — v3.4.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -31,7 +31,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 > **TL;DR — one checkbox and the converter makes every decision for you.**  
 > Located at the **top of the ⚙️ Parameters panel**, above all other settings.
 
-**"Let Me Handle It"** is the ultimate zero-config mode. When enabled, it activates all four AI systems simultaneously and grays out every setting you don't need to touch — leaving only the controls that remain meaningful to you:
+**"Let Me Handle It"** is the ultimate zero-config mode. When enabled, it activates all five AI systems simultaneously and grays out every setting you don't need to touch — leaving only the controls that remain meaningful to you:
 
 ```
 Let Me Handle It ✓
@@ -39,6 +39,7 @@ Let Me Handle It ✓
     ├── 🤖 Auto Action Framing        ← auto-activated (ON)
     ├── 🧠 Smart Auto Crop            ← auto-activated (ON)
     ├── 🔲 Background Subtraction     ← auto-activated (ON)
+    ├── 👁️ DMD Visibility Score       ← auto-activated (ON)
     │
     ├── 💬 Text Overlay               ← still editable (your content)
     ├── 🎞️ Per-GIF Config             ← still editable (per-file settings)
@@ -75,7 +76,7 @@ All other sliders (colorimetry, scroll speed, FPS, crop values, camera params…
 - You're converting simple pixel-art sprites that don't need AI (use standard scroll pipeline)
 - You're using per-GIF config to tune individual files
 
-> **Restore:** Toggling OFF restores all four flags to their previous state before "Let Me Handle It" was enabled.
+> **Restore:** Toggling OFF restores all five flags to their previous state before "Let Me Handle It" was enabled.
 
 ---
 
@@ -414,7 +415,7 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | **DMD auto-refresh** | DMD preview rebuilds automatically ~2 s after you stop moving any slider |
 | **Trim / clip** | Set start and end time — single-file conversion only |
 | **⏱ Max Duration** | Cap clip length + place the window anywhere in the source |
-| **🚀 Let Me Handle It** | One-click full-auto mode — activates all 4 AI systems (Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction) and grays out unrelated settings |
+| **🚀 Let Me Handle It** | One-click full-auto mode — activates all 5 AI systems (Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction + DMD Visibility Score) and grays out unrelated settings |
 | **🎨 Smart Color Boost** | One-click AI colorimetry — auto-adjusts contrast, saturation and gamma per source |
 | **🎞️ Per-GIF Config** | Global toggle — when ON each file stores its own independent copy of all ~50 parameters · config saved instantly on selection change |
 | **All standard parameters** | Sliders and drop-downs for mode, scroll, FPS, colorimetry |
@@ -795,7 +796,8 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
 | `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
 | `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — engine scans 60 frames and activates the optimal combination of the 3 options above using 3 mutually exclusive groups; resolves the face-priority ↔ floor-tracking contradiction automatically |
-| `let_me_handle_it` | `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction simultaneously and grays out all unrelated settings |
+| `dmd_visibility_score_enabled` | `False` | 🔬 DMD Visibility Score — simulates the proposed crop at target DMD resolution and computes a composite score (contrast, edges, pixel occupation). Cancels any zoom that scores < 95 % of the current view. Prevents zooms that make the subject invisible on low-res LED matrices. CPU cost: < 1 ms/frame. |
+| `let_me_handle_it` | `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction + DMD Visibility Score simultaneously and grays out all unrelated settings |
 | `target_width` | `128` | Output width in pixels (multi-panel tiling) |
 | `target_height` | `32` | Output height in pixels (multi-panel tiling) |
 | `text_overlay_enabled` | `False` | 💬 Burn a text label into the output GIF |

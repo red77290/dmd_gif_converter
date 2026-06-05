@@ -190,7 +190,6 @@ class _InfoBadge:
         if self._tip_win and self._text:
             self._refresh_tip_text()
 
-    # ── Tooltip ─────────────────────────────────────────────────────────────────
     def _on_enter(self, event):
         if self._text:
             self._show_tip(event.x_root, event.y_root)
@@ -342,6 +341,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
         self.v_action_smart_auto_crop    = tk.BooleanVar(value=False)
         self.v_bg_sub_enable       = tk.BooleanVar(value=False) # New background subtraction checkbox
+        self.v_dmd_visibility_score_enabled = tk.BooleanVar(value=False) # NEW: Enable DMD Visibility Score
 
         # ── Tkinter vars — Multi-dalle / Tiling ───────────────────────────────
         self.v_target_width  = tk.IntVar(value=DEFAULT_PARAMS["target_width"])
@@ -410,7 +410,7 @@ class DMDConverterApp(ctk.CTk):
             self.v_action_top_crop, self.v_action_auto_top_crop,
             self.v_action_vertical_bias,
             self.v_action_auto_vertical_bias, self.v_action_smart_auto_crop,
-            self.v_bg_sub_enable,
+            self.v_bg_sub_enable, self.v_dmd_visibility_score_enabled, # NEW: DMD Visibility Score
             self.v_target_width, self.v_target_height, self.v_target_preset,
             self.v_text_overlay_enabled, self.v_text_content, # Added text overlay vars
             self.v_text_font_size, self.v_text_color, self.v_text_position, # Added text overlay vars
@@ -959,7 +959,7 @@ class DMDConverterApp(ctk.CTk):
             self._trim_frame, from_=0, to=1, variable=self.v_trim_start,
             command=self._on_start_drag
         )
-        self._sl_start.grid(row=1, column=1, padx=4, sticky="ew")
+        self._sl_start.grid(row=1, column=1, sticky="ew", padx=4)
         self._lbl_start = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
                                         font=ctk.CTkFont(size=11))
         self._lbl_start.grid(row=1, column=2, padx=4)
@@ -970,7 +970,7 @@ class DMDConverterApp(ctk.CTk):
             self._trim_frame, from_=0, to=1, variable=self.v_trim_end,
             command=self._on_end_drag
         )
-        self._sl_end.grid(row=2, column=1, padx=4, sticky="ew", pady=(2, 8))
+        self._sl_end.grid(row=2, column=1, sticky="ew", padx=4, pady=(2, 8))
         self._lbl_end = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
                                       font=ctk.CTkFont(size=11))
         self._lbl_end.grid(row=2, column=2, padx=4)
@@ -1045,7 +1045,10 @@ class DMDConverterApp(ctk.CTk):
                     m = re.match(r'^([+-]?\d*\.?\d+)', raw)
                     val = float(m.group(1)) if m else float(raw)
                     val = max(from_, min(to, val))
-                    var.set(val)
+                    if is_int:
+                        var.set(int(val))
+                    else:
+                        var.set(val)
                 except (ValueError, AttributeError):
                     pass
                 entry_sv.set(_lbl_txt())
@@ -1155,7 +1158,7 @@ class DMDConverterApp(ctk.CTk):
         # FPS
         section("🎬  Render FPS")
         slider_row("FPS minimum", self.v_fps_min, 5.0,  30.0, "{:.1f}", " fps")
-        slider_row("FPS maximum", self.v_fps_max, 10.0, 60.0, "{:.1f}", " fps")
+        slider_row("FPS maximum", self.v_fps_max, 10.0, 60.0, "{:.1f}", " fps") # FIX: Passed self.v_fps_max as var
 
         # ── Max Duration ──────────────────────────────────────────────────────
         section("⏱  Max Duration")
@@ -1251,7 +1254,10 @@ class DMDConverterApp(ctk.CTk):
                     m = re.match(r'^([+-]?\d*\.?\d+)', raw)
                     val = float(m.group(1)) if m else float(raw)
                     val = max(from_, min(to, val))
-                    var.set(val)
+                    if is_int:
+                        var.set(int(val))
+                    else:
+                        var.set(val)
                 except (ValueError, AttributeError):
                     pass
                 entry_sv.set(_lbl_txt())
@@ -1428,6 +1434,24 @@ class DMDConverterApp(ctk.CTk):
                    "{:.2f}", "", steps=60)
         adv_slider(parent, "Intro panoramic", self.v_action_intro, 0.0, 5.0,
                    "{:.1f}", " s", steps=50)
+
+        # NEW: DMD Visibility Score Checkbox
+        dmd_vis_row = ctk.CTkFrame(parent, fg_color="transparent")
+        dmd_vis_row.pack(fill="x", padx=14, pady=(0, 4))
+        self._cb_dmd_visibility_score_enabled = ctk.CTkCheckBox(
+            dmd_vis_row,
+            text="Enable DMD Visibility Score (prevents zooms that reduce legibility)",
+            variable=self.v_dmd_visibility_score_enabled,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        self._cb_dmd_visibility_score_enabled.pack(side="left")
+        self._lmh_widgets.append(self._cb_dmd_visibility_score_enabled)
+        ctk.CTkLabel(
+            parent,
+            text="    This will prevent the auto-framing engine from zooming in if the resulting\n"
+                 "    DMD output would have a lower visibility score than the current view.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
 
         # ════════════════════════════════════════════════════════════════════
         # SECTION: Crop & Vertical Bias
@@ -1877,18 +1901,20 @@ class DMDConverterApp(ctk.CTk):
     def _on_let_me_handle_toggle(self):
         enabled = self.v_let_me_handle_it.get()
         if enabled:
-            # Save current state of the 4 managed flags
+            # Save current state of the 5 managed flags
             self._lmh_saved_state = {
                 "auto_color_enabled":    self.v_auto_color_enabled.get(),
                 "auto_action_enabled":   self.v_auto_action_enabled.get(),
                 "action_smart_auto_crop": self.v_action_smart_auto_crop.get(),
                 "bg_sub_enable":         self.v_bg_sub_enable.get(),
+                "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(),
             }
-            # Force all 4 flags ON (visual feedback)
+            # Force all 5 flags ON (visual feedback)
             self.v_auto_color_enabled.set(True)
             self.v_auto_action_enabled.set(True)
             self.v_action_smart_auto_crop.set(True)
             self.v_bg_sub_enable.set(True)
+            self.v_dmd_visibility_score_enabled.set(True)
             # Grey out every registered widget
             for w in self._lmh_widgets:
                 try:
@@ -1902,6 +1928,7 @@ class DMDConverterApp(ctk.CTk):
             self.v_auto_action_enabled.set(saved.get("auto_action_enabled", False))
             self.v_action_smart_auto_crop.set(saved.get("action_smart_auto_crop", False))
             self.v_bg_sub_enable.set(saved.get("bg_sub_enable", False))
+            self.v_dmd_visibility_score_enabled.set(saved.get("dmd_visibility_score_enabled", False))
             # Re-enable all registered widgets
             for w in self._lmh_widgets:
                 try:
@@ -1952,6 +1979,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_auto_vertical_bias.set(False)
         self.v_action_smart_auto_crop.set(False)
         self.v_bg_sub_enable.set(False) # Reset background subtraction
+        self.v_dmd_visibility_score_enabled.set(False) # NEW: Reset DMD Visibility Score
         self.v_target_preset.set("128x32 (1x1)") # Reset tiling preset
         self.v_target_width.set(DEFAULT_PARAMS["target_width"])
         self.v_target_height.set(DEFAULT_PARAMS["target_height"])
@@ -2372,12 +2400,13 @@ class DMDConverterApp(ctk.CTk):
         self._src_job = self.after(delay, self._animate_src)
 
     def show_source_preview(self):
-        if self._selected_iid:
-            path = self._file_data.get(self._selected_iid)
-            if path:
-                self._load_preview(path)
-        else:
+        if not self._selected_iid:
             messagebox.showinfo("Info", "Select a file first.")
+            return
+        src = self._file_data.get(self._selected_iid)
+        if not src:
+            return
+        self._load_preview(src)
 
     def refresh_all_previews(self):
         if not self._selected_iid:
@@ -2441,6 +2470,7 @@ class DMDConverterApp(ctk.CTk):
             vertical_bias=float(self.v_action_vertical_bias.get()),
             auto_vertical_bias=bool(self.v_action_auto_vertical_bias.get()),
             smart_auto_crop=bool(self.v_action_smart_auto_crop.get()),
+            dmd_visibility_score_enabled=bool(self.v_dmd_visibility_score_enabled.get()), # NEW
             start_s=start_s,
             end_s=end_s,
             target_width=self.v_target_width.get(),
@@ -2488,8 +2518,11 @@ class DMDConverterApp(ctk.CTk):
             self.after(0, lambda: self._on_auto_ready(pil_frames, delays, tmpdir, msg))
 
         except Exception as exc:
-            # Safety net: always unblock the rendering flag even on unexpected errors
-            self.after(0, lambda: self._on_auto_fail(f"Unexpected error: {exc}"))
+            # Safety net: always unblock the rendering flag even on unexpected errors.
+            # NOTE: Python 3 deletes 'exc' at the end of the except block, so we must
+            # snapshot it into a default argument (_e=exc) to avoid NameError in the lambda.
+            _msg = f"Unexpected error: {exc}"
+            self.after(0, lambda _m=_msg: self._on_auto_fail(_m))
 
     def _on_auto_ready(self, pil_frames, delays, tmpdir, msg):
         self._auto_rendering = False
@@ -2640,7 +2673,8 @@ class DMDConverterApp(ctk.CTk):
             except EOFError:
                 pass
             except Exception as exc:
-                self.after(0, lambda: self._on_dmd_fail(str(exc), tmpdir))
+                _msg = str(exc)
+                self.after(0, lambda _m=_msg, _td=tmpdir: self._on_dmd_fail(_m, _td))
                 return
 
             if not pil_frames:
@@ -2652,10 +2686,9 @@ class DMDConverterApp(ctk.CTk):
         except Exception as exc:
             import traceback as _tb
             _detail = _tb.format_exc()
-            # Safety net: always unblock the rendering flag even on unexpected errors
-            self.after(0, lambda: self._on_dmd_fail(
-                f"Unexpected error: {exc}\n{_detail}", tmpdir
-            ))
+            # Safety net: snapshot exc before the except block clears it.
+            _msg = f"Unexpected error: {exc}\n{_detail}"
+            self.after(0, lambda _m=_msg, _td=tmpdir: self._on_dmd_fail(_m, _td))
 
     def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif):
         try:
@@ -2927,6 +2960,7 @@ class DMDConverterApp(ctk.CTk):
             "action_auto_vertical_bias":  self.v_action_auto_vertical_bias.get(),
             "action_smart_auto_crop":     self.v_action_smart_auto_crop.get(),
             "bg_sub_enable":              self.v_bg_sub_enable.get(),
+            "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(), # NEW
             "target_width":               self.v_target_width.get(),
             "target_height":              self.v_target_height.get(),
             "target_preset":              self.v_target_preset.get(),
@@ -2984,6 +3018,7 @@ class DMDConverterApp(ctk.CTk):
         self.v_action_auto_vertical_bias.set(s.get("action_auto_vertical_bias", False))
         self.v_action_smart_auto_crop.set(s.get("action_smart_auto_crop", False))
         self.v_bg_sub_enable.set(s.get("bg_sub_enable", False))
+        self.v_dmd_visibility_score_enabled.set(s.get("dmd_visibility_score_enabled", False)) # NEW
         self.v_target_width.set(s.get("target_width", 128))
         self.v_target_height.set(s.get("target_height", 32))
         self.v_target_preset.set(s.get("target_preset", "128x32 (1x1)"))
@@ -3183,6 +3218,7 @@ class DMDConverterApp(ctk.CTk):
             "action_auto_vertical_bias": self.v_action_auto_vertical_bias.get(),
             "action_smart_auto_crop":    self.v_action_smart_auto_crop.get(),
             "bg_sub_enable": self.v_bg_sub_enable.get(),
+            "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(), # NEW
             "target_width": self.v_target_width.get(),
             "target_height": self.v_target_height.get(),
             "text_overlay_enabled": self.v_text_overlay_enabled.get(), # Collect text overlay params
@@ -3199,12 +3235,13 @@ class DMDConverterApp(ctk.CTk):
             # auto-colorimetry
             "auto_color_enabled": self.v_auto_color_enabled.get(),
         } | (
-            # "Let Me Handle It" overrides — force the 4 managed params ON
+            # "Let Me Handle It" overrides — force the 5 managed params ON
             {
                 "auto_color_enabled":     True,
                 "auto_action_enabled":    True,
                 "action_smart_auto_crop": True,
                 "bg_sub_enable":          True,
+                "dmd_visibility_score_enabled": True,
             } if self.v_let_me_handle_it.get() else {}
         )
 

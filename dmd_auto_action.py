@@ -14,12 +14,13 @@ Intermediate encoding: raw frames are piped directly to an FFmpeg subprocess
 
 from __future__ import annotations
 
+import collections
 import os
 import subprocess
 import tempfile
 import urllib.request
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Deque, Optional, Tuple
 import numpy as np  # Import numpy
 
 # ── ONNX YOLOv8n model settings ───────────────────────────────────────────────
@@ -71,6 +72,53 @@ class AutoActionConfig:
     vertical_bias: float = 0.0        # shift camera center: +1.0 = down (show floor), -1.0 = up (show sky)
     auto_vertical_bias: bool = False  # auto floor detection: places ROI bottom (floor) at ~85 % of crop height
     smart_auto_crop: bool = False      # let the engine choose the optimal crop/tracking combination
+    dmd_visibility_score_enabled: bool = False # NEW: Enable DMD Visibility Score
+    # ── PRIORITY 2 — Temporal Scene Memory ───────────────────────────────────
+    # Sliding window (seconds) of past ROI detections used to interpolate the
+    # camera position when YOLO loses the subject for a few frames.  Set to 0
+    # to disable (matches legacy behaviour).  2–5 s recommended.
+    roi_history_window_s: float = 3.0   # seconds of ROI history kept (0 = disabled)
+    # ── PRIORITY 3 — Scene Change Detection ──────────────────────────────────
+    # When the HSV histogram difference between two consecutive frames exceeds
+    # scene_change_threshold, the ROI history, camera smoothing, and zoom are
+    # all reset so stale tracking data does not bleed across hard cuts.
+    # Set to 0.0 to disable.
+    scene_change_threshold: float = 0.45  # 0..1, higher = less sensitive
+    # ── PRIORITY 4 — Micro-detection Rejection ────────────────────────────────
+    # Any detected ROI whose area is smaller than this fraction of the source
+    # frame area is silently discarded.  Prevents zooming onto tiny subjects
+    # (< 2 % of frame) that would become invisible after resize to DMD res.
+    min_roi_area_ratio: float = 0.02   # 0..1, 0 = disabled (accept all ROIs)
+    # ── PRIORITY 5 — Directional Look-Ahead ──────────────────────────────────
+    # When the ROI centre moves consistently in one direction, offset the camera
+    # slightly in that direction so there is space "in front of" the subject.
+    # lead_factor=0 = disabled (legacy).  0.15–0.35 recommended.
+    look_ahead_enabled: bool = True
+    look_ahead_factor: float = 0.25   # fraction of crop half-width to offset
+    # ── PRIORITY 6 — Multi-ROI Fusion ───────────────────────────────────────
+    # When True, all YOLO person detections above the confidence threshold are
+    # gathered and fused into a single confidence-weighted centroid bounding box.
+    # Prevents the camera from always snapping to the single highest-confidence
+    # subject when multiple people are visible (e.g. a crowd or co-op play).
+    multi_roi_fusion_enabled: bool = True
+    # ── PRIORITY 7 — Minimum Useful Size After Resize ────────────────────────
+    # Minimum dimension (pixels) a detected subject must occupy in the DMD
+    # output frame.  Any proposed zoom that would render the ROI smaller than
+    # this in BOTH width and height is cancelled and the camera stays at the
+    # current position.  0 = disabled.
+    min_subject_dmd_px: int = 4    # pixels in the DMD output (e.g. 128×32)
+    # ── PRIORITY 8 — Smart Platformer Mode ───────────────────────────────────
+    # Optimised for side-scrolling 2-D games: locks vertical tracking to keep
+    # the floor visible at a fixed ratio of the strip height, and widens the
+    # horizontal field of view to reveal more of the level ahead.
+    platformer_mode: bool = False
+    platformer_floor_ratio: float = 0.80  # fraction of strip height for floor line
+    # ── PRIORITY 10 — ROI Confidence System ──────────────────────────────────
+    # Minimum YOLO confidence score required to act on a detection.  Boxes
+    # below this value are silently dropped (treated as no detection).  When
+    # combined with P2 temporal memory the camera holds its last known position
+    # rather than jumping to centre.  0.0 = accept everything (legacy).
+    roi_confidence_min: float = 0.0   # [0..1], 0 = disabled
     # out_w / out_h are no longer used for the actual output resolution.
     # The preprocessor always outputs at the source native width with a 4:1
     # crop ratio (= DMD ratio 128:32) so that ffmpeg receives full-quality input.
@@ -126,7 +174,7 @@ class _FrameDetector:
         except Exception:
             self._onnx_session = None
 
-    def _detect_yolo(self, frame) -> Optional[Tuple[int, int, int, int]]:
+    def _detect_yolo(self, frame, min_conf: float = _YOLO_CONF_THRESH) -> Optional[Tuple[int, int, int, int]]:
         """Run YOLOv8n inference; return best person box (x, y, w, h) or None.
 
         The frame is resized to 640×640 (YOLOv8 native input) for inference and
@@ -149,7 +197,7 @@ class _FrameDetector:
         class_prob = pred[4:].T          # [8400, 80] — direct class probabilities
         person_scores = class_prob[:, 0]  # COCO class 0 = person
 
-        mask = person_scores > _YOLO_CONF_THRESH
+        mask = person_scores > min_conf
         if not np.any(mask):
             return None
 
@@ -174,12 +222,55 @@ class _FrameDetector:
 
     # ── Public detection methods ──────────────────────────────────────────────
 
-    def detect_person(self, frame) -> Optional[Tuple[int, int, int, int]]:
-        """Return best person bounding box via ONNX YOLOv8n, or None."""
+    def _detect_yolo_multi(self, frame, min_conf: float = _YOLO_CONF_THRESH) -> list:
+        """Return ALL person boxes above the confidence threshold.
+
+        Returns a list of (score, (x, y, w, h)) sorted by score descending.
+        Empty list when ONNX is unavailable or no detection passes threshold.
+        """
         if self._onnx_session is None:
-            # onnxruntime not installed or model unavailable — caller falls back.
+            return []
+        cv2  = self.cv2
+        h, w = frame.shape[:2]
+        img  = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
+        img  = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        img  = np.transpose(img, (2, 0, 1))[np.newaxis]
+        input_name = self._onnx_session.get_inputs()[0].name
+        pred       = self._onnx_session.run(None, {input_name: img})[0][0]
+        boxes_raw     = pred[:4].T
+        person_scores = pred[4:].T[:, 0]
+        mask    = person_scores > min_conf
+        indices = np.where(mask)[0]
+        if len(indices) == 0:
+            return []
+        sx, sy  = w / 640.0, h / 640.0
+        results = []
+        for i in indices:
+            score      = float(person_scores[i])
+            cx, cy, bw, bh = boxes_raw[i]
+            x  = max(0, int((cx - bw / 2) * sx))
+            y  = max(0, int((cy - bh / 2) * sy))
+            bw = min(int(bw * sx), w - x)
+            bh = min(int(bh * sy), h - y)
+            if bw >= 8 and bh >= 8:
+                results.append((score, (x, y, bw, bh)))
+        results.sort(key=lambda t: t[0], reverse=True)
+        return results
+
+    def detect_person(
+        self, frame, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Return person bounding box via ONNX YOLOv8n, or None.
+
+        When *multi_fusion* is True, all confident detections are fused into a
+        confidence-weighted centroid box (Priority 6 — Multi-ROI Fusion).
+        """
+        if self._onnx_session is None:
             return None
-        return self._detect_yolo(frame)
+        if multi_fusion:
+            hits = self._detect_yolo_multi(frame, min_conf=min_conf)
+            return _fuse_rois(hits) if hits else None
+        return self._detect_yolo(frame, min_conf=min_conf)
 
     def detect_motion(self, frame) -> Optional[Tuple[int, int, int, int]]:
         cv2 = self.cv2
@@ -213,7 +304,9 @@ class _FrameDetector:
         x, y, w, h = cv2.boundingRect(c)
         return (int(x), int(y), int(w), int(h))
 
-    def detect(self, frame, mode: str) -> Optional[Tuple[int, int, int, int]]:
+    def detect(
+        self, frame, mode: str, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH
+    ) -> Optional[Tuple[int, int, int, int]]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
             mode = "person"
@@ -222,7 +315,7 @@ class _FrameDetector:
             return None
 
         if mode == "person":
-            p = self.detect_person(frame)
+            p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf)
             if p is not None:
                 return p
             return self.detect_motion(frame)
@@ -231,10 +324,10 @@ class _FrameDetector:
             m = self.detect_motion(frame)
             if m is not None:
                 return m
-            return self.detect_person(frame)
+            return self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf)
 
         # hybrid
-        p = self.detect_person(frame)
+        p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf)
         m = self.detect_motion(frame)
         if p and m:
             # Merge boxes for broader action framing.
@@ -244,6 +337,36 @@ class _FrameDetector:
             y2 = max(p[1] + p[3], m[1] + m[3])
             return (x1, y1, x2 - x1, y2 - y1)
         return p or m
+
+
+# ── PRIORITY 6 — Multi-ROI Fusion helper ────────────────────────────────────
+
+def _fuse_rois(
+    hits: list,
+) -> Optional[Tuple[int, int, int, int]]:
+    """Fuse multiple (score, (x, y, w, h)) detections into one weighted box.
+
+    The fused box is the confidence-weighted centroid of all input boxes.
+    The width/height are the weighted average of individual w/h values so the
+    camera frame is large enough to contain the crowd without becoming the
+    union (which over-zooms when subjects are far apart).
+
+    Returns None if *hits* is empty.
+    """
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return hits[0][1]
+    total_w  = sum(s for s, _ in hits)
+    if total_w <= 0:
+        return hits[0][1]
+    wcx = sum(s * (r[0] + r[2] / 2.0) for s, r in hits) / total_w
+    wcy = sum(s * (r[1] + r[3] / 2.0) for s, r in hits) / total_w
+    ww  = sum(s * r[2] for s, r in hits) / total_w
+    wh  = sum(s * r[3] for s, r in hits) / total_w
+    x   = int(wcx - ww / 2.0)
+    y   = int(wcy - wh / 2.0)
+    return (max(0, x), max(0, y), int(ww), int(wh))
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -365,7 +488,7 @@ def _compute_auto_crop_margins(  # noqa: C901
     #   Anime / game characters: hair above forehead can be 20-35 % of bounding box.
     #     0.20 → detection zone ends IN THE HAIR, above the actual face.
     #     YOLO within this zone sees mostly hair → ROI centred on hair top →
-    #     camera follows hair → face ends up at the very bottom of the output strip
+    #     face ends up at the very bottom of the output strip
     #     → bottom half of the face is cut off.
     #   0.28 pushes the reference point to ~chin level for anime characters with
     #   moderate hairstyles (25 % hair overhead), and into the upper-face area for
@@ -496,12 +619,12 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     target_ratio = float(cfg.target_width) / cfg.target_height
     _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
     _auto = getattr(cfg, "auto_vertical_bias", False)
+    _platformer = getattr(cfg, "platformer_mode", False)
 
     # Fraction of crop height at which the estimated floor should appear.
-    # 0.93 means the floor is 93 % down from the top of the visible strip
-    # (≈ 7 % margin at the bottom) — aggressive enough to show the ground in
-    # most 2-D platformers without risking clipping below the frame.
-    _FLOOR_RATIO: float = 0.93
+    # Platformer mode allows overriding this via config, default 0.80.
+    # Normal auto mode defaults to 0.93 (aggressive bottom placement).
+    _FLOOR_RATIO: float = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
 
     def _cy_min(crop_h: float) -> float:
         """Minimum camera centre y: never pan above the top-crop line."""
@@ -544,7 +667,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # The cy clamp below keeps the camera inside the frame regardless.
         crop_w = float(frame_w)
         crop_h = float(frame_w) / target_ratio
-        if _auto:
+        if _auto or _platformer:
             if floor_y_est is not None:
                 # We have a memorised floor level: use it even without a live ROI
                 # so the camera stays anchored when the subject briefly leaves frame.
@@ -578,6 +701,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     crop_w = roi_w / zoom
     crop_h = roi_h / zoom
 
+    if _platformer:
+        # Platformer mode: widen horizontal view slightly to see more level ahead
+        # while keeping the character fully visible.
+        crop_w = min(float(frame_w), crop_w * 1.5)
+        crop_h = crop_w / target_ratio
+
+
     # Hard minimum: never zoom beyond zoom_max regardless of ROI size.
     min_crop_w = max(float(cfg.target_width) / 4,
                      float(frame_w) / max(1.0, cfg.zoom_max))
@@ -594,7 +724,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         crop_h = float(frame_w) / target_ratio
 
     # ── Vertical positioning ────────────────────────────────────────────────
-    if _auto:
+    if _auto or _platformer:
         # Use the pre-smoothed floor estimate when available (supplied by the
         # main loop via _FloorEstimator); fall back to raw roi bottom otherwise.
         fy = floor_y_est if floor_y_est is not None else float(y + h)
@@ -810,7 +940,7 @@ def _smart_auto_crop_decision(
     #   • TALL CHARACTER + floor tracking: floor anchor pulls the camera toward
     #     the feet, but face-priority needs the head in frame → MUTUALLY EXCLUSIVE.
     #   • FLOOR TRACKING + top crop: the 32-px camera strip anchored to the floor
-    #     already excludes the top by construction → top crop is REDUNDANT.
+    #     already covers the head: adding a top crop would be REDUNDANT.
     #   • FLOOR TRACKING + bottom crop: the floor line IS the natural "bottom of
     #     interest"; bottom crop simply removes extra HUD/tiles below it → COMPLEMENTARY.
     #   • TOP CROP alone (GROUP 3): without bottom crop the camera centres on the body
@@ -968,6 +1098,151 @@ def _smart_auto_crop_decision(
     }
 
 
+def _calculate_dmd_visibility_score(dmd_frame: np.ndarray) -> float:
+    """
+    Calculates a visibility score for a given DMD frame.
+    Metrics: non-black pixel ratio, local contrast, contour density, horizontal/vertical occupation.
+    """
+    import cv2
+    import numpy as np
+
+    if dmd_frame is None or dmd_frame.size == 0:
+        return 0.0
+
+    # Convert to grayscale for some metrics
+    gray_dmd = cv2.cvtColor(dmd_frame, cv2.COLOR_BGR2GRAY)
+
+    # 1. Non-black pixel count (simple brightness)
+    # Assuming black is (0,0,0) or very dark. Thresholding on grayscale.
+    _, thresh = cv2.threshold(gray_dmd, 10, 255, cv2.THRESH_BINARY)
+    non_black_pixels = np.sum(thresh > 0)
+    total_pixels = dmd_frame.shape[0] * dmd_frame.shape[1]
+    non_black_ratio = non_black_pixels / total_pixels if total_pixels > 0 else 0.0
+
+    # 2. Local contrast (using Sobel operator for edge detection)
+    sobelx = cv2.Sobel(gray_dmd, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(gray_dmd, cv2.CV_64F, 0, 1, ksize=3)
+    gradient_magnitude = np.sqrt(sobelx**2 + sobely**2)
+    mean_gradient = np.mean(gradient_magnitude)
+
+    # 3. Contour density
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contour_length = sum(cv2.arcLength(c, True) for c in contours)
+    # Normalize by frame perimeter to get a density
+    frame_perimeter = 2 * (dmd_frame.shape[0] + dmd_frame.shape[1])
+    contour_density = contour_length / frame_perimeter if frame_perimeter > 0 else 0.0
+
+    # 4. Horizontal and vertical occupation (bounding box of non-black pixels)
+    coords = np.argwhere(thresh > 0)
+    if coords.size > 0:
+        y_min, x_min = coords.min(axis=0)
+        y_max, x_max = coords.max(axis=0)
+        occupied_width = x_max - x_min + 1
+        occupied_height = y_max - y_min + 1
+        h_occupation = occupied_width / dmd_frame.shape[1]
+        v_occupation = occupied_height / dmd_frame.shape[0]
+    else:
+        h_occupation = 0.0
+        v_occupation = 0.0
+
+    # Combine metrics into a single score
+    # These weights are initial guesses and will likely need tuning.
+    # The sum of weights should be 1.0 for easier interpretation.
+    w_non_black = 0.3
+    w_contrast = 0.4
+    w_contour_density = 0.2
+    w_occupation = 0.1 # Average of h and v occupation
+
+    score = (
+        w_non_black * non_black_ratio +
+        w_contrast * (mean_gradient / 255.0) + # Normalize mean_gradient to 0-1 range
+        w_contour_density * contour_density +
+        w_occupation * ((h_occupation + v_occupation) / 2.0)
+    )
+
+    return score
+
+
+# ── PRIORITY 3 — Scene Change Detection helper ────────────────────────────────
+
+def _compute_scene_change_score(frame_a: np.ndarray, frame_b: np.ndarray) -> float:
+    """Return a scene similarity score in [0, 1].
+
+    Uses HSV histogram correlation on a small downscaled version of the frames:
+    1.0 = identical (no scene change), 0.0 = completely different (hard cut).
+
+    The caller should detect a cut when score < (1 - cfg.scene_change_threshold).
+
+    Graceful: returns 1.0 (no change detected) on any error.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        if frame_a is None or frame_b is None:
+            return 1.0
+
+        # Downscale for speed — histogram needs 32×32 at most.
+        small_a = cv2.resize(frame_a, (64, 32), interpolation=cv2.INTER_AREA)
+        small_b = cv2.resize(frame_b, (64, 32), interpolation=cv2.INTER_AREA)
+
+        hsv_a = cv2.cvtColor(small_a, cv2.COLOR_BGR2HSV)
+        hsv_b = cv2.cvtColor(small_b, cv2.COLOR_BGR2HSV)
+
+        # Compare H and V channels (hue shift + luminance change = hard cut signal)
+        scores = []
+        for ch in (0, 2):   # H, V
+            hist_a = cv2.calcHist([hsv_a], [ch], None, [32], [0, 256])
+            hist_b = cv2.calcHist([hsv_b], [ch], None, [32], [0, 256])
+            cv2.normalize(hist_a, hist_a)
+            cv2.normalize(hist_b, hist_b)
+            corr = cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL)
+            scores.append(float(corr))
+
+        return max(0.0, float(np.mean(scores)))
+    except Exception:
+        return 1.0   # on any error, treat as "no cut"
+
+
+# ── PRIORITY 5 — Directional Look-Ahead helper ────────────────────────────────
+
+def _apply_look_ahead(
+    cam_rect: Tuple[float, float, float, float],
+    prev_roi_cx: Optional[float],
+    curr_roi_cx: Optional[float],
+    prev_roi_cy: Optional[float],
+    curr_roi_cy: Optional[float],
+    frame_w: int,
+    frame_h: int,
+    look_ahead_factor: float,
+) -> Tuple[float, float, float, float]:
+    """Offset the camera in the direction of ROI motion.
+
+    Leaves the camera centred when there is no motion data or when
+    look_ahead_factor == 0.  The offset is clamped so the crop window
+    never exceeds the source frame boundaries.
+    """
+    if look_ahead_factor <= 0.0 or prev_roi_cx is None or curr_roi_cx is None:
+        return cam_rect
+
+    cx, cy, cw, ch = cam_rect
+
+    vx = curr_roi_cx - prev_roi_cx
+    vy = (curr_roi_cy - prev_roi_cy) if (prev_roi_cy is not None and curr_roi_cy is not None) else 0.0
+
+    # Horizontal offset: lead in x
+    if abs(vx) > 1.0:
+        offset_x = vx * look_ahead_factor * (cw / 2.0) / max(1.0, abs(vx))
+        cx = _clamp(cx + offset_x, cw / 2.0, float(frame_w) - cw / 2.0)
+
+    # Vertical offset: lead in y (smaller factor — DMD strip is short)
+    if abs(vy) > 1.0:
+        offset_y = vy * look_ahead_factor * 0.5 * (ch / 2.0) / max(1.0, abs(vy))
+        cy = _clamp(cy + offset_y, ch / 2.0, float(frame_h) - ch / 2.0)
+
+    return (cx, cy, cw, ch)
+
+
 def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     """Create an auto-framed temporary MP4 and return (ok, out_path, message).
 
@@ -1084,7 +1359,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             _auto_tc                  = _decision["auto_top_crop"]
             cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
             _smart_reasons            = _decision["reasons"]
-            # Use pre-computed margins from the smart scan — no second pass needed.
+            # Use pre-computed margins from the smart scan — reuse them directly.
             _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
             _smart_face_priority = _decision.get("face_priority", False)
         except Exception as _e:
@@ -1287,11 +1562,28 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     cam_now  = cam_full_view
     src_idx  = 0
 
-    # Dynamic floor estimator: active only when auto_vertical_bias is on.
+    # Dynamic floor estimator: active only when auto_vertical_bias or platformer_mode is on.
     # Use _cam_frame_h so the estimator works over the same vertical range as the camera.
     _floor_est: Optional[_FloorEstimator] = (
-        _FloorEstimator(_cam_frame_h) if cfg.auto_vertical_bias else None
+        _FloorEstimator(_cam_frame_h) if cfg.auto_vertical_bias or cfg.platformer_mode else None
     )
+
+    # ── PRIORITY 2 — Temporal Scene Memory ───────────────────────────────────
+    # Sliding window of (weight, roi) pairs.  Recent frames have higher weight.
+    # When the live detector returns None, we synthesise a weighted-average ROI
+    # from the history so the camera continues following the estimated trajectory
+    # instead of jumping back to the centre.
+    _roi_history: Deque[Tuple[float, Tuple[int, int, int, int]]] = collections.deque()
+    _roi_history_max_len: int = max(1, int(fps * max(0.0, cfg.roi_history_window_s)))
+    _roi_history_enabled: bool = cfg.roi_history_window_s > 0.0
+
+    # ── PRIORITY 3 — Scene Change Detection ──────────────────────────────────
+    _prev_frame_for_scene: Optional[np.ndarray] = None
+    _scene_change_enabled: bool = cfg.scene_change_threshold > 0.0
+
+    # ── PRIORITY 5 — Directional Look-Ahead ──────────────────────────────────
+    _prev_roi_cx: Optional[float] = None
+    _prev_roi_cy: Optional[float] = None
 
     while _pipe_alive:
         ok, frame = cap.read()
@@ -1322,8 +1614,25 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         #
         # NORMAL MODE: restrict to effective_frame_top:effective_frame_h so the
         # camera ignores HUD bars, sky, and other cropped-out areas.
+
+        # ── PRIORITY 3 — Scene Change Detection ──────────────────────────────
+        if _scene_change_enabled and _prev_frame_for_scene is not None:
+            sim = _compute_scene_change_score(_prev_frame_for_scene, frame)
+            if sim < (1.0 - cfg.scene_change_threshold):
+                # Hard cut detected: flush all state derived from the old scene.
+                _roi_history.clear()
+                cam_prev = cam_full_view
+                if _floor_est is not None:
+                    _floor_est = _FloorEstimator(_cam_frame_h)
+                _prev_roi_cx = None
+                _prev_roi_cy = None
+        _prev_frame_for_scene = frame
+        # ── End Priority 3 ────────────────────────────────────────────────────
+
         if _face_priority_mode:
-            roi = detector.detect(frame, cfg.detector)
+            roi = detector.detect(frame, cfg.detector,
+                                  multi_fusion=cfg.multi_roi_fusion_enabled,
+                                  min_conf=cfg.roi_confidence_min)
             if roi is not None:
                 rx, ry, rw, rh = roi
                 # Keep only the head region of the bounding box (top ~28 %).
@@ -1332,11 +1641,34 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
                 roi = (rx, ry, rw, _face_h)
         else:
             detect_frame = frame[effective_frame_top:effective_frame_h, :]
-            roi = detector.detect(detect_frame, cfg.detector)
+            roi = detector.detect(detect_frame, cfg.detector,
+                                  multi_fusion=cfg.multi_roi_fusion_enabled,
+                                  min_conf=cfg.roi_confidence_min)
             # Translate ROI y-coordinate back into original frame space.
             if roi is not None and effective_frame_top > 0:
                 rx, ry, rw, rh = roi
                 roi = (rx, ry + effective_frame_top, rw, rh)
+
+        # ── PRIORITY 4 — Micro-detection Rejection ────────────────────────────
+        if roi is not None and cfg.min_roi_area_ratio > 0.0:
+            roi_area   = roi[2] * roi[3]
+            frame_area = frame_w * frame_h
+            if frame_area > 0 and (roi_area / frame_area) < cfg.min_roi_area_ratio:
+                roi = None   # ROI too small to survive resize — discard
+        # ── End Priority 4 ────────────────────────────────────────────────────
+
+        # ── PRIORITY 7 — Minimum Useful Size After Resize ─────────────────────
+        if roi is not None and cfg.min_subject_dmd_px > 0:
+            # We must estimate how many pixels this ROI will occupy in the final
+            # out_w × out_h frame.  The camera crop will be `_cam_frame_w` wide,
+            # and that crop is resized to `out_w`.
+            # Ratio of output width to crop width:
+            _dmd_scale = out_w / float(_cam_frame_w)
+            dmd_w = roi[2] * _dmd_scale
+            dmd_h = roi[3] * _dmd_scale
+            if dmd_w < cfg.min_subject_dmd_px and dmd_h < cfg.min_subject_dmd_px:
+                roi = None
+        # ── End Priority 7 ────────────────────────────────────────────────────
 
         # Update floor estimate (asymmetric EMA) and forward it to the camera.
         floor_y_est: Optional[float] = None
@@ -1344,10 +1676,88 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             roi_bottom = float(roi[1] + roi[3]) if roi is not None else None
             floor_y_est = _floor_est.update(roi_bottom)
 
-        cam_now = _build_camera_rect(frame_w, _cam_frame_h, roi, cfg,
-                                     floor_y_est=floor_y_est,
-                                     frame_top=_cam_frame_top)
+        # ── PRIORITY 2 — Temporal Scene Memory ────────────────────────────────
+        # Push current live detection into the sliding window, then synthesise a
+        # weighted-average ROI when live detection is temporarily absent.
+        if _roi_history_enabled:
+            if roi is not None:
+                # Append with weight=1.0 (most-recent end of the deque).
+                _roi_history.append((1.0, roi))
+                # Evict oldest entries beyond the time window.
+                while len(_roi_history) > _roi_history_max_len:
+                    _roi_history.popleft()
+            elif _roi_history:
+                # No live detection — synthesise from history.
+                # Weights increase linearly from oldest (idx=0) to newest (idx=N-1).
+                n = len(_roi_history)
+                total_w = 0.0
+                wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
+                for idx, (_, hr) in enumerate(_roi_history):
+                    w = float(idx + 1)  # linear ramp: 1, 2, …, n
+                    total_w += w
+                    wx += w * hr[0]
+                    wy += w * hr[1]
+                    ww += w * hr[2]
+                    wh += w * hr[3]
+                if total_w > 0:
+                    roi = (
+                        int(wx / total_w),
+                        int(wy / total_w),
+                        int(ww / total_w),
+                        int(wh / total_w),
+                    )
+        # ── End Priority 2 ────────────────────────────────────────────────────
+
+        cam_now_proposed = _build_camera_rect(frame_w, _cam_frame_h, roi, cfg,
+                                              floor_y_est=floor_y_est,
+                                              frame_top=_cam_frame_top)
+
+        # --- DMD Visibility Score Logic (PRIORITY 1) ---
+        if cfg.dmd_visibility_score_enabled:
+            # 1. Simulate current view (cam_prev) DMD output and score
+            cropped_prev = _crop_frame(frame, cam_prev)
+            dmd_prev_frame = cv2.resize(cropped_prev, (cfg.target_width, cfg.target_height),
+                                        interpolation=cv2.INTER_LANCZOS4)
+            score_prev = _calculate_dmd_visibility_score(dmd_prev_frame)
+
+            # 2. Simulate proposed view (cam_now_proposed) DMD output and score
+            cropped_proposed = _crop_frame(frame, cam_now_proposed)
+            dmd_proposed_frame = cv2.resize(cropped_proposed, (cfg.target_width, cfg.target_height),
+                                            interpolation=cv2.INTER_LANCZOS4)
+            score_proposed = _calculate_dmd_visibility_score(dmd_proposed_frame)
+
+            # 3. Compare scores and adjust cam_now if proposed is worse
+            # Using a threshold (e.g., 5% reduction) to avoid micro-oscillations
+            if score_proposed < score_prev * 0.95:
+                # Revert to previous camera position if proposed zoom significantly reduces visibility
+                cam_now = cam_prev
+            else:
+                cam_now = cam_now_proposed
+        else:
+            cam_now = cam_now_proposed
+        # --- End DMD Visibility Score Logic ---
+
         cam = _smooth(cam_prev, cam_now, cfg.smoothness)
+
+        # ── PRIORITY 5 — Directional Look-Ahead ──────────────────────────────
+        # Compute current ROI centre (use live ROI when available, else None).
+        _curr_roi_cx: Optional[float] = None
+        _curr_roi_cy: Optional[float] = None
+        if roi is not None:
+            _curr_roi_cx = float(roi[0] + roi[2] / 2.0)
+            _curr_roi_cy = float(roi[1] + roi[3] / 2.0)
+        if cfg.look_ahead_enabled and cfg.look_ahead_factor > 0.0:
+            cam = _apply_look_ahead(
+                cam,
+                _prev_roi_cx, _curr_roi_cx,
+                _prev_roi_cy, _curr_roi_cy,
+                frame_w, frame_h,
+                cfg.look_ahead_factor,
+            )
+        _prev_roi_cx = _curr_roi_cx
+        _prev_roi_cy = _curr_roi_cy
+        # ── End Priority 5 ────────────────────────────────────────────────────
+
         cam_prev = cam
         last_frame = frame
 
@@ -1420,25 +1830,19 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
                 _stderr_hint = " | ffmpeg: " + _se[-300:]
         except Exception:
             pass
-        return False, None, f"FFmpeg pipe encoding failed during action preprocessing.{_stderr_hint}"
-
-    tail_info  = f" +{extra}t"     if extra > 0       else ""
-    intro_info = f" +{intro_frames}i" if intro_frames > 0 else ""
-    crop_info  = ""
-    if _tcp > 0.0 or _bcp > 0.0:
-        auto_suffix_t = "▲auto" if _auto_tc else "▲manual"
-        auto_suffix_b = "▼auto" if _auto_bc else "▼manual"
-        face_info = " [face priority 👤]" if _face_priority_mode else ""
-        crop_info = (
-            f", top={_tcp:.0%}{auto_suffix_t}"
-            f" bot={_bcp:.0%}{auto_suffix_b}{face_info}"
-        )
-    onnx_tag = " [ONNX]" if detector._onnx_session is not None else " [motion]"
-    smart_tag = ""
-    if getattr(cfg, "smart_auto_crop", False) and _smart_reasons:
-        smart_tag = " [smart:" + " / ".join(_smart_reasons) + "]"
+    # ── Build summary message ─────────────────────────────────────────────────
+    intro_info  = f", intro={cfg.intro_duration:.1f}s" if intro_frames > 0 else ""
+    tail_info   = ""   # tail extension is silent (≤ 0.3 s, not user-visible)
+    onnx_tag    = " [onnx]" if getattr(detector, "model_type", "") == "onnx" else ""
+    _crops      = []
+    if cfg.auto_bottom_crop or cfg.bottom_crop_pct > 0:
+        _crops.append(f"bot={cfg.bottom_crop_pct:.0%}")
+    if cfg.auto_top_crop or cfg.top_crop_pct > 0:
+        _crops.append(f"top={cfg.top_crop_pct:.0%}")
+    crop_info   = (" crop=" + "+".join(_crops)) if _crops else ""
+    smart_tag   = " smart" if (cfg.smart_auto_crop or cfg.roi_confidence_min > 0 or cfg.min_subject_dmd_px > 0) else ""
+    plat_tag    = " plat" if cfg.platformer_mode else ""
     return True, out_path, (
         f"Auto action OK ({frame_idx} frames{intro_info}{tail_info}, "
-        f"{out_w}×{out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag})."
+        f"{out_w}×{out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag}{plat_tag})."
     )
-

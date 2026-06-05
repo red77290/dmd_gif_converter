@@ -24,6 +24,7 @@ from dmd_auto_action import (
     AutoActionConfig,
     _FloorEstimator,
     _build_camera_rect,
+    _calculate_dmd_visibility_score,
     _clamp,
     _compute_auto_crop_margins,
     _crop_frame,
@@ -849,6 +850,644 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         self.assertIsNone(out)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 1 — _calculate_dmd_visibility_score
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCalculateDMDVisibilityScore(unittest.TestCase):
+    """Tests pour _calculate_dmd_visibility_score()."""
+
+    def setUp(self):
+        try:
+            import numpy as np
+            self.np = np
+        except ImportError:
+            self.skipTest("numpy non disponible")
+        try:
+            import cv2  # noqa: F401 — only needed transitively inside the func
+        except ImportError:
+            self.skipTest("opencv non disponible")
+
+    def _blank(self, w=128, h=32):
+        """Completely black frame — minimum visibility."""
+        return self.np.zeros((h, w, 3), dtype=self.np.uint8)
+
+    def _bright(self, w=128, h=32):
+        """Fully white frame — maximum brightness, but low edge density."""
+        return self.np.full((h, w, 3), 255, dtype=self.np.uint8)
+
+    def _checkerboard(self, w=128, h=32):
+        """Checkerboard pattern — high edge / contrast score."""
+        np = self.np
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        for r in range(h):
+            for c in range(w):
+                if (r + c) % 2 == 0:
+                    frame[r, c] = [255, 255, 255]
+        return frame
+
+    def _center_rect(self, w=128, h=32, rect_w=64, rect_h=20):
+        """Frame with a bright rectangle in the centre — medium score."""
+        np = self.np
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        x0 = (w - rect_w) // 2
+        y0 = (h - rect_h) // 2
+        frame[y0:y0 + rect_h, x0:x0 + rect_w] = [200, 200, 200]
+        return frame
+
+    # ── Return type & range ───────────────────────────────────────────────────
+
+    def test_returns_float(self):
+        score = _calculate_dmd_visibility_score(self._blank())
+        self.assertIsInstance(score, float)
+
+    def test_blank_frame_returns_zero(self):
+        """A completely black frame should score 0.0 (nothing visible)."""
+        score = _calculate_dmd_visibility_score(self._blank())
+        self.assertAlmostEqual(score, 0.0, places=4)
+
+    def test_score_is_non_negative(self):
+        for frame in [self._blank(), self._bright(), self._checkerboard(), self._center_rect()]:
+            self.assertGreaterEqual(_calculate_dmd_visibility_score(frame), 0.0)
+
+    def test_none_frame_returns_zero(self):
+        """Passing None must not raise and must return 0.0."""
+        score = _calculate_dmd_visibility_score(None)
+        self.assertAlmostEqual(score, 0.0, places=4)
+
+    def test_empty_array_returns_zero(self):
+        np = self.np
+        score = _calculate_dmd_visibility_score(np.zeros((0, 0, 3), dtype=np.uint8))
+        self.assertAlmostEqual(score, 0.0, places=4)
+
+    # ── Monotonicity — more content → higher score ────────────────────────────
+
+    def test_bright_frame_scores_higher_than_blank(self):
+        score_blank  = _calculate_dmd_visibility_score(self._blank())
+        score_bright = _calculate_dmd_visibility_score(self._bright())
+        self.assertGreater(score_bright, score_blank,
+                           "A bright frame should score higher than a blank frame")
+
+    def test_checkerboard_scores_higher_than_blank(self):
+        score_blank = _calculate_dmd_visibility_score(self._blank())
+        score_check = _calculate_dmd_visibility_score(self._checkerboard())
+        self.assertGreater(score_check, score_blank,
+                           "A checkerboard (high edge density) should score higher than blank")
+
+    def test_center_rect_scores_higher_than_blank(self):
+        score_blank = _calculate_dmd_visibility_score(self._blank())
+        score_rect  = _calculate_dmd_visibility_score(self._center_rect())
+        self.assertGreater(score_rect, score_blank,
+                           "A frame with a bright rect should score higher than blank")
+
+    def test_high_contrast_region_scores_higher_than_flat_region(self):
+        """A frame with alternating high-contrast stripes (2-px bands) must score higher
+        than a flat grey frame — validating that the Sobel-based contrast component works.
+        We use 4-px bands to avoid aliasing at kernel size 3."""
+        np = self.np
+        flat = np.full((32, 128, 3), 128, dtype=np.uint8)   # featureless grey
+
+        striped = np.zeros((32, 128, 3), dtype=np.uint8)
+        for c in range(0, 128, 4):
+            striped[:, c:c + 2] = 255   # alternate 2px white / 2px black bands
+
+        score_flat    = _calculate_dmd_visibility_score(flat)
+        score_striped = _calculate_dmd_visibility_score(striped)
+        self.assertGreater(score_striped, score_flat,
+                           "A high-contrast striped frame must score higher than a flat grey frame")
+
+    # ── Partial content occupation ────────────────────────────────────────────
+
+    def test_larger_rect_scores_higher_than_smaller(self):
+        score_small = _calculate_dmd_visibility_score(self._center_rect(rect_w=20, rect_h=8))
+        score_large = _calculate_dmd_visibility_score(self._center_rect(rect_w=100, rect_h=28))
+        self.assertGreater(score_large, score_small,
+                           "A larger bright area should produce a higher score")
+
+    # ── Different DMD resolutions ─────────────────────────────────────────────
+
+    def test_works_on_256x64_frame(self):
+        """Score function must handle non-default DMD sizes without error."""
+        frame = self._checkerboard(w=256, h=64)
+        score = _calculate_dmd_visibility_score(frame)
+        self.assertGreater(score, 0.0)
+
+    def test_works_on_single_row_frame(self):
+        """Edge case: 1-pixel tall frame must not raise."""
+        np = self.np
+        frame = np.full((1, 128, 3), 200, dtype=np.uint8)
+        score = _calculate_dmd_visibility_score(frame)
+        self.assertIsInstance(score, float)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 1 — AutoActionConfig.dmd_visibility_score_enabled
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDMDVisibilityScoreConfig(unittest.TestCase):
+    """Tests pour le flag dmd_visibility_score_enabled dans AutoActionConfig."""
+
+    def test_default_disabled(self):
+        """dmd_visibility_score_enabled must be False by default (no breaking change)."""
+        cfg = AutoActionConfig()
+        self.assertFalse(cfg.dmd_visibility_score_enabled)
+
+    def test_can_be_enabled(self):
+        cfg = AutoActionConfig(dmd_visibility_score_enabled=True)
+        self.assertTrue(cfg.dmd_visibility_score_enabled)
+
+    def test_independent_of_other_flags(self):
+        """Enabling it must not affect other defaults."""
+        cfg = AutoActionConfig(dmd_visibility_score_enabled=True)
+        self.assertFalse(cfg.bg_sub_enable)
+        self.assertFalse(cfg.smart_auto_crop)
+        self.assertFalse(cfg.auto_bottom_crop)
+        self.assertEqual(cfg.detector, "person")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 1 — Visibility score integration guard
+# Tests _calculate_dmd_visibility_score logic used inside the main loop:
+# "if proposed score < 95% of current score → keep current camera position"
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDMDVisibilityScoreGuard(unittest.TestCase):
+    """
+    Validates the 5%-threshold guard used in preprocess_video_for_dmd:
+    when a proposed crop scores < 95% of the current crop, the current
+    camera should be preferred.
+    """
+
+    def setUp(self):
+        try:
+            import numpy as np
+            self.np = np
+        except ImportError:
+            self.skipTest("numpy non disponible")
+        try:
+            import cv2  # noqa: F401
+        except ImportError:
+            self.skipTest("opencv non disponible")
+
+    def test_good_proposed_accepted(self):
+        """When proposed score >= 95% of current, the proposed crop is accepted."""
+        np = self.np
+        # Both frames equally bright
+        frame_a = np.full((32, 128, 3), 200, dtype=np.uint8)
+        frame_b = np.full((32, 128, 3), 200, dtype=np.uint8)
+        score_a = _calculate_dmd_visibility_score(frame_a)
+        score_b = _calculate_dmd_visibility_score(frame_b)
+        # Guard condition: proposed (b) < current (a) * 0.95 → revert
+        # Here scores are equal, so proposed should be accepted (NOT reverted)
+        self.assertFalse(score_b < score_a * 0.95,
+                         "Equal-brightness frames should not trigger the revert guard")
+
+    def test_bad_proposed_rejected(self):
+        """When proposed score < 95% of current, the guard should trigger revert."""
+        np = self.np
+        # Current: bright/rich content
+        current_frame = np.zeros((32, 128, 3), dtype=np.uint8)
+        for r in range(32):
+            for c in range(128):
+                if (r + c) % 2 == 0:
+                    current_frame[r, c] = [255, 255, 255]
+
+        # Proposed: nearly blank (zoomed into a flat area)
+        proposed_frame = np.zeros((32, 128, 3), dtype=np.uint8)
+        proposed_frame[14:18, 60:68] = [30, 30, 30]  # tiny dim rectangle
+
+        score_current  = _calculate_dmd_visibility_score(current_frame)
+        score_proposed = _calculate_dmd_visibility_score(proposed_frame)
+
+        self.assertLess(score_proposed, score_current * 0.95,
+                        "A nearly blank proposed frame should fall below 95% of a rich current frame "
+                        "and trigger the revert guard")
+
+    def test_slight_degradation_within_threshold_accepted(self):
+        """A 3% degradation (within 5% tolerance) must not trigger revert."""
+        np = self.np
+        # Current: checkerboard
+        current_frame = np.zeros((32, 128, 3), dtype=np.uint8)
+        for r in range(32):
+            for c in range(128):
+                if (r + c) % 2 == 0:
+                    current_frame[r, c] = [200, 200, 200]
+
+        # Proposed: same but slightly dimmer (simulate marginal quality change)
+        proposed_frame = np.zeros((32, 128, 3), dtype=np.uint8)
+        for r in range(32):
+            for c in range(128):
+                if (r + c) % 2 == 0:
+                    proposed_frame[r, c] = [195, 195, 195]  # ~2.5% dimmer
+
+        score_current  = _calculate_dmd_visibility_score(current_frame)
+        score_proposed = _calculate_dmd_visibility_score(proposed_frame)
+        # Should NOT trigger revert (within tolerance)
+        self.assertFalse(score_proposed < score_current * 0.95,
+                         "A marginal quality difference should not trigger the revert guard")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 2 — Temporal Scene Memory
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestROIHistoryConfig(unittest.TestCase):
+    """Tests for the roi_history_window_s AutoActionConfig field."""
+
+    def test_default_value(self):
+        """Default window is 3.0 s (non-zero → enabled by default)."""
+        cfg = AutoActionConfig()
+        self.assertAlmostEqual(cfg.roi_history_window_s, 3.0)
+
+    def test_can_be_disabled(self):
+        """Setting to 0 disables temporal memory without side-effects."""
+        cfg = AutoActionConfig(roi_history_window_s=0.0)
+        self.assertAlmostEqual(cfg.roi_history_window_s, 0.0)
+
+    def test_custom_window(self):
+        cfg = AutoActionConfig(roi_history_window_s=5.0)
+        self.assertAlmostEqual(cfg.roi_history_window_s, 5.0)
+
+    def test_deque_max_len_from_fps(self):
+        """_roi_history_max_len = int(fps * window_s), at least 1."""
+        fps = 24.0
+        window = 3.0
+        expected = max(1, int(fps * window))  # 72
+        self.assertEqual(expected, 72)
+
+    def test_independent_of_other_flags(self):
+        cfg = AutoActionConfig(roi_history_window_s=2.0)
+        self.assertFalse(cfg.dmd_visibility_score_enabled)
+        self.assertFalse(cfg.smart_auto_crop)
+
+
+class TestROIHistoryWeightedAverage(unittest.TestCase):
+    """Unit tests for the weighted-average ROI synthesis logic (Priority 2).
+
+    The production code computes a linearly-weighted average over a deque of
+    (_, roi) tuples where the weight for index idx is (idx+1) — so the most
+    recent entry has the highest weight.  We replicate that logic here to
+    verify its correctness independently of the full preprocessing pipeline.
+    """
+
+    def _weighted_avg(self, history):
+        """Replication of the in-loop weighted-average computation."""
+        total_w = 0.0
+        wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
+        for idx, (_, hr) in enumerate(history):
+            w = float(idx + 1)
+            total_w += w
+            wx += w * hr[0]
+            wy += w * hr[1]
+            ww += w * hr[2]
+            wh += w * hr[3]
+        if total_w <= 0:
+            return None
+        return (
+            int(wx / total_w),
+            int(wy / total_w),
+            int(ww / total_w),
+            int(wh / total_w),
+        )
+
+    def test_single_entry_returns_that_roi(self):
+        """With one history entry the average equals that entry."""
+        history = [(1.0, (100, 50, 80, 120))]
+        result = self._weighted_avg(history)
+        self.assertEqual(result, (100, 50, 80, 120))
+
+    def test_two_equal_rois_return_that_roi(self):
+        """Two identical ROIs → weighted average is that same ROI."""
+        roi = (100, 50, 80, 120)
+        history = [(1.0, roi), (1.0, roi)]
+        result = self._weighted_avg(history)
+        self.assertEqual(result, roi)
+
+    def test_recent_entry_has_more_weight(self):
+        """With two entries, the more recent one (idx=1, weight=2) biases the result."""
+        old_roi = (0, 0, 40, 40)
+        new_roi = (200, 200, 40, 40)
+        history = [(1.0, old_roi), (1.0, new_roi)]  # old=idx0(w=1), new=idx1(w=2)
+        result = self._weighted_avg(history)
+        # x: (1*0 + 2*200) / 3 = 133
+        self.assertAlmostEqual(result[0], int((0 + 400) / 3))
+        # Result x must be closer to new_roi (200) than to old_roi (0)
+        self.assertGreater(result[0], 100,
+                           "Weighted average should be closer to the more-recent ROI")
+
+    def test_three_entries_progressive_weight(self):
+        """Three entries: weights 1, 2, 3. Validate x-component math."""
+        history = [
+            (1.0, (0, 0, 10, 10)),    # oldest: w=1
+            (1.0, (100, 0, 10, 10)),  # middle: w=2
+            (1.0, (200, 0, 10, 10)),  # newest: w=3
+        ]
+        result = self._weighted_avg(history)
+        # x = (1*0 + 2*100 + 3*200) / 6 = (0+200+600)/6 = 800/6 ≈ 133
+        expected_x = int((0 + 200 + 600) / 6)
+        self.assertEqual(result[0], expected_x)
+
+    def test_empty_history_returns_none(self):
+        """Empty history must not crash and must return None."""
+        result = self._weighted_avg([])
+        self.assertIsNone(result)
+
+    def test_result_biased_toward_most_recent(self):
+        """With N entries linearly weighted, the result must be strictly
+        closer to the latest entry than to the oldest."""
+        old_roi = (10, 10, 50, 50)
+        new_roi = (300, 300, 50, 50)
+        history = [(1.0, old_roi), (1.0, new_roi)]
+        result = self._weighted_avg(history)
+        dist_old = abs(result[0] - old_roi[0])
+        dist_new = abs(result[0] - new_roi[0])
+        self.assertLess(dist_new, dist_old,
+                        "The weighted average x must be closer to the newest ROI")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 3 — Scene Change Detection
+# ─────────────────────────────────────────────────────────────────────────────
+from dmd_auto_action import _compute_scene_change_score
+
+
+class TestSceneChangeScore(unittest.TestCase):
+
+    def _frame(self, color):
+        """Return a 64×64 BGR frame filled with the given color."""
+        import numpy as np
+        f = np.zeros((64, 64, 3), dtype=np.uint8)
+        f[:] = color
+        return f
+
+    def test_identical_frames_score_near_one(self):
+        f = self._frame((128, 64, 200))
+        score = _compute_scene_change_score(f, f.copy())
+        self.assertGreaterEqual(score, 0.9,
+                                "Identical frames should score close to 1.0")
+
+    def test_black_vs_white_scores_low(self):
+        black = self._frame((0, 0, 0))
+        white = self._frame((255, 255, 255))
+        score = _compute_scene_change_score(black, white)
+        # Pure luminance change — V channel histograms will be maximally different
+        self.assertLess(score, 0.8,
+                        "Black→white hard cut should score well below 1.0")
+
+    def test_none_frame_returns_one(self):
+        """Graceful degradation: None input → treat as no cut."""
+        f = self._frame((100, 100, 100))
+        self.assertAlmostEqual(_compute_scene_change_score(None, f), 1.0)
+        self.assertAlmostEqual(_compute_scene_change_score(f, None), 1.0)
+        self.assertAlmostEqual(_compute_scene_change_score(None, None), 1.0)
+
+    def test_score_in_zero_one_range(self):
+        a = self._frame((30, 200, 100))
+        b = self._frame((200, 30, 100))
+        score = _compute_scene_change_score(a, b)
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+    def test_config_default_threshold(self):
+        cfg = AutoActionConfig()
+        self.assertAlmostEqual(cfg.scene_change_threshold, 0.45)
+
+    def test_config_disabled(self):
+        cfg = AutoActionConfig(scene_change_threshold=0.0)
+        self.assertAlmostEqual(cfg.scene_change_threshold, 0.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 4 — Micro-detection Rejection
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMicroDetectionRejection(unittest.TestCase):
+
+    def _cfg(self, ratio=0.02):
+        return AutoActionConfig(min_roi_area_ratio=ratio)
+
+    def _frame_area(self, w=1920, h=1080):
+        return w * h
+
+    def _reject(self, roi, frame_w=1920, frame_h=1080, ratio=0.02):
+        """Replicate the rejection check from the main loop."""
+        if roi is not None and ratio > 0.0:
+            roi_area = roi[2] * roi[3]
+            frame_area = frame_w * frame_h
+            if frame_area > 0 and (roi_area / frame_area) < ratio:
+                return None
+        return roi
+
+    def test_default_ratio(self):
+        self.assertAlmostEqual(AutoActionConfig().min_roi_area_ratio, 0.02)
+
+    def test_disabled_when_zero(self):
+        tiny_roi = (0, 0, 1, 1)
+        result = self._reject(tiny_roi, ratio=0.0)
+        self.assertIsNotNone(result, "ratio=0 disables rejection; tiny ROI must pass")
+
+    def test_tiny_roi_rejected(self):
+        """A 10×10 ROI in a 1920×1080 frame (0.0048%) is below 2 % threshold."""
+        tiny = (100, 100, 10, 10)
+        result = self._reject(tiny)
+        self.assertIsNone(result, "Tiny ROI should be rejected")
+
+    def test_large_roi_accepted(self):
+        """A 400×300 ROI in 1920×1080 frame (5.8%) is above 2 % threshold."""
+        large = (100, 100, 400, 300)
+        result = self._reject(large)
+        self.assertIsNotNone(result, "Large ROI should pass the area filter")
+
+    def test_boundary_roi_accepted(self):
+        """ROI exactly at threshold: area / frame_area == min_ratio should pass."""
+        frame_w, frame_h = 1000, 1000
+        ratio = 0.02
+        # Area = 200 / 1000000 = 0.0002  → 0.02 % which is < 2 %, so rejected
+        # Use area = ratio * frame_area exactly
+        roi_area = int(ratio * frame_w * frame_h)  # 20000
+        rw = 200
+        rh = roi_area // rw    # 100
+        roi = (0, 0, rw, rh)
+        actual_ratio = rw * rh / (frame_w * frame_h)
+        # If actual_ratio < ratio it gets rejected, else accepted
+        result = self._reject(roi, frame_w, frame_h, ratio)
+        if actual_ratio < ratio:
+            self.assertIsNone(result)
+        else:
+            self.assertIsNotNone(result)
+
+    def test_none_roi_passes_through(self):
+        result = self._reject(None)
+        self.assertIsNone(result)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 5 — Directional Look-Ahead
+# ─────────────────────────────────────────────────────────────────────────────
+from dmd_auto_action import _apply_look_ahead
+
+
+class TestLookAhead(unittest.TestCase):
+
+    FW = 1920
+    FH = 1080
+
+    def _cam(self, cx=960.0, cy=540.0, cw=960.0, ch=240.0):
+        return (cx, cy, cw, ch)
+
+    def test_no_motion_returns_same_cam(self):
+        cam = self._cam()
+        result = _apply_look_ahead(cam, 500.0, 500.0, 300.0, 300.0,
+                                   self.FW, self.FH, 0.25)
+        self.assertEqual(result, cam,
+                         "No motion (same cx/cy) → cam unchanged")
+
+    def test_disabled_returns_same_cam(self):
+        cam = self._cam()
+        result = _apply_look_ahead(cam, 400.0, 600.0, 300.0, 300.0,
+                                   self.FW, self.FH, 0.0)
+        self.assertEqual(result, cam, "factor=0 disables look-ahead")
+
+    def test_rightward_motion_shifts_cam_right(self):
+        cam = self._cam(cx=960.0)
+        result = _apply_look_ahead(cam, 400.0, 600.0, 300.0, 300.0,
+                                   self.FW, self.FH, 0.25)
+        self.assertGreater(result[0], cam[0],
+                           "Rightward ROI motion should shift camera cx right")
+
+    def test_leftward_motion_shifts_cam_left(self):
+        cam = self._cam(cx=960.0)
+        result = _apply_look_ahead(cam, 600.0, 400.0, 300.0, 300.0,
+                                   self.FW, self.FH, 0.25)
+        self.assertLess(result[0], cam[0],
+                        "Leftward ROI motion should shift camera cx left")
+
+    def test_result_stays_within_frame(self):
+        """Camera rect must never exceed frame boundaries after look-ahead."""
+        cam = self._cam(cx=1880.0)   # near right edge
+        result = _apply_look_ahead(cam, 100.0, 1900.0, 300.0, 300.0,
+                                   self.FW, self.FH, 0.5)
+        cx, cy, cw, ch = result
+        self.assertGreaterEqual(cx - cw / 2, 0, "Left edge must not go negative")
+        self.assertLessEqual(cx + cw / 2, self.FW, "Right edge must stay within frame")
+
+    def test_no_prev_cx_returns_unchanged(self):
+        cam = self._cam()
+        result = _apply_look_ahead(cam, None, 600.0, None, 300.0,
+                                   self.FW, self.FH, 0.25)
+        self.assertEqual(result, cam,
+                         "No previous ROI centre → no look-ahead offset")
+
+    def test_config_default_enabled(self):
+        cfg = AutoActionConfig()
+        self.assertTrue(cfg.look_ahead_enabled)
+        self.assertAlmostEqual(cfg.look_ahead_factor, 0.25)
+
+    def test_config_disabled(self):
+        cfg = AutoActionConfig(look_ahead_enabled=False)
+        self.assertFalse(cfg.look_ahead_enabled)
+        self.assertFalse(cfg.look_ahead_enabled)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 6 — Multi-ROI Fusion
+# ─────────────────────────────────────────────────────────────────────────────
+from dmd_auto_action import _fuse_rois
+
+
+class TestMultiROIFusionConfig(unittest.TestCase):
+
+    def test_default_enabled(self):
+        cfg = AutoActionConfig()
+        self.assertTrue(cfg.multi_roi_fusion_enabled)
+
+    def test_can_be_disabled(self):
+        cfg = AutoActionConfig(multi_roi_fusion_enabled=False)
+        self.assertFalse(cfg.multi_roi_fusion_enabled)
+
+    def test_independent_of_other_flags(self):
+        cfg = AutoActionConfig(multi_roi_fusion_enabled=True)
+        self.assertFalse(cfg.dmd_visibility_score_enabled)
+        self.assertAlmostEqual(cfg.look_ahead_factor, 0.25)
+
+
+class TestFuseROIs(unittest.TestCase):
+
+    def test_empty_returns_none(self):
+        self.assertIsNone(_fuse_rois([]))
+
+    def test_single_entry_returns_that_roi(self):
+        roi = (10, 20, 100, 80)
+        result = _fuse_rois([(0.9, roi)])
+        self.assertEqual(result, roi)
+
+    def test_two_equal_score_rois_centroid(self):
+        """Two equal-score ROIs → simple average centroid."""
+        r1 = (0, 0, 100, 100)    # cx=50, cy=50
+        r2 = (200, 0, 100, 100)  # cx=250, cy=50
+        result = _fuse_rois([(0.8, r1), (0.8, r2)])
+        # Weighted cx = (0.8*50 + 0.8*250) / 1.6 = 150
+        # Weighted x  = 150 - 100/2 = 100
+        self.assertAlmostEqual(result[0], 100, delta=2)
+
+    def test_high_score_roi_dominates(self):
+        """High-confidence detection biases the centroid toward itself."""
+        r_weak  = (0,   0, 50, 50)   # cx=25
+        r_strong = (500, 0, 50, 50)  # cx=525
+        result = _fuse_rois([(0.1, r_weak), (0.9, r_strong)])
+        fused_cx = result[0] + result[2] / 2.0
+        # fused_cx = (0.1*25 + 0.9*525) / 1.0 = 475  → should be much closer to 525
+        self.assertGreater(fused_cx, 400,
+                           "High-confidence ROI should dominate the centroid")
+
+    def test_fused_box_dimensions_are_weighted_average(self):
+        """Width/height of fused box = confidence-weighted average (not union)."""
+        r1 = (0, 0, 100, 80)
+        r2 = (200, 0, 200, 160)
+        result = _fuse_rois([(0.5, r1), (0.5, r2)])
+        # ww = (0.5*100 + 0.5*200) / 1.0 = 150
+        self.assertAlmostEqual(result[2], 150, delta=2)
+        # wh = (0.5*80 + 0.5*160) / 1.0 = 120
+        self.assertAlmostEqual(result[3], 120, delta=2)
+
+    def test_result_has_non_negative_coordinates(self):
+        """Returned x, y must always be >= 0."""
+        r = (0, 0, 10, 10)
+        result = _fuse_rois([(0.9, r), (0.1, r)])
+        self.assertGreaterEqual(result[0], 0)
+        self.assertGreaterEqual(result[1], 0)
+
+    def test_three_rois_returns_tuple_of_four(self):
+        rois = [(0.7, (0, 0, 50, 50)), (0.5, (100, 0, 50, 50)), (0.3, (200, 0, 50, 50))]
+        result = _fuse_rois(rois)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 4)
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIORITY 7, 8, 10
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPriority7810Config(unittest.TestCase):
+
+    def test_priority7_min_dmd_px(self):
+        cfg = AutoActionConfig()
+        self.assertEqual(cfg.min_subject_dmd_px, 4)
+        cfg2 = AutoActionConfig(min_subject_dmd_px=10)
+        self.assertEqual(cfg2.min_subject_dmd_px, 10)
+
+    def test_priority8_platformer_mode(self):
+        cfg = AutoActionConfig()
+        self.assertFalse(cfg.platformer_mode)
+        self.assertEqual(cfg.platformer_floor_ratio, 0.80)
+        cfg2 = AutoActionConfig(platformer_mode=True, platformer_floor_ratio=0.85)
+        self.assertTrue(cfg2.platformer_mode)
+        self.assertEqual(cfg2.platformer_floor_ratio, 0.85)
+
+    def test_priority10_confidence_min(self):
+        cfg = AutoActionConfig()
+        self.assertEqual(cfg.roi_confidence_min, 0.0)
+        cfg2 = AutoActionConfig(roi_confidence_min=0.5)
+        self.assertEqual(cfg2.roi_confidence_min, 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()
-

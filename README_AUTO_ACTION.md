@@ -3,6 +3,17 @@
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
 
+**v3.4.0 engine improvements:**
+- **DMD Visibility Score** *(Priority 1)*: Before committing to any zoom, the engine simulates both the current crop and the proposed crop at target DMD resolution and computes a composite visibility score. If the proposed zoom scores less than 95% of the current view the zoom is cancelled — preventing counterproductive crops that make the subject invisible on low-resolution LED matrices.
+- **Temporal Scene Memory** *(Priority 2)*: A sliding window (default 3 s) of past ROI detections is kept. When YOLO loses the subject for a few frames the camera continues following the estimated trajectory (weighted average biased toward the most-recent detections) instead of jumping back to centre.
+- **Scene Change Detection** *(Priority 3)*: HSV histogram correlation detects hard cuts between frames. On cut: ROI history, floor estimator, and camera smoothing are all reset so stale tracking from the previous scene never bleeds into the new scene.
+- **Micro-detection Rejection** *(Priority 4)*: ROIs whose area is below 2% of the source frame area are silently discarded. Prevents zooming onto subjects too small to be visible after resize to DMD resolution.
+- **Directional Look-Ahead** *(Priority 5)*: When the detected subject moves consistently in one direction, the camera is offset by 25% of the crop half-width in that direction, giving the subject natural leading space on the DMD strip.
+- **Multi-ROI Fusion** *(Priority 6)*: When multiple persons are detected in a frame, their bounding boxes are fused into a single confidence-weighted centroid box. Prevents the camera from snap-locking onto a single high-confidence subject while ignoring the rest of the action.
+- **Minimum Useful Size After Resize** *(Priority 7)*: Intercepts and cancels aggressive zooms that would cause the detected subject to shrink below a configured minimum size (e.g. 4 px) in the final DMD output space.
+- **Smart Platformer Mode** *(Priority 8)*: Special mode for 2-D side-scrollers. Locks the camera vertically to a steady floor level (using the asymmetric EMA estimator) and widens the horizontal view by 50% to reveal more level ahead.
+- **ROI Confidence System** *(Priority 10)*: Replaces hardcoded YOLO thresholds with a configurable minimum. Weak/flickering detections are explicitly rejected, forcing the temporal memory system to rely on smoothed trajectory data instead of twitching.
+
 **v3.3.0 improvements:**
 - **GIF pre-conversion**: GIF sources are now transcoded to a clean H.264 MP4 via FFmpeg before OpenCV processing — eliminates `FFmpeg pipe encoding failed` errors caused by BGRA transparency palettes in GIF files.
 - **BGRA safety net**: OpenCV frames are normalised to BGR (3-channel) before being piped to FFmpeg, even if the GIF pre-conversion fallback path is taken.
@@ -158,6 +169,240 @@ The three-group architecture ensures only one coherent strategy is activated per
 
 - All 3 individual toggles and sliders are fully interactive
 - The user activates each option manually as before
+
+---
+
+---
+
+## 🔬 DMD Visibility Score *(v3.4.0 — Priority 1)*
+
+### Problem
+
+The framing engine may zoom onto a detected ROI that becomes **invisible after the resize to DMD resolution** (e.g. 128×32). A character that is 300 px on screen becomes 6 px on the LED matrix — indistinguishable from noise.
+
+### Solution
+
+Before committing to a proposed camera position, the engine:
+
+1. **Simulates the current crop** → resizes to `target_width × target_height`.
+2. **Simulates the proposed crop** → resizes to `target_width × target_height`.
+3. **Scores both** using a composite metric.
+4. If `score_proposed < score_current × 0.95` → **cancel the zoom, keep the current position**.
+
+### Visibility score — composite metrics
+
+| Metric | Weight | What it measures |
+|--------|--------|-----------------|
+| Non-black pixel ratio | 30 % | How much of the DMD frame has any content |
+| Mean Sobel gradient (local contrast) | 40 % | Edge sharpness after resize — low = blurry/flat |
+| Contour density | 20 % | Number of distinct object boundaries |
+| Horizontal + vertical occupation | 10 % | How much of the DMD strip the subject fills |
+
+The **5 % tolerance** (`0.95` threshold) absorbs natural frame-to-frame micro-variations and ensures the guard only fires on meaningful quality drops.
+
+### Enabling
+
+| Interface | How |
+|-----------|-----|
+| UI | **📐 Crop & Vertical Bias → Enable DMD Visibility Score** checkbox |
+| CLI | not yet exposed (use `AutoActionConfig(dmd_visibility_score_enabled=True)`) |
+| Config file | `"dmd_visibility_score_enabled": true` |
+
+> **Default: OFF** — zero behaviour change for existing configurations.
+
+### CPU cost
+
+Two extra `cv2.resize()` + lightweight numpy operations per frame.
+On a 1080p source at 30 fps: typically **< 1 ms/frame extra** on any modern CPU.
+
+---
+
+---
+
+## 🕐 Temporal Scene Memory *(v3.4.0 — Priority 2)*
+
+### Problem
+
+YOLO detection is inherently intermittent: a character briefly obscured by a wall, a fast cut, or a partially out-of-frame pose can cause 2–3 frames without a detection. The old behaviour snapped the camera back to the full-frame centre, producing a jarring oscillation.
+
+### Solution
+
+A **sliding deque of past ROI detections** (default 3 s at source FPS) is maintained in the main loop. When the live detector returns `None`, instead of centering the camera the engine computes a **linearly-weighted average** of the history:
+
+```
+weight[oldest] = 1   …   weight[most-recent] = N
+ROI_synthetic = Σ(weight[i] × ROI[i]) / Σ weight[i]
+```
+
+The synthetic ROI is fed into the normal camera-smoothing path — so the camera gently continues the last known trajectory until detection resumes.
+
+### Configuration
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `roi_history_window_s` | `3.0` | Sliding window in seconds. Set to `0` to restore legacy behaviour (snap to centre on no detection). |
+
+> **Default: 3.0 s** — enabled automatically, no config change needed.
+
+### CPU cost
+
+One `deque` push + O(N) weighted sum where N = `fps × window_s`. At 30 fps × 3 s = 90 items: negligible (< 0.1 ms/frame).
+
+---
+
+## ✂️ Scene Change Detection *(v3.4.0 — Priority 3)*
+
+### Problem
+
+Hard cuts (instant scene transitions) leave the ROI history and floor estimator populated with data from the *previous* scene. The camera briefly drifts to a position that makes no sense for the new scene.
+
+### Solution
+
+Each frame is compared to the previous using **HSV histogram correlation** (H and V channels, 32 bins each, 64×32 downscale for speed). When the correlation drops below `1 − scene_change_threshold`, a cut is declared and all per-scene state is reset:
+- ROI history deque cleared
+- Camera smoothing reset to full-frame view
+- Floor estimator re-initialised
+- Look-ahead velocity cleared
+
+### Configuration
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `scene_change_threshold` | `0.45` | Sensitivity: higher = less sensitive. `0` disables. Range 0–1. |
+
+### CPU cost
+
+Two 32-bin histogram compares on a 64×32 thumbnail: **< 0.2 ms/frame**.
+
+---
+
+## 🔍 Micro-detection Rejection *(v3.4.0 — Priority 4)*
+
+### Problem
+
+YOLO occasionally detects a partially-visible subject with a bounding box that is only a few pixels wide. After resize to 128×32 the subject occupies 1–2 pixels and becomes invisible noise.
+
+### Solution
+
+After every live ROI detection, the engine checks:
+```
+roi_area / (frame_w × frame_h) < min_roi_area_ratio  →  discard ROI
+```
+
+A discarded ROI triggers the **Temporal Scene Memory** fallback (Priority 2) — so the camera continues the last known trajectory instead of jumping to centre.
+
+### Configuration
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `min_roi_area_ratio` | `0.02` | Minimum ROI area as a fraction of the source frame. `0` disables. |
+
+> At 1920×1080: minimum useful ROI area = 1920 × 1080 × 0.02 ≈ **41 500 px²** (roughly 200×208).
+
+### CPU cost
+
+Two integer multiplications and a division per frame: **negligible**.
+
+---
+
+## ➡️ Directional Look-Ahead *(v3.4.0 — Priority 5)*
+
+### Problem
+
+When a subject moves horizontally, the camera tracks the *centre* of the subject. On a narrow 128-wide LED strip this puts the subject in the middle with equal space before and behind — but visually the viewer expects space *in front of* the direction of travel.
+
+### Solution
+
+The ROI centre velocity (current − previous frame) is computed each frame. The smoothed camera position is then offset by:
+
+```
+offset_x = sign(vx) × look_ahead_factor × (crop_width / 2)
+```
+
+The offset is clamped to the frame boundaries. Vertical look-ahead is applied at 50% of the horizontal factor (the DMD strip is very short vertically).
+
+### Configuration
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `look_ahead_enabled` | `True` | Master switch. |
+| `look_ahead_factor` | `0.25` | Fraction of crop half-width to offset. 0 = disabled. 0.15–0.35 recommended. |
+
+> **Default: ON** with 25% lead. Set `look_ahead_enabled=False` or `look_ahead_factor=0` to disable.
+
+### CPU cost
+
+Two velocity differences and two clamp operations per frame: **negligible**.
+
+---
+
+## 👥 Multi-ROI Fusion *(v3.4.0 — Priority 6)*
+
+### Problem
+
+YOLO's default mode returns only the single highest-confidence person. In scenes with multiple characters (co-op games, crowd scenes, dialogues) the camera locks onto the dominant subject and ignores the rest, causing jerky panning as confidence rankings change.
+
+### Solution
+
+All per-frame detections above the confidence threshold are collected. When more than one box is found they are fused into a **confidence-weighted centroid box**:
+
+```
+fused_cx = Σ(score[i] × cx[i]) / Σ score[i]
+fused_w  = Σ(score[i] × w[i])  / Σ score[i]
+```
+
+This gives a natural "centre of mass" of all visible subjects, weighted toward the most clearly-detected one. The result is fed into the normal P2/P3/P4 pipeline like any other ROI.
+
+### Configuration
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `multi_roi_fusion_enabled` | `True` | Enable multi-person fusion. `False` = legacy single-best-box behaviour. |
+
+> **Default: ON** — no config change needed.
+
+### CPU cost
+
+One ONNX inference call (unchanged) + O(N) weighted sum where N = number of detections above threshold. At most a few dozen extras: **< 0.5 ms/frame**.
+
+---
+
+## 🔍 Minimum Useful Size After Resize *(v3.4.0 — Priority 7)*
+
+When zooming aggressively, the detected subject might end up occupying only a few pixels on the DMD, becoming a blurry, unrecognisable blob. This feature intercepts zoom commands that would cause the subject to drop below a hard minimum size *in the final output space* (e.g. 128×32).
+
+If the estimated final dimensions are too small, the zoom is cancelled and the camera holds its previous view.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `min_subject_dmd_px` | `4` | Minimum size (in output pixels) the ROI must occupy. `0` disables this check. |
+
+---
+
+## 🕹 Smart Platformer Mode *(v3.4.0 — Priority 8)*
+
+Optimised specifically for side-scrolling 2-D games (Mario, Sonic, Metroid).
+
+Standard tracking centres the subject, meaning the floor moves up and down as the character jumps. Platformer mode instead:
+1. **Locks the floor:** Uses the asymmetric EMA floor estimator to anchor the camera vertically so the ground stays at a fixed height (default: bottom 20% of the strip).
+2. **Widens the view:** Expands the horizontal field of view by 50% to reveal more of the level ahead, preventing the "tunnel vision" effect.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `platformer_mode` | `False` | Enable platformer-specific framing logic. |
+| `platformer_floor_ratio` | `0.80` | Vertical position of the floor (0.80 = 80% down from the top). |
+
+---
+
+## 🛡️ ROI Confidence System *(v3.4.0 — Priority 10)*
+
+Replaces the hardcoded YOLO confidence threshold (`0.30`) with a configurable minimum.
+
+When combined with **Priority 2 (Temporal Scene Memory)**, raising this threshold makes the camera much more stable: weak, flickering detections are discarded, and the camera relies on its smoothed memory trajectory instead of twitching.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `roi_confidence_min` | `0.0` | Minimum confidence `[0.0, 1.0]`. `0.0` uses the legacy `0.30` hardcoded fallback. |
 
 ---
 
