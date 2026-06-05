@@ -2402,17 +2402,35 @@ class DMDConverterApp(ctk.CTk):
             return
         self._dmd_pending_src = None
         self._dmd_rendering = True
-        self._stop_dmd_preview()
-        self._dmd_canvas.delete("all")
-        # Use current target dimensions for idle text positioning
-        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
-        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
-        self._dmd_canvas.create_text(
-            current_dmd_width // 2, current_dmd_height // 2,
-            text="⏳  Generating DMD…\n  (a few seconds)",
-            fill="#f39c12", font=("Helvetica", 11), justify="center"
-        )
         self._btn_dmd.configure(state="disabled", text="⏳ DMD…")
+
+        current_dmd_width  = int(self.v_target_width.get()  * DMD_DISPLAY_SCALE_FACTOR)
+        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+
+        if self._dmd_pil_frames:
+            # ── A preview is already visible — keep it playing while the new render
+            # runs in the background.  Overlay a subtle "↻ refreshing" tag so the
+            # user knows something is happening without the canvas going blank.
+            # (This is the main fix for the "preview disappears when auto-crop is
+            #  enabled" regression: auto-crop scans take several extra seconds, so
+            #  the canvas used to stay blank/loading for a noticeably long time.)
+            self._dmd_canvas.delete("refresh_tag")
+            self._dmd_canvas.create_text(
+                current_dmd_width - 4, 4,
+                text="↻", fill="#f39c12",
+                font=("Helvetica", 10, "bold"),
+                anchor="ne", tags="refresh_tag",
+            )
+        else:
+            # No previous preview — show the normal "generating" placeholder.
+            self._stop_dmd_preview()
+            self._dmd_canvas.delete("all")
+            self._dmd_canvas.create_text(
+                current_dmd_width // 2, current_dmd_height // 2,
+                text="⏳  Generating DMD…\n  (a few seconds)",
+                fill="#f39c12", font=("Helvetica", 11), justify="center"
+            )
+
         params  = self._collect_params()
         start_s, end_s = self._get_trim()
         # Capture display dimensions on the main thread (Tkinter is not thread-safe)
@@ -2474,7 +2492,7 @@ class DMDConverterApp(ctk.CTk):
     def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif):
         self._dmd_rendering = False
         self._btn_dmd.configure(state="normal", text="🔬 DMD")
-        self._stop_dmd_preview()
+        self._stop_dmd_preview()      # cancels animation, cleans up old tmpdir
         self._dmd_tmpdir = tmpdir
         # Store PIL Images; PhotoImages are created lazily in _animate_dmd (main thread, one per tick)
         self._dmd_pil_frames = pil_frames
@@ -2493,6 +2511,7 @@ class DMDConverterApp(ctk.CTk):
         self._dmd_rendering = False
         self._btn_dmd.configure(state="normal", text="🔬 DMD")
         shutil.rmtree(tmpdir, ignore_errors=True)
+        self._dmd_canvas.delete("refresh_tag")  # remove refresh indicator if present
         self._dmd_canvas.delete("all")
         # Use current target dimensions for idle text positioning
         current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
