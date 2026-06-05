@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.1.0
+# 🎞️ DMD GIF Converter — v3.2.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -120,8 +120,8 @@ This is the most powerful feature of the converter. Instead of a static crop or 
 ```
 Source video  ──[AI analysis]──▶  4:1 cinematic crop  ──[ffmpeg]──▶  128×32 DMD GIF
                     ↑
-        Person detection (HOG)
-        Motion detection (optical flow)
+        Person detection (ONNX YOLOv8 nano)
+        Motion detection (MOG2 background subtraction)
         Smooth exponential camera
         Intro panoramic establishing shot
         Auto floor tracking (2-D platformers)
@@ -139,11 +139,12 @@ Source video  ──[AI analysis]──▶  4:1 cinematic crop  ──[ffmpeg]�
 
 ### Why it is disabled by default
 
-Auto Action performs **full CPU-intensive computer vision** on every frame (HOG person detection, background subtraction, optical flow). This is significantly heavier than a simple ffmpeg pass:
+Auto Action performs **full CPU-intensive computer vision** on every frame (ONNX YOLOv8 nano person detection, MOG2 background subtraction). This is significantly heavier than a simple ffmpeg pass:
 
 - **CPU usage:** ~2–5× higher than standard conversion
 - **Processing time per file:** roughly doubles
 - **Memory:** each worker loads the full video as raw frames
+- **First run:** downloads the YOLOv8n ONNX model (~6 MB) to `~/.cache/dmd_gif_converter/` — subsequent runs use the cached model
 
 For batch conversion of large libraries, this cost adds up. If you are converting retro sprites or pixel-art GIFs, the standard scroll pipeline is already optimal.  
 **For live footage, sports, clips, or any video with a person or moving subject → enable Auto Action and get professional results automatically.**
@@ -179,7 +180,7 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 
 | Mode | Best for |
 |---|---|
-| `person` ★ default | Videos with people — uses HOG/SVM person detector, falls back to motion |
+| `person` ★ default | Videos with people — uses ONNX YOLOv8 nano person detector, falls back to motion |
 | `motion` | Sports, vehicles, fast action without clear human silhouette |
 | `hybrid` | Merges person + motion bounding boxes — broadest coverage |
 | `center` | No detection — keeps the camera centred (intro pan only) |
@@ -592,12 +593,13 @@ pip install -r requirements_ui.txt
 ```
 
 Or directly:
-```bash
-pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python duckduckgo-search requests
+```
+pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime duckduckgo-search requests
 ```
 
 > `dmd_gif_converter.py` (CLI / engine) has **zero external dependencies** — standard library only.  
-> `opencv-python` is optional — only required for the **Auto Action** AI feature. If absent, Auto Action is silently skipped.
+> `opencv-python` and `onnxruntime` are optional — only required for the **Auto Action** AI feature. If absent, Auto Action is silently skipped.  
+> The YOLOv8n ONNX model (~6 MB) is downloaded automatically to `~/.cache/dmd_gif_converter/` on first use.
 
 ---
 
@@ -803,9 +805,10 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 | LED Sim preview looks wrong / too dark | The grid is normal — it shows the physical gap between LEDs. Toggle **💡 LED Sim** off for the classic upscaled view |
 | LED Sim canvas is very large | Expected for multi-panel configs — the 4× zoom is clamped at 640 px width |
 | Manual mode shows wrong area | Increase Zoom first, then move X/Y sliders |
-| Auto Action says "OpenCV not installed" | Run `pip install opencv-python` or re-run `./launch_ui.sh` (installs automatically) |
+| Auto Action says "OpenCV not installed" | Run `pip install opencv-python onnxruntime` or re-run `./launch_ui.sh` (installs automatically) |
 | Auto Action preview is slow to appear | Normal — AI analysis takes a few seconds per video; progress shown in the AUTO ACTION canvas |
 | Auto Action result looks wrong | Try a different **Detection mode** (`motion` or `hybrid`) — `person` mode works best with visible human silhouettes |
+| Auto Action: "model download failed" | No internet access — place `yolov8n.onnx` manually in `~/.cache/dmd_gif_converter/`. Falls back to motion detection automatically |
 | Floor not visible in 2-D platformer | Enable **Auto floor detect** in the Auto Action advanced settings — it anchors the camera to the detected ground level |
 | Camera pans up during jumps | Enable **Auto floor detect** — it uses an asymmetric EMA that resists upward movement during airtime |
 | Auto floor detect still not showing floor | Increase **Bottom crop %** to hide the HUD/floor area from the main detector, then re-enable Auto floor detect |

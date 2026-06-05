@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Tests unitaires pour dmd_auto_color.py
+Unit tests for dmd_auto_color.py
 
-Couvre :
+Covers:
   - _clamp()
-  - _gamma_delta()
-  - _contrast_delta()
-  - _saturation_delta()
-  - _average_metrics()  (avec numpy)
-  - analyze_and_compensate() — chemin sans OpenCV et vérifications de structure
+  - _gamma_delta()       — continuous piecewise-linear interpolation
+  - _contrast_delta()    — continuous piecewise-linear interpolation
+  - _saturation_delta()  — continuous piecewise-linear interpolation
+  - _average_metrics()   (with numpy)
+  - analyze_and_compensate() — no-OpenCV path and structure checks
 """
 
 import sys
@@ -57,36 +57,79 @@ class TestClampAutoColor(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestGammaDelta(unittest.TestCase):
+    """_gamma_delta now uses continuous piecewise-linear interpolation.
 
-    def test_very_dark(self):
-        # mean_lum < 40 → +0.40
-        self.assertAlmostEqual(_gamma_delta(20.0), +0.40)
-        self.assertAlmostEqual(_gamma_delta(0.0),  +0.40)
+    Tests verify:
+      - Exact values at knot boundaries (xp points in _linear_interp)
+      - Clamping at the extremes (x=0 and x=255)
+      - Monotonically non-increasing across the [0, 255] range
+      - Continuity: adjacent inputs produce close outputs (no step jumps)
+    """
 
-    def test_dark(self):
-        # 40 ≤ mean_lum < 75 → +0.20
-        self.assertAlmostEqual(_gamma_delta(50.0), +0.20)
+    # ── Knot boundary values ──────────────────────────────────────────────────
 
-    def test_slightly_dark(self):
-        # 75 ≤ mean_lum < 100 → +0.08
-        self.assertAlmostEqual(_gamma_delta(90.0), +0.08)
+    def test_knot_x0(self):
+        self.assertAlmostEqual(_gamma_delta(0.0),   +0.40)
 
-    def test_normal(self):
-        # 100 ≤ mean_lum < 140 → 0.00
-        self.assertAlmostEqual(_gamma_delta(120.0), 0.00)
+    def test_knot_x40(self):
+        self.assertAlmostEqual(_gamma_delta(40.0),  +0.40)
 
-    def test_slightly_bright(self):
-        # 140 ≤ mean_lum < 175 → -0.10
-        self.assertAlmostEqual(_gamma_delta(160.0), -0.10)
+    def test_knot_x75(self):
+        self.assertAlmostEqual(_gamma_delta(75.0),  +0.20)
 
-    def test_bright(self):
-        # 175 ≤ mean_lum < 210 → -0.20
-        self.assertAlmostEqual(_gamma_delta(190.0), -0.20)
+    def test_knot_x100(self):
+        self.assertAlmostEqual(_gamma_delta(100.0), +0.08)
 
-    def test_very_bright(self):
-        # mean_lum ≥ 210 → -0.30
-        self.assertAlmostEqual(_gamma_delta(220.0), -0.30)
+    def test_knot_x140(self):
+        self.assertAlmostEqual(_gamma_delta(140.0),  0.00)
+
+    def test_knot_x175(self):
+        self.assertAlmostEqual(_gamma_delta(175.0), -0.10)
+
+    def test_knot_x210(self):
+        self.assertAlmostEqual(_gamma_delta(210.0), -0.20)
+
+    def test_knot_x255(self):
         self.assertAlmostEqual(_gamma_delta(255.0), -0.30)
+
+    # ── Clamping at extremes ──────────────────────────────────────────────────
+
+    def test_below_minimum_clamped(self):
+        # Values at or below the first knot (0) return the first fp value.
+        self.assertAlmostEqual(_gamma_delta(-10.0), +0.40)
+
+    def test_above_maximum_clamped(self):
+        # Values at or above the last knot (255) return the last fp value.
+        self.assertAlmostEqual(_gamma_delta(300.0), -0.30)
+
+    # ── Monotonicity ──────────────────────────────────────────────────────────
+
+    def test_monotonically_non_increasing(self):
+        """gamma_delta must never increase as luminance increases."""
+        prev = _gamma_delta(0.0)
+        for lum in range(1, 256):
+            curr = _gamma_delta(float(lum))
+            self.assertLessEqual(
+                curr, prev + 1e-9,
+                f"Non-monotonic at lum={lum}: {prev:.4f} → {curr:.4f}"
+            )
+            prev = curr
+
+    # ── Continuity / no step jumps ────────────────────────────────────────────
+
+    def test_no_step_jump_at_175(self):
+        """Old step boundary at 175 — difference must be tiny, not a full step."""
+        diff = abs(_gamma_delta(176.0) - _gamma_delta(174.0))
+        self.assertLess(diff, 0.02, f"Unexpected jump at lum≈175: {diff:.4f}")
+
+    # ── Intermediate values are bounded ──────────────────────────────────────
+
+    def test_intermediate_values_bounded(self):
+        """Any x between two knots must produce a value between those knots' fp."""
+        # Between knot 40 (+0.40) and knot 75 (+0.20)
+        v = _gamma_delta(57.0)
+        self.assertGreaterEqual(v, +0.20)
+        self.assertLessEqual(v,   +0.40)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,27 +137,45 @@ class TestGammaDelta(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestContrastDelta(unittest.TestCase):
+    """Continuous interpolation tests for _contrast_delta."""
 
-    def test_very_flat(self):
-        # std_lum < 20 → +0.70
-        self.assertAlmostEqual(_contrast_delta(10.0), +0.70)
+    def test_knot_x0(self):
+        self.assertAlmostEqual(_contrast_delta(0.0),  +0.70)
 
-    def test_dull(self):
-        # 20 ≤ std_lum < 35 → +0.45
-        self.assertAlmostEqual(_contrast_delta(25.0), +0.45)
+    def test_knot_x20(self):
+        self.assertAlmostEqual(_contrast_delta(20.0), +0.70)
 
-    def test_slightly_below_average(self):
-        # 35 ≤ std_lum < 50 → +0.20
-        self.assertAlmostEqual(_contrast_delta(40.0), +0.20)
+    def test_knot_x35(self):
+        self.assertAlmostEqual(_contrast_delta(35.0), +0.45)
 
-    def test_good(self):
-        # 50 ≤ std_lum < 70 → 0.00
-        self.assertAlmostEqual(_contrast_delta(60.0), 0.00)
+    def test_knot_x50(self):
+        self.assertAlmostEqual(_contrast_delta(50.0), +0.20)
 
-    def test_high_contrast(self):
-        # std_lum ≥ 70 → -0.15
-        self.assertAlmostEqual(_contrast_delta(80.0), -0.15)
-        self.assertAlmostEqual(_contrast_delta(100.0), -0.15)
+    def test_knot_x70(self):
+        self.assertAlmostEqual(_contrast_delta(70.0),  0.00)
+
+    def test_knot_x255(self):
+        self.assertAlmostEqual(_contrast_delta(255.0), -0.15)
+
+    def test_below_minimum_clamped(self):
+        self.assertAlmostEqual(_contrast_delta(-5.0), +0.70)
+
+    def test_above_maximum_clamped(self):
+        self.assertAlmostEqual(_contrast_delta(300.0), -0.15)
+
+    def test_monotonically_non_increasing(self):
+        prev = _contrast_delta(0.0)
+        for std in range(1, 256):
+            curr = _contrast_delta(float(std))
+            self.assertLessEqual(
+                curr, prev + 1e-9,
+                f"Non-monotonic at std={std}: {prev:.4f} → {curr:.4f}"
+            )
+            prev = curr
+
+    def test_no_step_jump_at_70(self):
+        diff = abs(_contrast_delta(71.0) - _contrast_delta(69.0))
+        self.assertLess(diff, 0.05)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -122,32 +183,48 @@ class TestContrastDelta(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSaturationDelta(unittest.TestCase):
+    """Continuous interpolation tests for _saturation_delta."""
 
-    def test_near_greyscale(self):
-        # mean_sat < 10 → +1.10
-        self.assertAlmostEqual(_saturation_delta(5.0),  +1.10)
-        self.assertAlmostEqual(_saturation_delta(0.0),  +1.10)
+    def test_knot_x0(self):
+        self.assertAlmostEqual(_saturation_delta(0.0),   +1.10)
 
-    def test_low_sat(self):
-        # 10 ≤ mean_sat < 40 → +0.70
-        self.assertAlmostEqual(_saturation_delta(20.0), +0.70)
+    def test_knot_x10(self):
+        self.assertAlmostEqual(_saturation_delta(10.0),  +1.10)
 
-    def test_slightly_muted(self):
-        # 40 ≤ mean_sat < 80 → +0.30
-        self.assertAlmostEqual(_saturation_delta(60.0), +0.30)
+    def test_knot_x40(self):
+        self.assertAlmostEqual(_saturation_delta(40.0),  +0.70)
 
-    def test_normal_colour(self):
-        # 80 ≤ mean_sat < 130 → 0.00
-        self.assertAlmostEqual(_saturation_delta(100.0), 0.00)
+    def test_knot_x80(self):
+        self.assertAlmostEqual(_saturation_delta(80.0),  +0.30)
 
-    def test_vivid(self):
-        # 130 ≤ mean_sat < 180 → -0.30
-        self.assertAlmostEqual(_saturation_delta(150.0), -0.30)
+    def test_knot_x130(self):
+        self.assertAlmostEqual(_saturation_delta(130.0),  0.00)
 
-    def test_very_saturated(self):
-        # mean_sat ≥ 180 → -0.60
-        self.assertAlmostEqual(_saturation_delta(200.0), -0.60)
+    def test_knot_x180(self):
+        self.assertAlmostEqual(_saturation_delta(180.0), -0.30)
+
+    def test_knot_x255(self):
         self.assertAlmostEqual(_saturation_delta(255.0), -0.60)
+
+    def test_below_minimum_clamped(self):
+        self.assertAlmostEqual(_saturation_delta(-5.0), +1.10)
+
+    def test_above_maximum_clamped(self):
+        self.assertAlmostEqual(_saturation_delta(300.0), -0.60)
+
+    def test_monotonically_non_increasing(self):
+        prev = _saturation_delta(0.0)
+        for sat in range(1, 256):
+            curr = _saturation_delta(float(sat))
+            self.assertLessEqual(
+                curr, prev + 1e-9,
+                f"Non-monotonic at sat={sat}: {prev:.4f} → {curr:.4f}"
+            )
+            prev = curr
+
+    def test_no_step_jump_at_130(self):
+        diff = abs(_saturation_delta(131.0) - _saturation_delta(129.0))
+        self.assertLess(diff, 0.05)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -163,11 +240,11 @@ class TestAverageMetrics(unittest.TestCase):
             self.np = np
             self.cv2 = cv2
         except ImportError:
-            self.skipTest("numpy ou opencv non disponible")
+            self.skipTest("numpy or opencv not available")
 
     def test_uniform_black_frame(self):
         from dmd_auto_color import _average_metrics
-        frame = self.np.zeros((64, 128, 3), dtype=self.np.uint8)  # BGR noir
+        frame = self.np.zeros((64, 128, 3), dtype=self.np.uint8)  # black BGR frame
         mean_lum, std_lum, mean_sat = _average_metrics([frame], self.cv2, self.np)
         self.assertAlmostEqual(mean_lum, 0.0, delta=1.0)
         self.assertAlmostEqual(std_lum, 0.0, delta=1.0)
@@ -184,7 +261,7 @@ class TestAverageMetrics(unittest.TestCase):
         dark  = self.np.zeros((64, 128, 3), dtype=self.np.uint8)
         light = self.np.full((64, 128, 3), 200, dtype=self.np.uint8)
         mean_lum, _, _ = _average_metrics([dark, light], self.cv2, self.np)
-        # La moyenne doit être entre les deux extrêmes
+        # The average must be between the two extremes
         self.assertGreater(mean_lum, 0.0)
         self.assertLess(mean_lum, 200.0)
 
@@ -196,7 +273,7 @@ class TestAverageMetrics(unittest.TestCase):
 class TestAnalyzeAndCompensate(unittest.TestCase):
 
     def test_returns_false_without_opencv(self):
-        """Sans OpenCV, doit renvoyer (False, {}, message)."""
+        """Without OpenCV, must return (False, {}, message)."""
         import builtins
         real_import = builtins.__import__
 
@@ -213,14 +290,14 @@ class TestAnalyzeAndCompensate(unittest.TestCase):
         self.assertIsInstance(msg, str)
 
     def test_result_params_keys_when_ok(self):
-        """Si analyze_and_compensate réussit, les clés attendues doivent être présentes."""
+        """If analyze_and_compensate succeeds, all expected keys must be present."""
         try:
             import cv2
             import numpy as np
         except ImportError:
-            self.skipTest("opencv/numpy non disponible")
+            self.skipTest("opencv/numpy not available")
 
-        # Construire un mock de VideoCapture retournant un frame synthétique
+        # Build a mock VideoCapture returning a synthetic frame
         frame = np.full((64, 128, 3), 100, dtype=np.uint8)
 
         mock_cap = MagicMock()
@@ -242,15 +319,15 @@ class TestAnalyzeAndCompensate(unittest.TestCase):
                 "sharpen_lum", "sharpen_chr", "dither"
             ]
             for key in expected_keys:
-                self.assertIn(key, params, f"Clé manquante : {key}")
+                self.assertIn(key, params, f"Missing key: {key}")
 
     def test_output_values_are_within_valid_ranges(self):
-        """Les paramètres résultants doivent être dans leurs plages valides."""
+        """Result parameters must fall within their valid ranges."""
         try:
             import cv2
             import numpy as np
         except ImportError:
-            self.skipTest("opencv/numpy non disponible")
+            self.skipTest("opencv/numpy not available")
 
         frame = np.full((64, 128, 3), 128, dtype=np.uint8)
 
@@ -278,12 +355,12 @@ class TestAnalyzeAndCompensate(unittest.TestCase):
             self.assertLessEqual(params["brightness"],     0.10)
 
     def test_message_is_string(self):
-        """Le message de retour doit toujours être une chaîne."""
+        """The return message must always be a string."""
         ok, params, msg = analyze_and_compensate("nonexistent_file.mp4")
         self.assertIsInstance(msg, str)
 
     def test_baseline_constants_are_reasonable(self):
-        """Les constantes de base doivent être dans des plages sensées."""
+        """Baseline constants must fall within sensible ranges."""
         self.assertGreater(_BASE_CONTRAST,   1.0)
         self.assertGreater(_BASE_SATURATION, 1.0)
         self.assertGreater(_BASE_GAMMA,      0.5)

@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v3.1.0
+# 🎞️ DMD GIF Converter — v3.2.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
@@ -120,8 +120,8 @@ C'est la fonctionnalité la plus puissante du convertisseur. Au lieu d'un crop s
 ```
 Vidéo source  ──[analyse IA]──▶  crop 4:1 cinématique  ──[ffmpeg]──▶  GIF DMD 128×32
                      ↑
-         Détection de personnes (HOG/SVM)
-         Détection de mouvement (soustraction de fond + flux optique)
+         Détection de personnes (ONNX YOLOv8 nano)
+         Détection de mouvement (soustraction de fond MOG2)
          Caméra virtuelle à lissage exponentiel
          Plan large d'introduction panoramique
          Suivi automatique du sol (jeux de plateformes 2D)
@@ -132,18 +132,19 @@ Vidéo source  ──[analyse IA]──▶  crop 4:1 cinématique  ──[ffmpeg
 | Phase | Ce qui se passe |
 |---|---|
 | **Panoramique intro** | Commence par un plan large (1,5 s par défaut) pour que le spectateur comprenne la scène |
-| **Détection IA** | Détecte les personnes (HOG/SVM) et/ou les mouvements image par image |
+| **Détection IA** | Détecte les personnes (ONNX YOLOv8 nano) et/ou les mouvements image par image |
 | **Cadrage cinématique** | Calcule la fenêtre de crop 4:1 idéale centrée sur l'action, avec un padding configurable |
 | **Caméra lissée** | Applique un lissage exponentiel pour simuler un vrai caméraman — pas de saccades |
 | **Extension queue** | Si la vidéo est trop courte pour que la caméra finisse son mouvement, la dernière image est prolongée jusqu'à convergence |
 
 ### Pourquoi c'est désactivé par défaut
 
-Auto Action effectue une **analyse d'image intensive en CPU** sur chaque frame (détection HOG de personnes, soustraction de fond, flux optique). C'est nettement plus lourd qu'une simple passe ffmpeg :
+Auto Action effectue une **analyse d'image intensive en CPU** sur chaque frame (détection de personnes via **ONNX YOLOv8 nano**, soustraction de fond MOG2). C'est nettement plus lourd qu'une simple passe ffmpeg :
 
 - **Charge CPU :** 2 à 5× plus élevée que la conversion standard
 - **Temps de traitement par fichier :** approximativement doublé
 - **Mémoire :** chaque worker charge la vidéo entière en frames brutes
+- **Premier lancement :** télécharge le modèle YOLOv8n ONNX (~6 Mo) dans `~/.cache/dmd_gif_converter/` — les lancements suivants utilisent le cache
 
 Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scroll standard est déjà optimal.  
 **Pour de la vidéo live, du sport, des clips, ou toute vidéo avec une personne ou un sujet en mouvement → activez Auto Action et obtenez un résultat professionnel entièrement automatisé.**
@@ -179,7 +180,7 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 
 | Mode | Idéal pour |
 |---|---|
-| `person` ★ défaut | Vidéos avec des personnes — HOG/SVM, repli sur le mouvement si aucune silhouette détectée |
+| `person` ★ défaut | Vidéos avec des personnes — ONNX YOLOv8 nano, repli sur la détection de mouvement si indisponible |
 | `motion` | Sport, véhicules, action rapide sans silhouette humaine claire |
 | `hybrid` | Fusionne les boîtes person + motion — couverture la plus large |
 | `center` | Pas de détection — caméra centrée (panoramique intro uniquement) |
@@ -621,11 +622,12 @@ pip install -r requirements_ui.txt
 
 Ou directement :
 ```bash
-pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python duckduckgo-search requests
+pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime duckduckgo-search requests
 ```
 
 > `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.  
-> `opencv-python` est optionnel — uniquement nécessaire pour la fonctionnalité **Auto Action** IA. En son absence, Auto Action est silencieusement ignoré.
+> `opencv-python` et `onnxruntime` sont optionnels — uniquement nécessaires pour la fonctionnalité **Auto Action** IA. En leur absence, Auto Action est silencieusement ignoré.  
+> Le modèle YOLOv8n ONNX (~6 Mo) est téléchargé automatiquement dans `~/.cache/dmd_gif_converter/` au premier lancement.
 
 ---
 
@@ -831,7 +833,7 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Aperçu LED Sim trop sombre / quadrillé | C'est normal — les écarts noirs simulent les espaces physiques entre LEDs. Désactivez **💡 LED Sim** pour l'aperçu classique |
 | Canvas LED Sim très grand | Attendu pour les configs multi-dalle — le zoom 4× est plafonné à 640 px de large |
 | Mode manuel montre la mauvaise zone | Augmenter d'abord le Zoom, puis ajuster les curseurs X/Y |
-| Auto Action : « OpenCV not installed » | Lancer `pip install opencv-python` ou re-lancer `./launch_ui.sh` (installe automatiquement) |
+| Auto Action : « OpenCV not installed » | Lancer `pip install opencv-python onnxruntime` ou re-lancer `./launch_ui.sh` (installe automatiquement) |
 | Aperçu Auto Action lent à apparaître | Normal — l'analyse IA prend quelques secondes par vidéo ; progression affichée dans le canvas AUTO ACTION |
 | Résultat Auto Action incorrect | Essayer un autre **mode de détection** (`motion` ou `hybrid`) — le mode `person` fonctionne mieux avec des silhouettes humaines visibles |
 | Sol non visible dans un jeu de plateformes 2D | Activer **Auto floor detect** dans les paramètres avancés Auto Action — il ancre la caméra au niveau du sol détecté |
