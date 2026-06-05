@@ -247,6 +247,7 @@ def _make_app():
     app.v_action_auto_top_crop      = tk.BooleanVar(value=False)
     app.v_action_vertical_bias      = tk.DoubleVar(value=0.0)
     app.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
+    app.v_action_smart_auto_crop    = tk.BooleanVar(value=False)
     app.v_bg_sub_enable             = tk.BooleanVar(value=False)
     app.v_target_width              = tk.IntVar(value=128)
     app.v_target_height             = tk.IntVar(value=32)
