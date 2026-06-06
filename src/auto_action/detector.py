@@ -5,7 +5,7 @@ import numpy as np
 
 # ── ONNX YOLOv8n model settings ───────────────────────────────────────────────
 _YOLO_MODEL_URL = (
-    "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.onnx"
+    "https://huggingface.co/flightsnotights/yolov8n_onnx/resolve/main/yolov8n.onnx"
 )
 _YOLO_MODEL_FILENAME = "yolov8n.onnx"
 # Confidence threshold for person detection (class 0 in COCO)
@@ -107,10 +107,16 @@ class _FrameDetector:
             self._onnx_session = ort.InferenceSession(
                 model_path, providers=["CPUExecutionProvider"]
             )
+            inputs = self._onnx_session.get_inputs()[0]
+            self._model_h = inputs.shape[2]
+            self._model_w = inputs.shape[3]
+            if not isinstance(self._model_h, int) or not isinstance(self._model_w, int):
+                self._model_h, self._model_w = 640, 640
         except Exception:
             self._onnx_session = None
+            self._model_h, self._model_w = 640, 640
 
-    def _detect_yolo(self, frame, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0) -> Optional[Tuple[int, int, int, int]]:
+    def _detect_yolo(self, frame, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0, platformer_mode: bool = False) -> Optional[Tuple[int, int, int, int]]:
         """Run YOLOv8n inference; return best person box (x, y, w, h) or None.
 
         VNext Priority 8: dynamic_confidence allows lower raw confidence if persistence is high.
@@ -118,17 +124,17 @@ class _FrameDetector:
         cv2 = self.cv2
         h, w = frame.shape[:2]
 
-        # Preprocess: BGR→RGB, resize to 640×640, normalize 0→1, NCHW layout
-        img = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
+        # Preprocess: BGR→RGB, resize to model input shape, normalize 0→1, NCHW layout
+        img = cv2.resize(frame, (self._model_w, self._model_h), interpolation=cv2.INTER_LINEAR)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         img = np.transpose(img, (2, 0, 1))[np.newaxis]  # HWC → NCHW
 
         input_name = self._onnx_session.get_inputs()[0].name
-        pred = self._onnx_session.run(None, {input_name: img})[0][0]  # [84, 8400]
+        pred = self._onnx_session.run(None, {input_name: img})[0][0]
 
-        # YOLOv8 output layout: rows [cx, cy, w, h, class_0..class_79], 8 400 proposals
-        boxes_raw  = pred[:4].T          # [8400, 4] — cx/cy/w/h in 640-px space
-        class_prob = pred[4:].T          # [8400, 80] — direct class probabilities
+        # YOLOv8 output layout: rows [cx, cy, w, h, class_0..class_79], proposals
+        boxes_raw  = pred[:4].T
+        class_prob = pred[4:].T
         person_scores = class_prob[:, 0]  # COCO class 0 = person
 
         # Dynamic confidence threshold
@@ -138,16 +144,34 @@ class _FrameDetector:
         if not np.any(mask):
             return None
 
-        # Best score is raw score * persistence factor (not needed for single best, max is max)
-        best_i = int(np.argmax(person_scores * mask))
+        if platformer_mode:
+            # Score = leftness + vertical floor proximity + person_score
+            # We want small X and Y near the floor.
+            # Since boxes are in model space (0..model_w), leftness is 1.0 - cx/model_w
+            leftness = 1.0 - (boxes_raw[:, 0] / self._model_w)
+            
+            # The player is usually at the bottom of the screen, not flying.
+            bottomness = boxes_raw[:, 1] / self._model_h
+            
+            # Combine raw confidence with leftness and bottomness.
+            # Give high weight to leftness so the leftmost person wins unless their confidence is garbage.
+            platformer_scores = person_scores * mask * (1.0 + 2.0 * leftness + 1.0 * bottomness)
+            best_i = int(np.argmax(platformer_scores))
+        else:
+            # Best score is raw score * persistence factor (not needed for single best, max is max)
+            best_i = int(np.argmax(person_scores * mask))
+            
         cx, cy, bw, bh = boxes_raw[best_i]
 
-        # Scale box from 640×640 space back to original frame dimensions
-        sx, sy = w / 640.0, h / 640.0
+        # Scale box from model space back to original frame dimensions
+        sx, sy = w / float(self._model_w), h / float(self._model_h)
         x  = int((cx - bw / 2) * sx)
         y  = int((cy - bh / 2) * sy)
         bw = int(bw * sx)
         bh = int(bh * sy)
+
+        # Return the raw bounding box. Headroom logic is now handled dynamically by the camera.
+        pass
 
         # Clamp to frame boundaries
         x  = max(0, x)
@@ -170,7 +194,7 @@ class _FrameDetector:
             return []
         cv2  = self.cv2
         h, w = frame.shape[:2]
-        img  = cv2.resize(frame, (640, 640), interpolation=cv2.INTER_LINEAR)
+        img  = cv2.resize(frame, (self._model_w, self._model_h), interpolation=cv2.INTER_LINEAR)
         img  = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         img  = np.transpose(img, (2, 0, 1))[np.newaxis]
         input_name = self._onnx_session.get_inputs()[0].name
@@ -183,24 +207,28 @@ class _FrameDetector:
         indices = np.where(mask)[0]
         if len(indices) == 0:
             return []
-        sx, sy  = w / 640.0, h / 640.0
+        sx, sy  = w / float(self._model_w), h / float(self._model_h)
         results = []
         for i in indices:
-            score      = float(person_scores[i])
+            score = float(person_scores[i])
             cx, cy, bw, bh = boxes_raw[i]
             x  = max(0, int((cx - bw / 2) * sx))
             y  = max(0, int((cy - bh / 2) * sy))
-            bw = min(int(bw * sx), w - x)
-            bh = min(int(bh * sy), h - y)
+            bw = int(bw * sx)
+            bh = int(bh * sy)
+            
+            # Return the raw bounding box.
+            pass
+            
+            bw = min(bw, w - x)
+            bh = min(bh, h - y)
             if bw >= 8 and bh >= 8:
                 results.append((score, (x, y, bw, bh)))
         results.sort(key=lambda t: t[0], reverse=True)
         return results
 
-    def detect_person(
-        self, frame, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0
-    ) -> Optional[Tuple[int, int, int, int]]:
-        """Return person bounding box via ONNX YOLOv8n, or None.
+    def detect_person(self, frame, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0, platformer_mode: bool = False) -> Optional[Tuple[int, int, int, int]]:
+        """Run YOLOv8n person detection.
 
         When *multi_fusion* is True, all confident detections are fused into a
         confidence-weighted centroid box (Priority 6 — Multi-ROI Fusion).
@@ -210,7 +238,7 @@ class _FrameDetector:
         if multi_fusion:
             hits = self._detect_yolo_multi(frame, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
             return _fuse_rois(hits, roi_persistence_score=roi_persistence_score) if hits else None
-        return self._detect_yolo(frame, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
+        return self._detect_yolo(frame, min_conf=min_conf, roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode)
 
     def detect_motion(self, frame) -> Optional[Tuple[int, int, int, int]]:
         cv2 = self.cv2
@@ -245,7 +273,7 @@ class _FrameDetector:
         return (int(x), int(y), int(w), int(h))
 
     def detect(
-        self, frame, mode: str, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0
+        self, frame, mode: str, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0, platformer_mode: bool = False
     ) -> Optional[Tuple[int, int, int, int]]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
@@ -255,7 +283,7 @@ class _FrameDetector:
             return None
 
         if mode == "person":
-            p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
+            p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode)
             if p is not None:
                 return p
             return self.detect_motion(frame)
@@ -264,10 +292,10 @@ class _FrameDetector:
             m = self.detect_motion(frame)
             if m is not None:
                 return m
-            return self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
+            return self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode)
 
         # hybrid
-        p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
+        p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode)
         m = self.detect_motion(frame)
         if p and m:
             # Merge boxes for broader action framing.

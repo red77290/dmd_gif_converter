@@ -10,6 +10,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     _auto = getattr(cfg, "auto_vertical_bias", False)
     _platformer = getattr(cfg, "platformer_mode", False)
 
+    # Force bias for intro frame (roi=None) depending on tracking mode
+    if roi is None:
+        if _auto and abs(_bias) < 1e-4:
+            _bias = -1.0  # person smart pushes up to ensure head is visible
+        elif _platformer and abs(_bias) < 1e-4:
+            _bias = 1.0   # platformer pushes down to ensure floor is visible
+
     _FLOOR_RATIO: float = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
 
     def _cy_min(crop_h: float) -> float:
@@ -22,7 +29,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         if abs(_bias) < 1e-4:
             return cy
         target_cy = _cy_max(crop_h) if _bias > 0 else _cy_min(crop_h)
-        cy = cy + _bias * (target_cy - cy)
+        cy = cy + abs(_bias) * (target_cy - cy)
         return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
 
     def _apply_auto_floor(cy: float, floor_y: float, crop_h: float) -> float:
@@ -34,57 +41,79 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cy = (frame_top + frame_h) / 2.0
         crop_w = float(frame_w)
         crop_h = float(frame_w) / target_ratio
-        if _auto or _platformer:
-            if floor_y_est is not None:
-                cy = _apply_auto_floor(cy, floor_y_est, crop_h)
-            else:
-                cy_max = _cy_max(crop_h)
-                cy = cy + 0.65 * (cy_max - cy)
-                cy = _clamp(cy, _cy_min(crop_h), cy_max)
-        else:
-            cy = _apply_bias(cy, crop_h)
+        cy = _apply_bias(cy, crop_h)
         return cx, cy, crop_w, crop_h
 
     x, y, w, h = roi
-    cx = x + w / 2.0
-    cy = y + h / 2.0
-
-    strength = _clamp(cfg.strength, 0.0, 1.0)
-    zoom = 1.0 + strength * (max(1.0, cfg.zoom_max) - 1.0)
-
-    roi_w = max(16.0, w * (1.0 + cfg.padding))
-    roi_h = max(8.0,  h * (1.0 + cfg.padding))
-    if roi_w / roi_h < target_ratio:
-        roi_w = roi_h * target_ratio
+    
+    # Anime Hair Protection: hair can extend significantly above YOLO's box.
+    if getattr(cfg, 'detector', 'person') == 'anime_face':
+        hair_headroom = h * 0.80
     else:
-        roi_h = roi_w / target_ratio
+        hair_headroom = h * 0.25
+        
+    ideal_top = max(0.0, y - hair_headroom)
+    total_h = h + (y - ideal_top)
+    
+    cx = x + w / 2.0
+    cy = ideal_top + total_h / 2.0
 
-    crop_w = roi_w / zoom
-    crop_h = roi_h / zoom
+    # Calculate the ideal crop that perfectly frames the subject + headroom + padding
+    ideal_crop_h = total_h * (1.0 + cfg.padding)
+    
+    if _auto or _platformer:
+        # Prevent the camera from abandoning the floor tracking by ensuring crop_h is large enough
+        # to fit both the character's full height AND the space reserved for the floor.
+        # We need total_h to fit between the top padding (5%) and the floor (_FLOOR_RATIO).
+        required_h = total_h / max(0.1, _FLOOR_RATIO - 0.05)
+        ideal_crop_h = max(ideal_crop_h, required_h)
+        
+    ideal_crop_w = ideal_crop_h * target_ratio
+    
+    if ideal_crop_w < w * (1.0 + cfg.padding):
+        ideal_crop_w = w * (1.0 + cfg.padding)
+        ideal_crop_h = ideal_crop_w / target_ratio
+
+    tight_w = ideal_crop_w
+    loose_w = frame_w
+    
+    strength = _clamp(cfg.strength, 0.0, 1.0)
+    # strength=1.0 -> tight framing. strength=0.0 -> loose framing (show context)
+    crop_w = loose_w - strength * (loose_w - tight_w)
+
+    # Enforce zoom_max (maximum zoom-in from full frame)
+    min_allowed_w = frame_w / max(1.0, cfg.zoom_max)
+    crop_w = max(crop_w, min_allowed_w)
+    
+    # Ensure we never crop tighter than the person's required bounding box
+    crop_w = max(crop_w, tight_w)
 
     if _platformer:
         crop_w = min(float(frame_w), crop_w * 1.5)
-        crop_h = crop_w / target_ratio
 
-
-    min_crop_w = max(float(cfg.target_width) / 4,
-                     float(frame_w) / max(1.0, cfg.zoom_max))
-    min_crop_h = min_crop_w / target_ratio
-    crop_w = max(crop_w, min_crop_w)
-    crop_h = max(crop_h, min_crop_h)
-
-    crop_w = crop_h * target_ratio
-    if crop_w > float(frame_w):
-        crop_w = float(frame_w)
-        crop_h = float(frame_w) / target_ratio
+    crop_h = crop_w / target_ratio
 
     if _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
-        cy = _apply_auto_floor(cy, fy, crop_h)
+        cy_floor = _apply_auto_floor(cy, fy, crop_h)
+        
+        # Priority: Keep head+hair visible over floor.
+        # If the floor-tracked camera top is lower than the ideal top of the hair,
+        # pull the camera up to perfectly frame the hair and face.
+        if (cy_floor - crop_h / 2.0) > ideal_top:
+            cy = ideal_top + crop_h / 2.0
+        else:
+            cy = cy_floor
     else:
         cy = _apply_bias(cy, crop_h)
+        
+        # Head protection: if the camera window is shorter than the subject+hair,
+        # pin the camera to the top so the hair and face are guaranteed visible.
+        if crop_h < total_h:
+            cy = ideal_top + crop_h / 2.0
 
     cy = _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
+    
 
     return cx, cy, crop_w, crop_h
 
@@ -97,6 +126,7 @@ def _smooth(prev, curr, smoothness: float):
 
 
 def _crop_frame(frame, cam_rect):
+    import numpy as np
     h, w = frame.shape[:2]
     cx, cy, cw, ch = cam_rect
 
@@ -105,25 +135,34 @@ def _crop_frame(frame, cam_rect):
 
     x1 = int(round(cx - cw / 2.0))
     y1 = int(round(cy - ch / 2.0))
-
-    if x1 + out_w > w:
-        x1 = w - out_w
-    if x1 < 0:
-        x1 = 0
-    if y1 + out_h > h:
-        y1 = h - out_h
-    if y1 < 0:
-        y1 = 0
-
     x2 = x1 + out_w
     y2 = y1 + out_h
 
-    x2 = min(w, x2)
-    y2 = min(h, y2)
+    # Create an empty black canvas
+    if len(frame.shape) == 3:
+        canvas = np.zeros((out_h, out_w, frame.shape[2]), dtype=frame.dtype)
+    else:
+        canvas = np.zeros((out_h, out_w), dtype=frame.dtype)
 
-    if x2 <= x1 or y2 <= y1:
-        return frame
-    return frame[y1:y2, x1:x2]
+    # Calculate intersection between the requested crop box and the actual frame
+    src_x1 = max(0, x1)
+    src_y1 = max(0, y1)
+    src_x2 = min(w, x2)
+    src_y2 = min(h, y2)
+
+    # If there is no overlap, return black canvas
+    if src_x1 >= src_x2 or src_y1 >= src_y2:
+        return canvas
+
+    # Calculate where this intersection goes on the canvas
+    dst_x1 = src_x1 - x1
+    dst_y1 = src_y1 - y1
+    dst_x2 = dst_x1 + (src_x2 - src_x1)
+    dst_y2 = dst_y1 + (src_y2 - src_y1)
+
+    canvas[dst_y1:dst_y2, dst_x1:dst_x2] = frame[src_y1:src_y2, src_x1:src_x2]
+
+    return canvas
 
 
 def _apply_look_ahead(

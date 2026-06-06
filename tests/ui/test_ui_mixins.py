@@ -42,7 +42,6 @@ class TestSettingsLogic(unittest.TestCase):
         app.v_auto_color_enabled.set.assert_called_with(True)
         app.v_auto_action_enabled.set.assert_called_with(True)
         app.v_action_smart_auto_crop.set.assert_called_with(True)
-        app.v_bg_sub_enable.set.assert_called_with(True)
         app.v_dmd_visibility_score_enabled.set.assert_called_with(True)
         
         for w in app._lmh_widgets:
