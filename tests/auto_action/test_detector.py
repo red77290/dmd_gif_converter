@@ -314,5 +314,61 @@ class TestROIHistoryWeightedAverage(unittest.TestCase):
         self.assertLess(dist_new, dist_old,
                         "The weighted average x must be closer to the newest ROI")
 
+class TestDetectorONNXDimensions(unittest.TestCase):
+    @patch("src.auto_action.detector._ensure_yolo_model")
+    def test_dynamic_dimensions_used(self, mock_ensure):
+        import numpy as np
+        # Mock ensure to return a fake path so we proceed to load
+        mock_ensure.return_value = "dummy.onnx"
+        
+        # We need to mock onnxruntime since it might not be installed or we don't want to load a real model
+        with patch.dict('sys.modules', {'onnxruntime': MagicMock()}):
+            import onnxruntime as ort
+            mock_session = MagicMock()
+            ort.InferenceSession.return_value = mock_session
+            
+            # Setup a mock input with dynamic shape [1, 3, 320, 320]
+            mock_input = MagicMock()
+            mock_input.shape = [1, 3, 320, 320]
+            mock_input.name = "images"
+            mock_session.get_inputs.return_value = [mock_input]
+            
+            # Setup a mock output pred
+            # [1, 84, 2100]. We need the first class (index 4) to have a high score.
+            # pred[:4].T is boxes, pred[4:].T is class_prob.
+            mock_output = np.zeros((1, 84, 2100), dtype=np.float32)
+            # Make the first proposal a highly confident person (class 0 is index 4)
+            mock_output[0, 4, 0] = 0.99  # person score
+            # Set the box cx, cy, w, h in 320x320 space
+            mock_output[0, 0, 0] = 160.0  # cx
+            mock_output[0, 1, 0] = 160.0  # cy
+            mock_output[0, 2, 0] = 100.0  # w
+            mock_output[0, 3, 0] = 200.0  # h
+            mock_session.run.return_value = [mock_output]
+            
+            from src.auto_action.detector import _FrameDetector
+            detector = _FrameDetector()
+            
+            # Verify dimensions were dynamically loaded during init (_try_load_onnx)
+            self.assertEqual(detector._model_h, 320)
+            self.assertEqual(detector._model_w, 320)
+            
+            # Provide a dummy frame 1920x1080
+            dummy_frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            
+            res = detector._detect_yolo(dummy_frame)
+            
+            # Verify the result is not None
+            self.assertIsNotNone(res)
+            
+            # Original frame is 1920x1080. Model is 320x320.
+            # Scale x: 1920 / 320 = 6.0
+            # Scale y: 1080 / 320 = 3.375
+            # Original w = 100 * 6.0 = 600
+            # Original h = 200 * 3.375 = 675
+            x, y, bw, bh = res
+            self.assertEqual(bw, 600)
+            self.assertEqual(bh, 675)
+
 if __name__ == "__main__":
     unittest.main()

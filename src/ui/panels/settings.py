@@ -37,7 +37,7 @@ from src.ui.dmd_led_sim import LED_SIM_SCALE, LED_SIM_GAP, LED_SIM_MAX_W, apply_
 class SettingsPanelMixin:
     def _build_right_panel(self):
         rp = ctk.CTkFrame(self, fg_color="transparent")
-        rp.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        rp.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
         rp.grid_rowconfigure(1, weight=1)
         rp.grid_columnconfigure(0, weight=1)
         self._build_preview_area(rp)
@@ -966,7 +966,6 @@ class SettingsPanelMixin:
             self.v_auto_color_enabled.set(True)
             self.v_auto_action_enabled.set(True)
             self.v_action_smart_auto_crop.set(True)
-            self.v_bg_sub_enable.set(True)
             self.v_dmd_visibility_score_enabled.set(True)
             self.v_dmd_readability_score_enabled.set(True)
             # Grey out every registered widget
@@ -1388,7 +1387,6 @@ class SettingsPanelMixin:
                 "auto_color_enabled":     True,
                 "auto_action_enabled":    True,
                 "action_smart_auto_crop": True,
-                "bg_sub_enable":          True,
                 "dmd_visibility_score_enabled": True,
                 "dmd_readability_score_enabled": True,
             } if self.v_let_me_handle_it.get() else {}
