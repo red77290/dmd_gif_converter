@@ -108,6 +108,7 @@ class MiddlePanelMixin:
         
         self._tree_converted.heading("#0", command=lambda: self._sort_converted("name"))
         self._tree_converted.heading("Score", command=lambda: self._sort_converted("score"))
+        self._tree_converted.heading("Category", command=lambda: self._sort_converted("Category"))
 
         # ── Cleanup Assistant ────────────────────────────────────────────────
         cleanup_frame = ctk.CTkFrame(mp, fg_color="#1a1a2e", corner_radius=6)
@@ -246,18 +247,56 @@ class MiddlePanelMixin:
         self._update_converted_count()
         self._update_statistics()
         self._selected_converted_iid = ""
+        if hasattr(self, "_stop_dmd_preview"):
+            self._stop_src_preview()
+            self._stop_auto_preview()
+            self._stop_dmd_preview()
+            self._draw_canvas_idle()
+            self._draw_auto_canvas_idle()
+            self._draw_dmd_canvas_idle()
 
     def _clear_converted(self):
         if not self._converted_data:
             return
-        if not messagebox.askyesno("Clear List", "Clear all items from the converted list?\n(Files will NOT be deleted from disk)"):
+        if not messagebox.askyesno("Clear List", "Clear all items from the converted list AND delete them from disk?"):
             return
-        self._tree_converted.delete(*self._tree_converted.get_children())
+            
+        try:
+            import send2trash
+            safe_delete = send2trash.send2trash
+        except ImportError:
+            self._log("send2trash module missing. Deleting permanently instead.", "warning")
+            import os
+            safe_delete = os.remove
+            
+        for data in self._converted_data.values():
+            path = data["path"]
+            if os.path.exists(path):
+                try: safe_delete(path)
+                except: pass
+            sidecar = path + ".scores.json"
+            if os.path.exists(sidecar):
+                try: safe_delete(sidecar)
+                except: pass
+
+        children = self._tree_converted.get_children()
+        if children:
+            self._tree_converted.delete(*children)
         self._converted_data.clear()
         self._converted_paths.clear()
         self._update_converted_count()
         self._update_statistics()
         self._selected_converted_iid = ""
+        
+        # Clear the preview panel
+        if hasattr(self, "_stop_dmd_preview"):
+            self._stop_src_preview()
+            self._stop_auto_preview()
+            self._stop_dmd_preview()
+            self._draw_canvas_idle()
+            self._draw_auto_canvas_idle()
+            self._draw_dmd_canvas_idle()
+
 
     def _move_and_clear_converted(self):
         out_dir = self.v_output_dir.get().strip()
@@ -296,7 +335,9 @@ class MiddlePanelMixin:
             self._log(f"🚚 Successfully moved {moved} files to {out_dir}")
             
         # Clear the list automatically
-        self._tree_converted.delete(*self._tree_converted.get_children())
+        children = self._tree_converted.get_children()
+        if children:
+            self._tree_converted.delete(*children)
         self._converted_data.clear()
         self._converted_paths.clear()
         self._update_converted_count()
@@ -315,7 +356,9 @@ class MiddlePanelMixin:
         elif preset == "Poor And Above": min_score = 31
 
         # Re-populate tree based on filter
-        self._tree_converted.delete(*self._tree_converted.get_children())
+        children = self._tree_converted.get_children()
+        if children:
+            self._tree_converted.delete(*children)
         
         for iid, data in self._converted_data.items():
             path = data["path"]
@@ -335,18 +378,28 @@ class MiddlePanelMixin:
             self._tree_converted.insert("", "end", iid=iid, text=f" {disp}", values=(score_str, rating), tags=(rating,))
 
     def _sort_converted(self, col):
+        if not hasattr(self, "_sort_dirs"):
+            self._sort_dirs = {}
+            
+        # Toggle direction
+        self._sort_dirs[col] = not self._sort_dirs.get(col, False)
+        reverse = self._sort_dirs[col]
+        
         items = [(self._tree_converted.set(k, col) if col != "name" else self._tree_converted.item(k)["text"], k) for k in self._tree_converted.get_children("")]
         
         if col == "score":
-            # Extract numeric score
             def _get_score(val):
                 try:
                     return int(val.split(" ")[1].replace("%", ""))
                 except:
                     return 0
-            items.sort(key=lambda x: _get_score(x[0]), reverse=True)
+            items.sort(key=lambda x: _get_score(x[0]), reverse=reverse)
+        elif col == "Category":
+            # Sort by predefined category levels
+            rating_order = {"Excellent": 5, "Good": 4, "Acceptable": 3, "Poor": 2, "Bad": 1, "Unknown": 0}
+            items.sort(key=lambda x: rating_order.get(x[0], 0), reverse=reverse)
         else:
-            items.sort(key=lambda t: t[0].lower())
+            items.sort(key=lambda t: t[0].lower(), reverse=reverse)
             
         for index, (val, k) in enumerate(items):
             self._tree_converted.move(k, "", index)
@@ -389,33 +442,45 @@ class MiddlePanelMixin:
                 import send2trash
                 safe_delete = send2trash.send2trash
             except ImportError:
-                import os
                 self._log("send2trash module missing. Deleting permanently instead.", "warning")
                 safe_delete = os.remove
                 
             deleted = 0
             for iid, path in to_remove:
                 try:
-                    safe_delete(path)
-                    
-                    # Also trash the sidecar if it exists
-                    sidecar_path = path + ".scores.json"
-                    if os.path.exists(sidecar_path):
-                        try:
-                            safe_delete(sidecar_path)
-                        except Exception:
-                            pass
-                            
-                    self._converted_paths.discard(path)
-                    del self._converted_data[iid]
-                    # remove from tree
-                    if self._tree_converted.exists(iid):
-                        self._tree_converted.delete(iid)
-                        
-                    deleted += 1
+                    if os.path.exists(path):
+                        safe_delete(path)
                 except Exception as e:
                     self._log(f"Failed to trash {path}: {e}", "warning")
+                    
+                # Also trash the sidecar if it exists
+                sidecar_path = path + ".scores.json"
+                if os.path.exists(sidecar_path):
+                    try:
+                        safe_delete(sidecar_path)
+                    except Exception:
+                        pass
+                        
+                self._converted_paths.discard(path)
+                if iid in self._converted_data:
+                    del self._converted_data[iid]
+                # remove from tree
+                if self._tree_converted.exists(iid):
+                    self._tree_converted.delete(iid)
+                    
+                deleted += 1
                     
             self._update_converted_count()
             self._update_statistics()
             self._log(f"🧹 Trashed {deleted} files.")
+            
+            # Clear preview if the selected item was trashed
+            if self._selected_converted_iid in [iid for iid, _ in to_remove]:
+                self._selected_converted_iid = ""
+                if hasattr(self, "_stop_dmd_preview"):
+                    self._stop_src_preview()
+                    self._stop_auto_preview()
+                    self._stop_dmd_preview()
+                    self._draw_canvas_idle()
+                    self._draw_auto_canvas_idle()
+                    self._draw_dmd_canvas_idle()

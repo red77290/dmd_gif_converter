@@ -437,8 +437,10 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 | **Multi-sélection dans la liste** | Ctrl+clic / Shift+clic pour sélectionner plusieurs fichiers · Suppr les efface tous d'un coup |
 | **Listes de Conversion Intelligentes** | Les fichiers passent de **En attente** à **Fichiers Convertis** automatiquement à la fin de la conversion. |
 | **DMD Quality Score** | Les fichiers convertis reçoivent un Score de Qualité (0-100%) coloré (de Rouge à Vert Premium) basé sur le contraste, l'occupation et la séparation des formes. |
-| **Assistant de Nettoyage** | Mettez instantanément à la corbeille les mauvaises conversions (ex: <=30%, <=50%, ou seuil personnalisé) en un clic. |
-| **Batch Auto-Cleanup** | Option activable en mode dossier (Batch) : met automatiquement à la corbeille les GIFs dont le score est inférieur au seuil que vous avez choisi. |
+| **Assistant de Nettoyage** | Mettez instantanément à la corbeille les mauvaises conversions (ex: <=30%, <=50%, ou seuil personnalisé) en un clic. Les fichiers et métadonnées sont physiquement supprimés du disque. |
+| **Liste Triable** | Cliquez sur les en-têtes de colonnes `File`, `Score` ou `Category` de la liste des Fichiers Convertis pour trier les éléments par ordre croissant ou décroissant. |
+| **Dossier Temporaire Intelligent** | Si aucun dossier de destination n'est défini, les fichiers sont créés dans un sous-dossier `dmd_tmp/` au sein du dossier source, évitant de mélanger les sources avec les conversions. |
+| **Batch Auto-Cleanup** | Quand vous traitez un dossier complet, vous pouvez demander au programme de mettre à la corbeille automatiquement les conversions qui n'atteignent pas un certain score. |
 | **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), alimente la liste automatiquement |
 | **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
 | **Diagnostic DMD** | Cliquez sur un fichier converti pour voir son score, son classement, et les raisons expliquant son score. |

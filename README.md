@@ -422,9 +422,11 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 | **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
 | **Multi-select file list** | Ctrl+click / Shift+click to select multiple files · Del removes all selected at once |
 | **Smart Conversion Lists** | Files move from **Files To Convert** to **Converted Files** automatically upon completion. |
-| **DMD Quality Score** | Converted files receive a 0-100% Quality Score and are color-coded (Red to Premium Green) based on contrast, occupancy, and shape separation. |
-| **Cleanup Assistant** | Instantly send bad conversions (e.g. <=30%, <=50%, or custom threshold) to the trash with one click. |
-| **Batch Auto-Cleanup** | When processing a whole folder, you can optionally auto-trash conversions scoring below a threshold you define. |
+| **DMD Quality Score** | Converted files receive a 0-100% Quality Score and |
+| **Preview Panel** | Shows the original video, the OpenCV Auto-Action crop bounding box (if enabled), and the final DMD representation. |
+| **Cleanup Assistant** | Instantly send bad conversions (e.g. <=30%, <=50%, or custom threshold) to the trash with one click. Files and metadata are permanently removed from the disk. |
+| **Sortable List** | Click on the `File`, `Score`, or `Category` column headers in the Converted List to sort items in ascending/descending order. |
+| **Smart Temp Folder** | If no output directory is defined, all files are stored in a `dmd_tmp/` subfolder inside your source folder to prevent mixing converted GIFs with your source videos. |
 | **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity (up to 300), auto-populates the list |
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **Diagnostic Preview** | Clicking a converted file shows its score, rating, and bullet-point reasons explaining the score. |

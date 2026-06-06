@@ -47,9 +47,8 @@ class ActionsPanelMixin:
         self._params_scroll.grid_columnconfigure(0, weight=1)
         self._build_params_panel(self._params_scroll)
 
-        ar = ctk.CTkFrame(bot, width=310)
+        ar = ctk.CTkScrollableFrame(bot, width=310)
         ar.grid(row=0, column=1, sticky="nsew")
-        ar.grid_propagate(False)
         ar.grid_columnconfigure(0, weight=1)
         ar.grid_rowconfigure(3, weight=1)
         self._build_actions_panel(ar)
@@ -110,12 +109,26 @@ class ActionsPanelMixin:
         )
         self._status_lbl.grid(row=5, column=0, padx=4, pady=2)
 
+        self._btn_stop = ctk.CTkButton(
+            af, text="⏹ Force Stop",
+            command=self.cancel_conversion,
+            height=30, fg_color="#c0392b", hover_color="#922b21",
+            font=ctk.CTkFont(size=12, weight="bold"), state="disabled"
+        )
+        self._btn_stop.grid(row=6, column=0, padx=4, pady=(2, 4), sticky="ew")
+
         self._btn_toggle_logs = ctk.CTkButton(
             parent, text="📝 Show / Hide Logs", width=140, height=28,
             fg_color="#3a3a4a", hover_color="#50506b",
             command=self._toggle_global_logs
         )
         self._btn_toggle_logs.grid(row=2, column=0, padx=12, pady=(10, 4), sticky="w")
+
+    def cancel_conversion(self):
+        if hasattr(self, "_cancel_event"):
+            self._cancel_event.set()
+            self._log("⚠️  Cancellation requested... Interruption in progress.", "warning")
+            self._btn_stop.configure(state="disabled", text="Stopping...")
 
     # ══════════════════════════════════════════════════════════════════════════
     #  FILE MANAGEMENT
@@ -131,15 +144,18 @@ class ActionsPanelMixin:
     # ══════════════════════════════════════════════════════════════════════════
 
     def _out_path(self, src):
-        stem    = Path(src).stem
-        out_dir = self.v_output_dir.get().strip() or str(Path(src).parent)
-        out = os.path.join(out_dir, stem + ".gif")
-        # Prevent silently overwriting the source file
-        if os.path.normpath(out) == os.path.normpath(src):
-            out = os.path.join(out_dir, stem + "_dmd.gif")
-        return out
+        base = Path(src).stem + "_dmd" + Path(src).suffix
+        out_dir = self.v_output_dir.get().strip()
+        if out_dir and os.path.isdir(out_dir):
+            return str(Path(out_dir) / base)
+            
+        # Use a temporary folder in the source directory by default
+        tmp_dir = Path(src).parent / "dmd_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        return str(tmp_dir / base)
 
     def convert_selected(self):
+        if hasattr(self, "_cancel_event"): self._cancel_event.clear()
         if not self._selected_iid:
             messagebox.showinfo("Info", "Select a file from the list first.")
             return
@@ -159,6 +175,7 @@ class ActionsPanelMixin:
         ).start()
 
     def convert_all(self):
+        if hasattr(self, "_cancel_event"): self._cancel_event.clear()
         if not self._file_data:
             messagebox.showinfo("Info", "The file list is empty.")
             return
@@ -177,12 +194,14 @@ class ActionsPanelMixin:
         ).start()
 
     def batch_folder(self):
+        if hasattr(self, "_cancel_event"): self._cancel_event.clear()
         folder_in = filedialog.askdirectory(title="Source folder — Batch")
         if not folder_in:
             return
         out_dir = self.v_output_dir.get().strip()
         if not out_dir:
-            out_dir = str(Path(folder_in).parent / (Path(folder_in).name + "_DMD"))
+            out_dir = str(Path(folder_in) / "dmd_tmp")
+            Path(out_dir).mkdir(parents=True, exist_ok=True)
         files = [
             f for f in os.listdir(folder_in)
             if Path(f).suffix.lower() in SUPPORTED_EXTENSIONS
@@ -200,28 +219,49 @@ class ActionsPanelMixin:
         ).start()
 
     def _run_tasks(self, tasks, params):
+        import concurrent.futures
         self.after(0, lambda: self._set_busy(True))
         total = len(tasks)
-        for i, (src, out, start_s, end_s, iid) in enumerate(tasks):
+        max_workers = int(params.get("max_workers", 2))
+        self.after(0, lambda w=max_workers: self._log(f"🚀  Convert all: {total} files using {w} workers..."))
+        
+        done_count = [0]
+        done_lock = threading.Lock()
+
+        def _process_one_task(task_tuple):
+            src, out, start_s, end_s, iid = task_tuple
+            if hasattr(self, "_cancel_event") and self._cancel_event.is_set():
+                return
+            
             self.after(0, lambda _iid=iid: self._set_file_status(_iid, "converting"))
             success, msg = process_file(
                 src, out, params, start_s, end_s,
-                callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv))
+                callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
+                cancel_event=getattr(self, "_cancel_event", None)
             )
             
             if success:
-                # Load score sidecar
                 from src.converter.quality import load_score_sidecar
                 score_result = load_score_sidecar(out) or {"score": 0, "rating": "Unknown", "color": "⚪", "reasons": ["No score"]}
-                # Move to converted panel
                 self.after(0, lambda _out=out, _res=score_result: self._add_converted_file(_out, _res))
-                # Remove from left panel
                 self.after(0, lambda _iid=iid: self._remove_specific_file(_iid))
             else:
                 self.after(0, lambda _iid=iid: self._set_file_status(_iid, "error"))
                 
-            self.after(0, lambda p=(i + 1) / total: self._progress.set(p))
-        self.after(0, lambda: self._log(f"✅  {total} conversion(s) done."))
+            with done_lock:
+                done_count[0] += 1
+                progress = done_count[0] / total
+                self.after(0, lambda p=progress: self._progress.set(p))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_process_one_task, t) for t in tasks]
+            concurrent.futures.wait(futures)
+
+        if hasattr(self, "_cancel_event") and self._cancel_event.is_set():
+            self.after(0, lambda: self._log("🛑  List processing cancelled."))
+        else:
+            self.after(0, lambda: self._log(f"✅  {total} conversion(s) done."))
+            
         self.after(0, lambda: self._set_busy(False))
 
     def _run_batch_folder(self, folder_in, folder_out, params):
@@ -237,8 +277,14 @@ class ActionsPanelMixin:
             folder_in, folder_out, params,
             callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
             progress_callback=on_progress,
+            cancel_event=getattr(self, "_cancel_event", None)
         )
         
+        if hasattr(self, "_cancel_event") and self._cancel_event.is_set():
+            self.after(0, lambda: self._log("🛑  Batch processing cancelled."))
+            self.after(0, lambda: self._set_busy(False))
+            return
+
         # Perform Auto-Cleanup if enabled
         if self.v_batch_auto_trash.get():
             try:
@@ -296,7 +342,10 @@ class ActionsPanelMixin:
         for btn in (self._btn_convert, self._btn_all, self._btn_batch):
             btn.configure(state=state)
         for btn in (self._btn_all_prev, self._btn_src, self._btn_auto, self._btn_dmd):
-            btn.configure(state=state)
+            if hasattr(self, "_btn_src"):
+                btn.configure(state=state)
+        if hasattr(self, "_btn_stop"):
+            self._btn_stop.configure(state="normal" if busy else "disabled", text="⏹ Force Stop")
         self._status_lbl.configure(text="⏳  Converting…" if busy else "Ready")
         if not busy:
             self._progress.set(1.0)

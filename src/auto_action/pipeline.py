@@ -9,7 +9,7 @@ from .analyzer import VideoAnalyzer
 from .tracker import TrackingEngine
 from .renderer import Renderer
 
-def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
+def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=None):
     """Create an auto-framed temporary MP4 and return (ok, out_path, message)."""
     try:
         import cv2
@@ -81,6 +81,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             cam_intro = (cx, cy, crop_w_full, crop_h_src)
             
             out_frame = renderer.render(first_frame_for_intro, cam_intro)
+            if cancel_event and cancel_event.is_set():
+                _pipe_alive = False
+                break
             if not writer.write_frame(out_frame):
                 _pipe_alive = False
                 break
@@ -98,6 +101,10 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     dynamic_smoothness = max(0.50, min(cfg.smoothness, required_smoothness))
 
     while _pipe_alive:
+        if cancel_event and cancel_event.is_set():
+            _pipe_alive = False
+            break
+
         ok, frame = reader.read()
         if not ok:
             break
@@ -125,6 +132,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         settle_px = 1.0
         extra = 0
         while extra < max_extra:
+            if cancel_event and cancel_event.is_set():
+                break
+
             if cam_prev is None:
                 cam_next = cam_now
                 displacement = 0.0

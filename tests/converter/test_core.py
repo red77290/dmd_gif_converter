@@ -233,13 +233,15 @@ class TestProcessFile(unittest.TestCase):
     def _mock_ffmpeg_ok(self):
         mock = MagicMock()
         mock.returncode = 0
-        return patch("src.converter.core.subprocess.run", return_value=mock)
+        mock.poll.return_value = 0
+        return patch("src.converter.core.subprocess.Popen", return_value=mock)
 
     def _mock_ffmpeg_fail(self, stderr=b"some error\nlast error line"):
         mock = MagicMock()
         mock.returncode = 1
-        mock.stderr = stderr
-        return patch("src.converter.core.subprocess.run", return_value=mock)
+        mock.poll.return_value = 1
+        mock.stderr.read.return_value = stderr
+        return patch("src.converter.core.subprocess.Popen", return_value=mock)
 
     def test_success_returns_true(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -282,12 +284,14 @@ class TestProcessFile(unittest.TestCase):
             captured_cmd.extend(cmd)
             m = MagicMock()
             m.returncode = 0
+            m.poll.return_value = 0
+            m.stderr.read.return_value = b""
             return m
 
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
             with self._mock_metadata():
-                with patch("src.converter.core.subprocess.run", side_effect=fake_run):
+                with patch("src.converter.core.subprocess.Popen", side_effect=fake_run):
                     conv.process_file(
                         "input.mp4", out,
                         params={"mode": "cinema", "target_width": 256, "target_height": 64}
@@ -302,12 +306,14 @@ class TestProcessFile(unittest.TestCase):
                 captured_cmd.extend(cmd)
             m = MagicMock()
             m.returncode = 0
+            m.poll.return_value = 0
+            m.stderr.read.return_value = b""
             return m
 
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
             with self._mock_metadata():
-                with patch("src.converter.core.subprocess.run", side_effect=fake_run):
+                with patch("src.converter.core.subprocess.Popen", side_effect=fake_run):
                     conv.process_file("input.mp4", out, start_s=5.0)
         self.assertIn("-ss", captured_cmd)
 
@@ -318,13 +324,15 @@ class TestProcessFile(unittest.TestCase):
             captured_cmds.append(list(cmd))
             m = MagicMock()
             m.returncode = 0
+            m.poll.return_value = 0
+            m.stderr.read.return_value = b""
             return m
 
         with tempfile.TemporaryDirectory() as tmpdir:
             out = os.path.join(tmpdir, "out.gif")
             # Durée source = 30 s, max_duration = 5 s
             with patch("src.converter.core.get_metadata", return_value=(640, 480, 25.0, 30.0)):
-                with patch("src.converter.core.subprocess.run", side_effect=fake_run):
+                with patch("src.converter.core.subprocess.Popen", side_effect=fake_run):
                     conv.process_file("input.mp4", out, params={"max_duration": 5.0})
         # La durée de sortie dans -t doit être <= 5 s (+ frames scroll)
         # On vérifie juste que l'appel ffmpeg est bien fait

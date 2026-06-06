@@ -35,13 +35,21 @@ Usage:
 """
 
 import os
-import re
 import sys
+
+# Fix for macOS CoreFoundation fork safety issue with multithreading + subprocess + ONNX
+# MUST BE SET BEFORE tkinter or any framework is loaded
+if sys.platform == "darwin":
+    os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
+
+import threading
+import tkinter as tk
+
+import re
 import platform
 import glob
 import logging
 import shutil
-import threading
 import tempfile
 import subprocess
 from pathlib import Path
@@ -265,6 +273,9 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
 
         # ── Tkinter vars — LED pixel simulation ───────────────────────────────
         self.v_led_sim = tk.BooleanVar(value=True)   # ON by default
+
+        # ── Global Cancellation Event ─────────────────────────────────────────
+        self._cancel_event = threading.Event()
 
         # ── Attach auto-refresh debounce to every param that affects DMD ──────
         _watch = [
