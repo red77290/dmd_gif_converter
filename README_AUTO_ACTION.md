@@ -1,4 +1,4 @@
-# Auto Action Framing
+# Auto Action Framing (v5.1.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
@@ -24,6 +24,13 @@ It creates an intermediate video that follows action/person areas at the target 
 **v5.0.0 architectural improvements:**
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
+
+**v5.1.0 architectural improvements:**
+- **Full OOP refactoring**: Every class now implements a strict ABC interface (`IDetector`, `ITracker`, `IRenderer`). See [ARCHITECTURE.md](ARCHITECTURE.md) for class diagrams and sequence diagrams.
+- **`DetectorFactory`**: The ONNX detector instantiation is now decoupled behind a factory — swap the backend without touching the pipeline.
+- **`TrackingEngine` implements `ITracker`**: `last_roi` and `cam_full_view` are now proper `@property` accessors, not raw attributes.
+- **`Renderer` implements `IRenderer`**: Crop and render logic is fully encapsulated.
+- **`AbstractDetector`**: Intermediate abstract class between `IDetector` and `_FrameDetector` — extend it to add custom backends without subclassing the concrete implementation.
 
 ---
 

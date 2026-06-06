@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v5.0.0
+# 🎞️ DMD GIF Converter — v5.1.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -6,13 +6,19 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ---
 
+## What is New in v5.1.0?
+- **🏛️ Full OOP Architecture**: The entire codebase has been refactored using Abstract Base Classes, interfaces, and an MVC pattern. Every layer now defines strict contracts (`IConverter`, `IDetector`, `ITracker`, `IRenderer`, `IModel`, `IController`). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full class diagrams and sequence diagrams.
+- **🔩 Service Layer**: `FFmpegConverter`, `BatchOrchestrator`, and `PillowOverlayService` are now standalone injectable services implementing their respective interfaces — making them independently testable and replaceable.
+- **🧩 MVC UI Layer**: `AppState` (Model), `ConversionController`, and `PreviewController` separate state from logic from rendering.
+- **🏭 DetectorFactory**: Instantiation of the ONNX detector is now handled by a Factory, making it trivial to swap or extend the detection backend.
+
 ## What is New in v5.0.0?
 - **🏗️ Under-the-hood Refactoring**: Massive architectural overhaul splitting the monolithic scripts into a modular `src/` package (`auto_action`, `converter`, `ui`) for easier debugging and maintainability.
 - **🤖 Let me handle it**: Now explicitly enforces visibility scoring for optimal framing.
 - **👁️ DMD Quality Scoring & Smart Conversion**: The UI now separates pending files from converted files. Every generated GIF receives a Quality Score (0-100%). Use the **Cleanup Assistant** to instantly trash bad conversions!
 
 ## Table of Contents
-- [🚀 Let Me Handle It — one-click full-auto mode](#-let-me-handle-it--one-click-full-auto-mode-new-in-v330)
+- [🚀 Let Me Handle It — one-click full-auto mode](#-let-me-handle-it--one-click-full-auto-mode-new-in-v500)
 - [🔍 GIF Search — download GIFs directly from the UI](#-gif-search--download-gifs-directly-from-the-ui--new-in-v300)
 - [🎞️ Per-GIF Config — independent settings per file](#️-per-gif-config--independent-settings-per-file)
 - [🤖 Auto Action Framing — AI-powered cinematic camera](#-auto-action-framing--ai-powered-cinematic-camera)
@@ -26,6 +32,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 - [⚙️ Parameters](#-parameters)
 - [🔍 How it works](#-how-it-works)
 - [❓ Troubleshooting](#-troubleshooting)
+- [🏛️ Technical Architecture](ARCHITECTURE.md)
 - [📄 License](#-license)
 - [🙏 Credits](#-credits)
 
