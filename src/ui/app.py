@@ -206,6 +206,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, PreviewPanelMixin, SettingsPanelM
         self.v_action_smart_auto_crop    = tk.BooleanVar(value=False)
         self.v_bg_sub_enable       = tk.BooleanVar(value=False) # New background subtraction checkbox
         self.v_dmd_visibility_score_enabled = tk.BooleanVar(value=False) # NEW: Enable DMD Visibility Score
+        self.v_dmd_readability_score_enabled = tk.BooleanVar(value=True) # NEW: Enable DMD Readability Score
 
         # ── Tkinter vars — Multi-dalle / Tiling ───────────────────────────────
         self.v_target_width  = tk.IntVar(value=DEFAULT_PARAMS["target_width"])
@@ -274,7 +275,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, PreviewPanelMixin, SettingsPanelM
             self.v_action_top_crop, self.v_action_auto_top_crop,
             self.v_action_vertical_bias,
             self.v_action_auto_vertical_bias, self.v_action_smart_auto_crop,
-            self.v_bg_sub_enable, self.v_dmd_visibility_score_enabled, # NEW: DMD Visibility Score
+            self.v_bg_sub_enable, self.v_dmd_visibility_score_enabled, self.v_dmd_readability_score_enabled, # NEW: DMD Visibility Score & Readability
             self.v_target_width, self.v_target_height, self.v_target_preset,
             self.v_text_overlay_enabled, self.v_text_content, # Added text overlay vars
             self.v_text_font_size, self.v_text_color, self.v_text_position, # Added text overlay vars

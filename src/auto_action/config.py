@@ -64,6 +64,20 @@ class AutoActionConfig:
     # combined with P2 temporal memory the camera holds its last known position
     # rather than jumping to centre.  0.0 = accept everything (legacy).
     roi_confidence_min: float = 0.0   # [0..1], 0 = disabled
+
+    # ── VNext Priority 1 & 8 — Dynamic ROI Confidence & Persistence ──────────
+    dynamic_roi_confidence_enabled: bool = True
+    roi_persistence_score_enabled: bool = True
+
+    # ── VNext Priority 6 — Scroll Direction Memory ───────────────────────────
+    scroll_direction_memory_enabled: bool = True
+
+    # ── VNext Priority 9 — DMD Readability Predictor ─────────────────────────
+    dmd_readability_score_enabled: bool = True
+
+    # ── VNext Priority 10 — Auto Tuning Dataset Generator ────────────────────
+    auto_tuning_dataset_dir: Optional[str] = None  # None = disabled
+
     
     # API backward-compatibility only
     out_w: int = 0
