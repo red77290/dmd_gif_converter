@@ -278,7 +278,7 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         """If _FrameDetector() raises, the function should return safe defaults."""
         cap = self._make_cap()
         cfg = self._cfg()
-        with patch("src.auto_action.pipeline._FrameDetector", side_effect=RuntimeError("mock fail")):
+        with patch("src.auto_action.detector._FrameDetector", side_effect=RuntimeError("mock fail")):
             result = _smart_auto_crop_decision(cap, cfg, 640, 480)
         self.assertFalse(result["auto_bottom_crop"])
         self.assertFalse(result["auto_top_crop"])
@@ -286,7 +286,7 @@ class TestSmartAutoCropDecision(unittest.TestCase):
 
     def test_preprocess_smart_crop_exception_degrades_gracefully(self):
         """If _smart_auto_crop_decision raises, preprocess falls back without crashing."""
-        with patch("src.auto_action.pipeline._smart_auto_crop_decision",
+        with patch("src.auto_action.analyzer._smart_auto_crop_decision",
                    side_effect=RuntimeError("boom")):
             cfg = AutoActionConfig(smart_auto_crop=True)
             ok, out, msg = preprocess_video_for_dmd("/nonexistent_file_xyz.mp4", cfg)

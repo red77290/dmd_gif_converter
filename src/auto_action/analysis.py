@@ -139,7 +139,18 @@ def _compute_auto_crop_margins(  # noqa: C901
 
 def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count: int = 80) -> dict:
     from .detector import _FrameDetector
-    detector = _FrameDetector()
+    try:
+        detector = _FrameDetector()
+    except Exception as e:
+        return {
+            "auto_bottom_crop":   False,
+            "auto_top_crop":      False,
+            "auto_vertical_bias": False,
+            "top_pct":            0.0,
+            "bottom_pct":         0.0,
+            "face_priority":      False,
+            "reasons":            [f"detector init failed: {e!r}"],
+        }
     import cv2
     _EMPTY = {
         "auto_bottom_crop":   False,

@@ -8,10 +8,12 @@ import cv2
 class TestPipelineMocks(unittest.TestCase):
 
     @patch("cv2.VideoCapture")
-    @patch("src.auto_action.pipeline._FrameDetector.detect")
-    @patch("src.auto_action.pipeline.subprocess.Popen")
-    @patch("src.auto_action.pipeline.subprocess.run")
-    def test_preprocess_video_success(self, mock_run, mock_popen, mock_detect, mock_vc):
+    @patch("src.auto_action.detector._FrameDetector.detect")
+    @patch("src.auto_action.writer.subprocess.Popen")
+    @patch("src.auto_action.reader.subprocess.run")
+    @patch("os.path.isfile")
+    def test_preprocess_video_success(self, mock_isfile, mock_run, mock_popen, mock_detect, mock_vc):
+        mock_isfile.return_value = True
         mock_cap = MagicMock()
         mock_cap.isOpened.return_value = True
         mock_cap.get.side_effect = lambda prop: 30.0 if prop == cv2.CAP_PROP_FPS else (100 if prop == cv2.CAP_PROP_FRAME_WIDTH else (50 if prop == cv2.CAP_PROP_FRAME_HEIGHT else 10))
