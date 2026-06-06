@@ -607,7 +607,9 @@ class LeftPanelMixin:
         self._stop_src_preview()
         self._stop_auto_preview()
         self._stop_dmd_preview()
-        self._tree.delete(*self._tree.get_children())
+        children = self._tree.get_children()
+        if children:
+            self._tree.delete(*children)
         self._file_data.clear()
         self._file_paths.clear()
         self._per_gif_configs.clear()  # clear all per-gif configs
