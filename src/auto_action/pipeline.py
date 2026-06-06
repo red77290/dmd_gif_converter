@@ -7,7 +7,7 @@ import numpy as np
 from .config import AutoActionConfig
 from .detector import _FrameDetector, available_detectors
 from .camera import _build_camera_rect, _smooth, _crop_frame, _apply_look_ahead
-from .analysis import _clamp, _FloorEstimator, _compute_auto_crop_margins, _smart_auto_crop_decision, _calculate_dmd_visibility_score, _compute_scene_change_score
+from .analysis import _clamp, _FloorEstimator, _compute_auto_crop_margins, _smart_auto_crop_decision, _calculate_dmd_visibility_score, _compute_scene_change_score, _calculate_dmd_readability_score
 
 def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     """Create an auto-framed temporary MP4 and return (ok, out_path, message).
@@ -353,6 +353,13 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     _prev_roi_cx: Optional[float] = None
     _prev_roi_cy: Optional[float] = None
 
+    # ── VNext State Variables ────────────────────────────────────────────────
+    _roi_persistence_frames: int = 0
+    _roi_persistence_score: float = 1.0
+    _scroll_vx: float = 0.0
+    _scroll_vy: float = 0.0
+    _scroll_memory_frames: int = 0
+
     while _pipe_alive:
         ok, frame = cap.read()
         if not ok:
@@ -400,7 +407,8 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         if _face_priority_mode:
             roi = detector.detect(frame, cfg.detector,
                                   multi_fusion=cfg.multi_roi_fusion_enabled,
-                                  min_conf=cfg.roi_confidence_min)
+                                  min_conf=cfg.roi_confidence_min,
+                                  roi_persistence_score=_roi_persistence_score if getattr(cfg, 'dynamic_roi_confidence_enabled', True) else 1.0)
             if roi is not None:
                 rx, ry, rw, rh = roi
                 # Keep only the head region of the bounding box (top ~28 %).
@@ -411,11 +419,22 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
             detect_frame = frame[effective_frame_top:effective_frame_h, :]
             roi = detector.detect(detect_frame, cfg.detector,
                                   multi_fusion=cfg.multi_roi_fusion_enabled,
-                                  min_conf=cfg.roi_confidence_min)
+                                  min_conf=cfg.roi_confidence_min,
+                                  roi_persistence_score=_roi_persistence_score if getattr(cfg, 'dynamic_roi_confidence_enabled', True) else 1.0)
             # Translate ROI y-coordinate back into original frame space.
             if roi is not None and effective_frame_top > 0:
                 rx, ry, rw, rh = roi
                 roi = (rx, ry + effective_frame_top, rw, rh)
+
+        # VNext Priority 1: ROI Persistence Score
+        if getattr(cfg, 'roi_persistence_score_enabled', True):
+            if roi is not None:
+                _roi_persistence_frames = min(120, _roi_persistence_frames + 1)
+            else:
+                _roi_persistence_frames = max(0, _roi_persistence_frames - 2)
+            _roi_persistence_score = min(1.0, _roi_persistence_frames / 60.0)
+        else:
+            _roi_persistence_score = 1.0
 
         # ── PRIORITY 4 — Micro-detection Rejection ────────────────────────────
         if roi is not None and cfg.min_roi_area_ratio > 0.0:
@@ -480,52 +499,97 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
                                               floor_y_est=floor_y_est,
                                               frame_top=_cam_frame_top)
 
-        # --- DMD Visibility Score Logic (PRIORITY 1) ---
-        if cfg.dmd_visibility_score_enabled:
+        # --- DMD Visibility Score & Readability Logic (PRIORITY 2 & 9) ---
+        if cfg.dmd_visibility_score_enabled or getattr(cfg, 'dmd_readability_score_enabled', True):
+            def get_sub_rect(c_rect, r_roi):
+                if r_roi is None: return None
+                cx, cy, cw, ch = c_rect
+                sx = r_roi[0] - (cx - cw/2.0)
+                sy = r_roi[1] - (cy - ch/2.0)
+                _scale = out_w / cw if cw > 0 else 1.0
+                return (int(sx*_scale), int(sy*_scale), int(r_roi[2]*_scale), int(r_roi[3]*_scale))
+
+            sub_rect_prev = get_sub_rect(cam_prev, roi)
+            sub_rect_prop = get_sub_rect(cam_now_proposed, roi)
+
             # 1. Simulate current view (cam_prev) DMD output and score
             cropped_prev = _crop_frame(frame, cam_prev)
             dmd_prev_frame = cv2.resize(cropped_prev, (cfg.target_width, cfg.target_height),
                                         interpolation=cv2.INTER_LANCZOS4)
-            score_prev = _calculate_dmd_visibility_score(dmd_prev_frame)
+            vis_prev = _calculate_dmd_visibility_score(dmd_prev_frame, sub_rect_prev) if cfg.dmd_visibility_score_enabled else 1.0
+            read_prev = _calculate_dmd_readability_score(dmd_prev_frame) if getattr(cfg, 'dmd_readability_score_enabled', True) else 1.0
 
             # 2. Simulate proposed view (cam_now_proposed) DMD output and score
             cropped_proposed = _crop_frame(frame, cam_now_proposed)
             dmd_proposed_frame = cv2.resize(cropped_proposed, (cfg.target_width, cfg.target_height),
                                             interpolation=cv2.INTER_LANCZOS4)
-            score_proposed = _calculate_dmd_visibility_score(dmd_proposed_frame)
+            vis_proposed = _calculate_dmd_visibility_score(dmd_proposed_frame, sub_rect_prop) if cfg.dmd_visibility_score_enabled else 1.0
+            read_proposed = _calculate_dmd_readability_score(dmd_proposed_frame) if getattr(cfg, 'dmd_readability_score_enabled', True) else 1.0
 
             # 3. Compare scores and adjust cam_now if proposed is worse
-            # If the proposed zoom significantly reduces visibility, we revert only the zoom (width/height)
-            # but keep the proposed tracking coordinates (cx, cy) to prevent tracking stutter.
+            # VNext Priority 9: Selectable solution (Visibility, Readability, or Average)
+            if cfg.dmd_visibility_score_enabled and getattr(cfg, 'dmd_readability_score_enabled', True):
+                score_prev = vis_prev * 0.5 + read_prev * 0.5
+                score_proposed = vis_proposed * 0.5 + read_proposed * 0.5
+            elif getattr(cfg, 'dmd_readability_score_enabled', True):
+                score_prev = read_prev
+                score_proposed = read_proposed
+            else:
+                score_prev = vis_prev
+                score_proposed = vis_proposed
+
             if score_proposed < score_prev * 0.95:
                 cam_now = (cam_now_proposed[0], cam_now_proposed[1], cam_prev[2], cam_prev[3])
             else:
                 cam_now = cam_now_proposed
+                
+            # VNext Priority 10: Auto Tuning Dataset Generator
+            if getattr(cfg, 'auto_tuning_dataset_dir', None) is not None:
+                _ds_dir = cfg.auto_tuning_dataset_dir
+                os.makedirs(_ds_dir, exist_ok=True)
+                cv2.imwrite(os.path.join(_ds_dir, f"frame_{src_idx:04d}_dmd.png"), dmd_proposed_frame)
+                with open(os.path.join(_ds_dir, "scores.csv"), "a") as f:
+                    f.write(f"{src_idx},{vis_proposed:.3f},{read_proposed:.3f},{_roi_persistence_score:.3f}\n")
         else:
             cam_now = cam_now_proposed
-        # --- End DMD Visibility Score Logic ---
+        # --- End Visibility & Readability Logic ---
 
-        # ── PRIORITY 5 — Directional Look-Ahead ──────────────────────────────
-        # Compute current ROI centre (use live ROI when available, else None).
-        # We apply look-ahead to cam_now BEFORE smoothing, so the camera smoothly tracks 
-        # towards the projected future position, rather than snapping to it abruptly.
+        # ── PRIORITY 5 & VNext Priority 6 — Directional Look-Ahead & Scroll Memory
         _curr_roi_cx: Optional[float] = None
         _curr_roi_cy: Optional[float] = None
         if roi is not None:
             _curr_roi_cx = float(roi[0] + roi[2] / 2.0)
             _curr_roi_cy = float(roi[1] + roi[3] / 2.0)
             
+        _live_vx, _live_vy = 0.0, 0.0
+        if _curr_roi_cx is not None and _prev_roi_cx is not None:
+            _live_vx = _curr_roi_cx - _prev_roi_cx
+            _live_vy = _curr_roi_cy - _prev_roi_cy
+            
+        if getattr(cfg, "scroll_direction_memory_enabled", True):
+            if roi is not None:
+                _scroll_vx = 0.9 * _scroll_vx + 0.1 * _live_vx
+                _scroll_vy = 0.9 * _scroll_vy + 0.1 * _live_vy
+                _scroll_memory_frames = min(60, _scroll_memory_frames + 1)
+            else:
+                _scroll_memory_frames = max(0, _scroll_memory_frames - 1)
+                if _scroll_memory_frames == 0:
+                    _scroll_vx *= 0.9
+                    _scroll_vy *= 0.9
+        else:
+            _scroll_vx, _scroll_vy = _live_vx, _live_vy
+
         if cfg.look_ahead_enabled and cfg.look_ahead_factor > 0.0:
             cam_now = _apply_look_ahead(
                 cam_now,
-                _prev_roi_cx, _curr_roi_cx,
-                _prev_roi_cy, _curr_roi_cy,
+                _scroll_vx, _scroll_vy,
                 frame_w, frame_h,
                 cfg.look_ahead_factor,
+                roi_persistence=_roi_persistence_score,
             )
         _prev_roi_cx = _curr_roi_cx
         _prev_roi_cy = _curr_roi_cy
-        # ── End Priority 5 ────────────────────────────────────────────────────
+        # ── End Priority 5 & 6 ────────────────────────────────────────────────
 
         cam = _smooth(cam_prev, cam_now, cfg.smoothness)
 

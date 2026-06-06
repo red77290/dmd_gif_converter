@@ -210,10 +210,13 @@ class TestFuseROIs(unittest.TestCase):
         r1 = (0, 0, 100, 80)
         r2 = (200, 0, 200, 160)
         result = _fuse_rois([(0.5, r1), (0.5, r2)])
-        # ww = (0.5*100 + 0.5*200) / 1.0 = 150
-        self.assertAlmostEqual(result[2], 150, delta=2)
-        # wh = (0.5*80 + 0.5*160) / 1.0 = 120
-        self.assertAlmostEqual(result[3], 120, delta=2)
+        # VNext Priority 5: Weight incorporates sqrt(area).
+        # Area1 = 8000 (sqrt ~89.44), Area2 = 32000 (sqrt ~178.88)
+        # Weight1 ~ 44.72, Weight2 ~ 89.44 (Ratio 1:2)
+        # ww ≈ (1*100 + 2*200) / 3 = 500/3 ≈ 166
+        self.assertAlmostEqual(result[2], 166, delta=2)
+        # wh ≈ (1*80 + 2*160) / 3 = 400/3 ≈ 133
+        self.assertAlmostEqual(result[3], 133, delta=2)
 
     def test_result_has_non_negative_coordinates(self):
         """Returned x, y must always be >= 0."""

@@ -341,27 +341,27 @@ class TestLookAhead(unittest.TestCase):
 
     def test_no_motion_returns_same_cam(self):
         cam = self._cam()
-        result = _apply_look_ahead(cam, 500.0, 500.0, 300.0, 300.0,
+        result = _apply_look_ahead(cam, 0.0, 0.0,
                                    self.FW, self.FH, 0.25)
         self.assertEqual(result, cam,
-                         "No motion (same cx/cy) → cam unchanged")
+                         "No motion (0 vx/vy) → cam unchanged")
 
     def test_disabled_returns_same_cam(self):
         cam = self._cam()
-        result = _apply_look_ahead(cam, 400.0, 600.0, 300.0, 300.0,
+        result = _apply_look_ahead(cam, 200.0, 0.0,
                                    self.FW, self.FH, 0.0)
         self.assertEqual(result, cam, "factor=0 disables look-ahead")
 
     def test_rightward_motion_shifts_cam_right(self):
         cam = self._cam(cx=960.0)
-        result = _apply_look_ahead(cam, 400.0, 600.0, 300.0, 300.0,
+        result = _apply_look_ahead(cam, 200.0, 0.0,
                                    self.FW, self.FH, 0.25)
         self.assertGreater(result[0], cam[0],
                            "Rightward ROI motion should shift camera cx right")
 
     def test_leftward_motion_shifts_cam_left(self):
         cam = self._cam(cx=960.0)
-        result = _apply_look_ahead(cam, 600.0, 400.0, 300.0, 300.0,
+        result = _apply_look_ahead(cam, -200.0, 0.0,
                                    self.FW, self.FH, 0.25)
         self.assertLess(result[0], cam[0],
                         "Leftward ROI motion should shift camera cx left")
@@ -369,18 +369,11 @@ class TestLookAhead(unittest.TestCase):
     def test_result_stays_within_frame(self):
         """Camera rect must never exceed frame boundaries after look-ahead."""
         cam = self._cam(cx=1880.0)   # near right edge
-        result = _apply_look_ahead(cam, 100.0, 1900.0, 300.0, 300.0,
+        result = _apply_look_ahead(cam, 1000.0, 0.0,
                                    self.FW, self.FH, 0.5)
         cx, cy, cw, ch = result
         self.assertGreaterEqual(cx - cw / 2, 0, "Left edge must not go negative")
         self.assertLessEqual(cx + cw / 2, self.FW, "Right edge must stay within frame")
-
-    def test_no_prev_cx_returns_unchanged(self):
-        cam = self._cam()
-        result = _apply_look_ahead(cam, None, 600.0, None, 300.0,
-                                   self.FW, self.FH, 0.25)
-        self.assertEqual(result, cam,
-                         "No previous ROI centre → no look-ahead offset")
 
     def test_config_default_enabled(self):
         cfg = AutoActionConfig()
