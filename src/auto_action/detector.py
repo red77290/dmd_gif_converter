@@ -17,6 +17,7 @@ import urllib.request
 from abc import abstractmethod
 from typing import List, Optional, Tuple
 import numpy as np
+import cv2
 
 from .interfaces import IDetector, BoundingBox
 
@@ -131,34 +132,55 @@ class _FrameDetector(AbstractDetector):
     """
 
     def __init__(self):
-        import cv2
         self.cv2 = cv2
         self.prev_gray = None
-        self._onnx_session = None
-        self._model_h = 640
-        self._model_w = 640
-        self.model_type = ""
-        self._try_load_onnx()
         self.bg_sub = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=36)
+        self._try_load_onnx()
+
+    _shared_session = None
+    _shared_model_h = 640
+    _shared_model_w = 640
+    _shared_model_type = ""
+    _session_lock = __import__("threading").Lock()
 
     def _try_load_onnx(self) -> None:
-        try:
-            import onnxruntime as ort
-            model_path = _ensure_yolo_model()
-            if model_path is None:
+        with self._session_lock:
+            if _FrameDetector._shared_session is not None:
+                self._onnx_session = _FrameDetector._shared_session
+                self._model_h = _FrameDetector._shared_model_h
+                self._model_w = _FrameDetector._shared_model_w
+                self.model_type = _FrameDetector._shared_model_type
                 return
-            self._onnx_session = ort.InferenceSession(
-                model_path, providers=["CPUExecutionProvider"]
-            )
-            inputs = self._onnx_session.get_inputs()[0]
-            self._model_h = inputs.shape[2]
-            self._model_w = inputs.shape[3]
-            if not isinstance(self._model_h, int) or not isinstance(self._model_w, int):
-                self._model_h, self._model_w = 640, 640
-            self.model_type = "onnx"
-        except Exception:
-            self._onnx_session = None
-            self._model_h, self._model_w = 640, 640
+
+            try:
+                import onnxruntime as ort
+                model_path = _ensure_yolo_model()
+                if model_path is None:
+                    self._onnx_session = None
+                    return
+                session = ort.InferenceSession(
+                    model_path, providers=["CPUExecutionProvider"]
+                )
+                inputs = session.get_inputs()[0]
+                model_h = inputs.shape[2]
+                model_w = inputs.shape[3]
+                if not isinstance(model_h, int) or not isinstance(model_w, int):
+                    model_h, model_w = 640, 640
+                
+                _FrameDetector._shared_session = session
+                _FrameDetector._shared_model_h = model_h
+                _FrameDetector._shared_model_w = model_w
+                _FrameDetector._shared_model_type = "onnx"
+
+                self._onnx_session = session
+                self._model_h = model_h
+                self._model_w = model_w
+                self.model_type = "onnx"
+            except Exception:
+                self._onnx_session = None
+                self._model_h = 640
+                self._model_w = 640
+                self.model_type = ""
 
     def _detect_yolo(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
                      roi_persistence_score: float = 1.0, platformer_mode: bool = False) -> Optional[BoundingBox]:

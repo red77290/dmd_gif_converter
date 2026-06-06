@@ -91,7 +91,15 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     if _platformer:
         crop_w = min(float(frame_w), crop_w * 1.5)
 
+    # Prevent zooming out beyond the frame dimensions (avoid black bars)
+    if crop_w > frame_w:
+        crop_w = float(frame_w)
+
     crop_h = crop_w / target_ratio
+
+    if crop_h > frame_h:
+        crop_h = float(frame_h)
+        crop_w = crop_h * target_ratio
 
     if _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
@@ -111,6 +119,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # pin the camera to the top so the hair and face are guaranteed visible.
         if crop_h < total_h:
             cy = ideal_top + crop_h / 2.0
+
+    if crop_w >= frame_w:
+        cx = frame_w / 2.0
+    else:
+        cx = _clamp(cx, crop_w / 2.0, float(frame_w) - crop_w / 2.0)
 
     cy = _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
     
@@ -193,7 +206,14 @@ def _apply_look_ahead(
     offset_x = _clamp(scroll_vx * adaptive_factor * 5.0, -max_offset_x, max_offset_x)
     offset_y = _clamp(scroll_vy * adaptive_factor * 5.0, -max_offset_y, max_offset_y)
 
-    cx = _clamp(cx + offset_x, cw / 2.0, float(frame_w) - cw / 2.0)
-    cy = _clamp(cy + offset_y, ch / 2.0, float(frame_h) - ch / 2.0)
+    if cw >= frame_w:
+        cx = frame_w / 2.0
+    else:
+        cx = _clamp(cx + offset_x, cw / 2.0, float(frame_w) - cw / 2.0)
+        
+    if ch >= frame_h:
+        cy = frame_h / 2.0
+    else:
+        cy = _clamp(cy + offset_y, ch / 2.0, float(frame_h) - ch / 2.0)
 
     return (cx, cy, cw, ch)

@@ -114,7 +114,7 @@ _PRESETS = {
     "cinema":    (  1.4,      1.3,  -0.01,  0.90,  0.8,   0.2,   "none" ),
 }
 
-def process_file(src_path, out_path, params=None, start_s=None, end_s=None, callback=None):
+def process_file(src_path, out_path, params=None, start_s=None, end_s=None, callback=None, cancel_event=None):
     """
     Convert any video / GIF to 128×32 DMD format.
 
@@ -138,6 +138,10 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         getattr(logger, level)(msg)
         if callback:
             callback(msg, level)
+
+    if cancel_event and cancel_event.is_set():
+        log(f"[CANCEL] {filename} — Cancelled before processing", "warning")
+        return False, f"[CANCEL] {filename}"
 
     # Optional preprocessor temp dir (auto action mode).
     temp_pre_src = None
@@ -173,7 +177,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             target_width=target_width, # Pass target dimensions to auto_action
             target_height=target_height, # Pass target dimensions to auto_action
         )
-        ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg)
+        ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg, cancel_event=cancel_event)
         if ok_pre and pre_src:
             src_path = pre_src
             temp_pre_src = os.path.dirname(pre_src)
@@ -484,14 +488,26 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         out_path
     ]
 
-    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    import time
+    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    
+    while process.poll() is None:
+        if cancel_event and cancel_event.is_set():
+            process.terminate()
+            process.wait()
+            log(f"[CANCEL] {filename} — ffmpeg interrupted by user", "warning")
+            return False, f"[CANCEL] {filename} interrupted"
+        time.sleep(0.1)
+        
+    result_stderr = process.stderr.read()
+    process.stderr.close()
 
     if temp_pre_src and os.path.isdir(temp_pre_src):
         import shutil
         shutil.rmtree(temp_pre_src, ignore_errors=True)
 
-    if result.returncode != 0:
-        err = result.stderr.decode(errors="replace").strip().splitlines()
+    if process.returncode != 0:
+        err = result_stderr.decode(errors="replace").strip().splitlines()
         last_line = err[-1] if err else "unknown error"
         log(f"[ERROR ] {filename} — ffmpeg: {last_line}", "error")
         return False, f"[ERROR] {filename} — {last_line}"
@@ -517,7 +533,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     return True, f"[OK] {filename}"
 
 
-def process_folder(folder_in, folder_out, params=None, callback=None, progress_callback=None):
+def process_folder(folder_in, folder_out, params=None, callback=None, progress_callback=None, cancel_event=None):
     """Batch-convert all supported video files in a folder to DMD GIFs.
 
     Args:
@@ -562,9 +578,11 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         done_lock  = __import__("threading").Lock()
 
         def _one(filename):
+            if cancel_event and cancel_event.is_set():
+                return False, "[CANCEL] Skipped"
             src = os.path.join(str(folder_in), filename)
             out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
-            result = process_file(src, out, params=p, callback=callback)
+            result = process_file(src, out, params=p, callback=callback, cancel_event=cancel_event)
             with done_lock:
                 done_count[0] += 1
                 current = done_count[0]
@@ -625,7 +643,10 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
             target_width=action_cfg.target_width,
             target_height=action_cfg.target_height,
         )
-        ok, pre_src, msg = preprocess_video_for_dmd(src, cfg)
+        if cancel_event and cancel_event.is_set():
+            return filename, src, None
+
+        ok, pre_src, msg = preprocess_video_for_dmd(src, cfg, cancel_event=cancel_event)
         if ok and pre_src:
             log(f"[ACTION ] {filename} — {msg}")
             return filename, pre_src, os.path.dirname(pre_src)
@@ -649,9 +670,11 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     done_lock2  = __import__("threading").Lock()
 
     def _convert(item):
+        if cancel_event and cancel_event.is_set():
+            return False, "[CANCEL] Skipped"
         filename, pre_src, tmpdir = item
         out = os.path.join(str(folder_out), Path(filename).stem + ".gif")
-        success, msg = process_file(pre_src, out, params=p_no_action, callback=callback)
+        success, msg = process_file(pre_src, out, params=p_no_action, callback=callback, cancel_event=cancel_event)
         if tmpdir and os.path.isdir(tmpdir):
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
