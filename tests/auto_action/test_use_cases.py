@@ -8,6 +8,7 @@ from unittest.mock import patch
 from src.auto_action.pipeline import preprocess_video_for_dmd
 from src.auto_action.config import AutoActionConfig
 import src.auto_action.pipeline as pipeline_mod
+import src.auto_action.tracker as tracker_mod
 import src.auto_action.detector as detector_mod
 
 USE_CASES_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "use_cases")
@@ -54,7 +55,7 @@ class TestUseCases(unittest.TestCase):
         recorded_pairs = []
 
         original_detect = detector_mod._FrameDetector.detect
-        original_build_camera_rect = pipeline_mod._build_camera_rect
+        original_build_camera_rect = tracker_mod._build_camera_rect
 
         def mock_build_camera_rect(frame_w, frame_h, passed_roi, cfg, *args, **kwargs):
             cam = original_build_camera_rect(frame_w, frame_h, passed_roi, cfg, *args, **kwargs)
@@ -71,7 +72,7 @@ class TestUseCases(unittest.TestCase):
             recorded_rois.append(roi)
             return roi
 
-        with patch("src.auto_action.pipeline._build_camera_rect", side_effect=mock_build_camera_rect), \
+        with patch("src.auto_action.tracker._build_camera_rect", side_effect=mock_build_camera_rect), \
              patch("src.auto_action.detector._FrameDetector.detect", side_effect=mock_detect, autospec=True):
             
             success, out_path, msg = preprocess_video_for_dmd(gif_path, cfg)
