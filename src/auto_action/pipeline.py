@@ -271,27 +271,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     elif first_frame_for_intro.ndim == 2:
         first_frame_for_intro = cv2.cvtColor(first_frame_for_intro, cv2.COLOR_GRAY2BGR)
 
-    # ── Background subtractor warm-up ─────────────────────────────────────────
-    # MOG2 starts with no background model: the very first frames it processes
-    # either return an all-foreground mask (everything visible) or an all-zero
-    # mask (black flash), depending on the internal state of the Gaussian mixture.
-    #
-    # Fix: before outputting a single frame, prime the model by replaying the
-    # first frame 30× at a high learning-rate (0.5).  After this the model has
-    # a solid estimate of the static background and produces clean masks from
-    # frame 1 of the actual output.
-    if cfg.bg_sub_enable:
-        _wf = first_frame_for_intro
-        if max(_wf.shape[0], _wf.shape[1]) > 512:
-            _sf = 512 / max(_wf.shape[0], _wf.shape[1])
-            _wf = cv2.resize(
-                _wf,
-                (int(_wf.shape[1] * _sf), int(_wf.shape[0] * _sf)),
-                interpolation=cv2.INTER_AREA,
-            )
-        _BG_WARMUP_ITERS = 30
-        for _ in range(_BG_WARMUP_ITERS):
-            detector.bg_sub.apply(_wf, learningRate=0.5)
+    last_vignette_mask = None
 
     # ── Phase 1: Intro panoramic pan (frozen first frame, top → centre) ──────
     # The first source frame is held for intro_frames while the camera pans
@@ -360,6 +340,12 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
     _scroll_vy: float = 0.0
     _scroll_memory_frames: int = 0
 
+    # Dynamic Smoothness: Scale smoothness so it is proportional to the action clip length
+    # A video with very few frames gets a much lower smoothness value to ensure the camera reaches its target.
+    action_frames = max(1, total_frames_src - intro_frames)
+    required_smoothness = 0.10 ** (1.0 / max(5, action_frames))
+    dynamic_smoothness = max(0.50, min(cfg.smoothness, required_smoothness))
+
     while _pipe_alive:
         ok, frame = cap.read()
         if not ok:
@@ -406,9 +392,10 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
 
         if _face_priority_mode:
             roi = detector.detect(frame, cfg.detector,
-                                  multi_fusion=cfg.multi_roi_fusion_enabled,
+                                  multi_fusion=cfg.multi_roi_fusion_enabled and not cfg.platformer_mode,
                                   min_conf=cfg.roi_confidence_min,
-                                  roi_persistence_score=_roi_persistence_score if getattr(cfg, 'dynamic_roi_confidence_enabled', True) else 1.0)
+                                  roi_persistence_score=_roi_persistence_score if getattr(cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
+                                  platformer_mode=cfg.platformer_mode)
             if roi is not None:
                 rx, ry, rw, rh = roi
                 # Keep only the head region of the bounding box (top ~28 %).
@@ -418,9 +405,10 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         else:
             detect_frame = frame[effective_frame_top:effective_frame_h, :]
             roi = detector.detect(detect_frame, cfg.detector,
-                                  multi_fusion=cfg.multi_roi_fusion_enabled,
+                                  multi_fusion=cfg.multi_roi_fusion_enabled and not cfg.platformer_mode,
                                   min_conf=cfg.roi_confidence_min,
-                                  roi_persistence_score=_roi_persistence_score if getattr(cfg, 'dynamic_roi_confidence_enabled', True) else 1.0)
+                                  roi_persistence_score=_roi_persistence_score if getattr(cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
+                                  platformer_mode=cfg.platformer_mode)
             # Translate ROI y-coordinate back into original frame space.
             if roi is not None and effective_frame_top > 0:
                 rx, ry, rw, rh = roi
@@ -591,26 +579,44 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         _prev_roi_cy = _curr_roi_cy
         # ── End Priority 5 & 6 ────────────────────────────────────────────────
 
-        cam = _smooth(cam_prev, cam_now, cfg.smoothness)
+        cam = _smooth(cam_prev, cam_now, dynamic_smoothness)
 
         cam_prev = cam
         last_frame = frame
 
         cropped_frame = _crop_frame(frame, cam)
 
-        # Apply background subtraction if enabled
+        # Apply cinematic vignette if background subtraction is enabled
         if cfg.bg_sub_enable:
-            bs_frame = cropped_frame
-            if max(cropped_frame.shape[0], cropped_frame.shape[1]) > 512:
-                scale_factor_bs = 512 / max(cropped_frame.shape[0], cropped_frame.shape[1])
-                bs_frame = cv2.resize(cropped_frame, (int(cropped_frame.shape[1] * scale_factor_bs), int(cropped_frame.shape[0] * scale_factor_bs)), interpolation=cv2.INTER_AREA)
-
-            fg_mask = detector.bg_sub.apply(bs_frame)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-            fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-            fg_mask = cv2.resize(fg_mask, (cropped_frame.shape[1], cropped_frame.shape[0]), interpolation=cv2.INTER_LINEAR)
-            cropped_frame = cv2.bitwise_and(cropped_frame, cropped_frame, mask=fg_mask)
+            # Create a 2D float mask for the vignette
+            vignette = np.full((frame_h, frame_w), 0.35, dtype=np.float32)
+            
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                
+                # Create an ellipse that covers the ROI
+                cx, cy = rx + rw/2, ry + rh/2
+                axes = (max(20, int(rw * 0.8)), max(20, int(rh * 0.8)))
+                
+                # Draw solid white ellipse
+                cv2.ellipse(vignette, (int(cx), int(cy)), axes, 0, 0, 360, 1.0, -1)
+                
+                # Blur massively to create a smooth cinematic spotlight
+                vignette = cv2.GaussianBlur(vignette, (99, 99), 0)
+                last_vignette_mask = vignette
+            elif last_vignette_mask is not None:
+                vignette = last_vignette_mask
+            else:
+                vignette = np.ones((frame_h, frame_w), dtype=np.float32)
+                
+            # Crop the vignette to match the camera
+            cropped_mask = _crop_frame(np.expand_dims(vignette, axis=-1), cam)
+            cropped_mask = cropped_mask.squeeze()
+            
+            # Apply the darkening effect
+            cropped_frame = cropped_frame.astype(np.float32)
+            cropped_mask_float = np.expand_dims(cropped_mask, axis=-1)
+            cropped_frame = (cropped_frame * cropped_mask_float).astype(np.uint8)
 
         out_frame = cv2.resize(cropped_frame, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
         if not _write_frame(out_frame):
@@ -630,10 +636,21 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig):
         settle_px = 1.0                       # stop when camera moves < 1 px/frame
         extra = 0
         while extra < max_extra:
-            cam_next = _smooth(cam_prev, cam_now, cfg.smoothness)
-            displacement = max(abs(cam_next[i] - cam_prev[i]) for i in range(4))
+            if cam_prev is None:
+                cam_next = cam_now
+                displacement = 0.0
+            else:
+                cam_next = _smooth(cam_prev, cam_now, dynamic_smoothness)
+                displacement = max(abs(cam_next[i] - cam_prev[i]) for i in range(4))
             cam_prev = cam_next
             cropped_frame = _crop_frame(last_frame, cam_next)
+
+            if cfg.bg_sub_enable and last_vignette_mask is not None:
+                cropped_mask = _crop_frame(np.expand_dims(last_vignette_mask, axis=-1), cam_next)
+                cropped_mask = cropped_mask.squeeze()
+                cropped_frame = cropped_frame.astype(np.float32)
+                cropped_mask_float = np.expand_dims(cropped_mask, axis=-1)
+                cropped_frame = (cropped_frame * cropped_mask_float).astype(np.uint8)
 
             out_frame = cv2.resize(cropped_frame, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
             if not _write_frame(out_frame):

@@ -11,8 +11,9 @@ Lors de la conversion de vidéos vers de très basses résolutions (par ex. 128x
 1. **Smart Auto Crop** 🤖 : Analyse la vidéo pour déterminer s'il faut suivre le visage d'un personnage, s'ancrer au sol (pour les jeux de plateforme), ou ignorer le ciel.
 2. **Mode Platformer** 🎮 : Spécialement calibré pour les jeux 2D à défilement horizontal (Mario, Sonic, Metroid). Il verrouille le sol en bas de l'écran et anticipe la direction du personnage de manière fluide.
 3. **Tracking d'Action** 🏃 : Utilise une IA légère (YOLO) combinée à la détection de mouvement pour suivre le sujet sans faille.
-4. **Score de Visibilité et Lisibilité DMD** 👁️ : Le moteur teste plusieurs options de recadrage en interne et choisit celle qui offre le meilleur contraste, la meilleure séparation des formes et la taille idéale pour votre résolution LED exacte.
-5. **Auto Tuning & Debug** 🛠️ : Si un recadrage semble incorrect, vous pouvez activer le dataset de debug pour voir exactement ce que le moteur analyse.
+4. **DMD Quality Score** 👁️ : Le moteur évalue toutes les conversions générées et leur attribue un score (0-100%) basé sur le contraste, l'occupation de l'écran et la séparation des formes.
+5. **Gestion Intelligente (GUI)** 📋 : La nouvelle interface sépare vos fichiers en attente des fichiers convertis. Les résultats sont triés par score, vous permettant d'utiliser l'**Assistant de Nettoyage (Cleanup Assistant)** pour jeter instantanément les mauvaises conversions.
+6. **Auto Tuning & Debug** 🛠️ : Si un recadrage semble incorrect, vous pouvez activer le dataset de debug pour voir exactement ce que le moteur analyse.
 
 ## Démarrage Rapide (Ligne de commande)
 

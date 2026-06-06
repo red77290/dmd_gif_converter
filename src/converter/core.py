@@ -10,6 +10,7 @@ try:
 except Exception:
     _analyze_and_compensate = None
 from src.converter.ffmpeg_utils import _check_drawtext, _apply_text_overlay_pillow, snap_to_clean_fps, get_metadata
+from src.converter.quality import evaluate_gif_quality
 logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {
@@ -467,15 +468,16 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     # ── FFmpeg command ────────────────────────────────────────────────────────
     # When auto_action is enabled the preprocessed MP4 already has the exact
-    # right duration (intro + tracking + short tail).  Playing it once
-    # (-stream_loop 0) avoids ffmpeg padding the last frame to fill duration_out.
-    # For all other modes we keep -stream_loop -1 so the scroll filter can run
-    # longer than the source clip.
-    stream_loop = "0" if auto_action_enabled else "-1"
+    # right duration (intro + tracking + short tail).  Playing it exactly once
+    # without any -t cap or -stream_loop avoids ffmpeg padding glitches at the end.
     cmd = ["ffmpeg", "-y"]
     if trim_start > 0:
         cmd += ["-ss", str(trim_start)]
-    cmd += ["-stream_loop", stream_loop, "-t", duration_out, "-i", src_path]
+    
+    if auto_action_enabled:
+        cmd += ["-i", src_path]
+    else:
+        cmd += ["-stream_loop", "-1", "-t", duration_out, "-i", src_path]
     cmd += [
         "-filter_complex", filter_graph,
         "-gifflags", "-offsetting-transdiff",
@@ -494,7 +496,6 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         log(f"[ERROR ] {filename} — ffmpeg: {last_line}", "error")
         return False, f"[ERROR] {filename} — {last_line}"
 
-    # ── Pillow text overlay (post-processing fallback) ────────────────────────
     if _use_pillow_text:
         ok_txt, txt_msg = _apply_text_overlay_pillow(
             out_path, text_content_raw, font_path_str,
@@ -505,6 +506,12 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             log(f"[TEXT  ] {filename} — {txt_msg}")
         else:
             log(f"[TEXT  ] {filename} — Pillow text overlay failed: {txt_msg}", "warning")
+
+    # Evaluate DMD Quality
+    q_result = evaluate_gif_quality(out_path)
+    score = q_result["score"]
+    color = q_result["color"]
+    log(f"[QUALITY] {filename} — Score: {score}% {color} | Reasons: {', '.join(q_result['reasons'])}")
 
     log(f"[OK    ] {filename}")
     return True, f"[OK] {filename}"

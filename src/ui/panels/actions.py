@@ -88,27 +88,34 @@ class ActionsPanelMixin:
             height=36, fg_color="#1e6a3c", hover_color="#155230",
             font=ctk.CTkFont(size=12)
         )
-        self._btn_batch.grid(row=2, column=0, padx=4, pady=4, sticky="ew")
+        self._btn_batch.grid(row=2, column=0, padx=4, pady=(4, 0), sticky="ew")
+
+        # Batch Auto-Cleanup Options
+        batch_cleanup_frame = ctk.CTkFrame(af, fg_color="transparent")
+        batch_cleanup_frame.grid(row=3, column=0, padx=4, pady=(0, 4), sticky="w")
+        
+        self.v_batch_auto_trash = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(batch_cleanup_frame, text="Auto-Trash <=", variable=self.v_batch_auto_trash, width=10, checkbox_height=18, checkbox_width=18, font=ctk.CTkFont(size=11)).pack(side="left", padx=(4, 2))
+        
+        self.v_batch_trash_score = tk.StringVar(value="50")
+        ctk.CTkEntry(batch_cleanup_frame, textvariable=self.v_batch_trash_score, width=35, height=20, font=ctk.CTkFont(size=11)).pack(side="left")
+        ctk.CTkLabel(batch_cleanup_frame, text="%", font=ctk.CTkFont(size=11)).pack(side="left")
 
         self._progress = ctk.CTkProgressBar(af, height=8)
         self._progress.set(0)
-        self._progress.grid(row=3, column=0, padx=4, pady=(10, 2), sticky="ew")
+        self._progress.grid(row=4, column=0, padx=4, pady=(10, 2), sticky="ew")
 
         self._status_lbl = ctk.CTkLabel(
             af, text="Ready", text_color="#888899", font=ctk.CTkFont(size=11)
         )
-        self._status_lbl.grid(row=4, column=0, padx=4, pady=2)
+        self._status_lbl.grid(row=5, column=0, padx=4, pady=2)
 
-        ctk.CTkLabel(
-            parent, text="📋  Conversion log",
-            font=ctk.CTkFont(size=12, weight="bold")
-        ).grid(row=2, column=0, padx=12, pady=(10, 2), sticky="w")
-
-        self._log_box = ctk.CTkTextbox(
-            parent, font=ctk.CTkFont(size=11, family="Courier"), wrap="word"
+        self._btn_toggle_logs = ctk.CTkButton(
+            parent, text="📝 Show / Hide Logs", width=140, height=28,
+            fg_color="#3a3a4a", hover_color="#50506b",
+            command=self._toggle_global_logs
         )
-        self._log_box.grid(row=3, column=0, padx=8, pady=(0, 8), sticky="nsew")
-        self._log_box.configure(state="disabled")
+        self._btn_toggle_logs.grid(row=2, column=0, padx=12, pady=(10, 4), sticky="w")
 
     # ══════════════════════════════════════════════════════════════════════════
     #  FILE MANAGEMENT
@@ -201,13 +208,24 @@ class ActionsPanelMixin:
                 src, out, params, start_s, end_s,
                 callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv))
             )
-            status = "done" if success else "error"
-            self.after(0, lambda _iid=iid, s=status: self._set_file_status(_iid, s))
+            
+            if success:
+                # Load score sidecar
+                from src.converter.quality import load_score_sidecar
+                score_result = load_score_sidecar(out) or {"score": 0, "rating": "Unknown", "color": "⚪", "reasons": ["No score"]}
+                # Move to converted panel
+                self.after(0, lambda _out=out, _res=score_result: self._add_converted_file(_out, _res))
+                # Remove from left panel
+                self.after(0, lambda _iid=iid: self._remove_specific_file(_iid))
+            else:
+                self.after(0, lambda _iid=iid: self._set_file_status(_iid, "error"))
+                
             self.after(0, lambda p=(i + 1) / total: self._progress.set(p))
         self.after(0, lambda: self._log(f"✅  {total} conversion(s) done."))
         self.after(0, lambda: self._set_busy(False))
 
     def _run_batch_folder(self, folder_in, folder_out, params):
+        folder_out = os.path.abspath(folder_out)
         self.after(0, lambda: self._set_busy(True))
         self.after(0, lambda: self._progress.set(0))
 
@@ -220,6 +238,55 @@ class ActionsPanelMixin:
             callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
             progress_callback=on_progress,
         )
+        
+        # Perform Auto-Cleanup if enabled
+        if self.v_batch_auto_trash.get():
+            try:
+                threshold = int(self.v_batch_trash_score.get())
+                self.after(0, lambda: self._log(f"🧹 Running Auto-Cleanup (Trash <= {threshold}%)..."))
+                
+                from src.converter.quality import load_score_sidecar
+                try:
+                    import send2trash
+                    safe_delete = send2trash.send2trash
+                except ImportError:
+                    import os
+                    self.after(0, lambda: self._log("send2trash module missing. Deleting permanently instead.", "warning"))
+                    safe_delete = os.remove
+                
+                trashed_count = 0
+                for f in os.listdir(folder_out):
+                    if f.lower().endswith('.gif'):
+                        gif_path = os.path.join(folder_out, f)
+                        score_result = load_score_sidecar(gif_path)
+                        if score_result and score_result.get("score", 0) <= threshold:
+                            try:
+                                safe_delete(gif_path)
+                                trashed_count += 1
+                                # Also trash sidecar if it exists
+                                sidecar = gif_path + ".scores.json"
+                                if os.path.exists(sidecar):
+                                    safe_delete(sidecar)
+                                    
+                                # Remove from UI list (must be on main thread)
+                                def _remove_from_ui(p=gif_path):
+                                    for iid, data in list(self._converted_data.items()):
+                                        if data["path"] == p:
+                                            self._converted_paths.discard(p)
+                                            del self._converted_data[iid]
+                                            if self._tree_converted.exists(iid):
+                                                self._tree_converted.delete(iid)
+                                    self._update_converted_count()
+                                    self._update_statistics()
+                                    
+                                self.after(0, _remove_from_ui)
+                            except Exception as e:
+                                self.after(0, lambda err=e: self._log(f"Failed to trash: {err}", "warning"))
+                                
+                self.after(0, lambda c=trashed_count: self._log(f"✅  Auto-Cleanup removed {c} bad conversions."))
+            except ValueError:
+                self.after(0, lambda: self._log("⚠️  Invalid Auto-Trash percentage. Skipping cleanup.", "warning"))
+
         self.after(0, lambda: self._log("✅  Batch folder done."))
         self.after(0, lambda: self._set_busy(False))
 
@@ -239,11 +306,16 @@ class ActionsPanelMixin:
     #  LOG
     # ══════════════════════════════════════════════════════════════════════════
 
+    def _toggle_global_logs(self):
+        if hasattr(self, "toggle_log_panel"):
+            self.toggle_log_panel()
+
     def _log(self, message, level="info"):
-        self._log_box.configure(state="normal")
-        self._log_box.insert("end", message + "\n")
-        self._log_box.configure(state="disabled")
-        self._log_box.see("end")
+        if hasattr(self, "_log_box"):
+            self._log_box.configure(state="normal")
+            self._log_box.insert("end", message + "\n")
+            self._log_box.configure(state="disabled")
+            self._log_box.see("end")
 
     # ══════════════════════════════════════════════════════════════════════════
     #  CLEANUP

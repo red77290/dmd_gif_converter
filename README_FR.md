@@ -1,10 +1,15 @@
-# 🎞️ DMD GIF Converter — v4.0.0
+# 🎞️ DMD GIF Converter — v5.0.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
 ---
+
+## Nouveautés de la v5.0.0
+- **🏗️ Refonte Architecturale** : Séparation des scripts monolithiques en un paquet `src/` modulaire (`auto_action`, `converter`, `ui`) pour faciliter le débogage et la maintenance.
+- **🤖 Let me handle it** : Implémentation du système de score de visibilité pour un cadrage optimal.
+- **👁️ DMD Quality Scoring & Gestion Intelligente** : L'interface sépare désormais les fichiers en attente des fichiers convertis. Chaque GIF généré reçoit un Score de Qualité (0-100%). Utilisez l'**Assistant de Nettoyage (Cleanup Assistant)** pour supprimer instantanément les mauvaises conversions !
 
 ## Table des matières
 - [🚀 Laisse-moi gérer ça — mode tout-automatique](#-laisse-moi-gerer-ca--mode-tout-automatique-nouveau-en-v330)
@@ -26,7 +31,7 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ---
 
-## 🚀 Laisse-moi gérer ça — mode tout-automatique *(nouveau en v4.0.0)*
+## 🚀 Laisse-moi gérer ça — mode tout-automatique *(nouveau en v5.0.0)*
 
 > **En bref — une seule case à cocher et le convertisseur prend toutes les décisions à votre place.**  
 > Situé tout en **haut du panneau ⚙️ Paramètres**, au-dessus de tous les autres réglages.
@@ -271,7 +276,7 @@ python auto_action_cli.py input.mp4 --auto-floor-detect
 Analyse un échantillon de frames (~40) et détecte où **le sujet se termine en bas** (pieds, sol, ligne de sol).
 Élimine automatiquement le HUD, les barres de sous-titres et les dalles de sol vides qui feraient descendre la caméra.
 
-##### 👤 Mode Face Priority (automatique) — amélioré en v4.0.0
+##### 👤 Mode Face Priority (automatique) — amélioré en v5.0.0
 
 Quand le personnage détecté est **plus grand que la fenêtre DMD** (hauteur ROI > 80 % de `largeur_frame / ratio_cible`), le système bascule automatiquement en **mode Face Priority** :
 
@@ -423,8 +428,13 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 |---|---|
 | **Import par fichier ou dossier** | ➕ fichiers individuels, 📂 dossier entier — tous les formats vidéo acceptés |
 | **Multi-sélection dans la liste** | Ctrl+clic / Shift+clic pour sélectionner plusieurs fichiers · Suppr les efface tous d'un coup |
+| **Listes de Conversion Intelligentes** | Les fichiers passent de **En attente** à **Fichiers Convertis** automatiquement à la fin de la conversion. |
+| **DMD Quality Score** | Les fichiers convertis reçoivent un Score de Qualité (0-100%) coloré (de Rouge à Vert Premium) basé sur le contraste, l'occupation et la séparation des formes. |
+| **Assistant de Nettoyage** | Mettez instantanément à la corbeille les mauvaises conversions (ex: <=30%, <=50%, ou seuil personnalisé) en un clic. |
+| **Batch Auto-Cleanup** | Option activable en mode dossier (Batch) : met automatiquement à la corbeille les GIFs dont le score est inférieur au seuil que vous avez choisi. |
 | **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), alimente la liste automatiquement |
 | **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
+| **Diagnostic DMD** | Cliquez sur un fichier converti pour voir son score, son classement, et les raisons expliquant son score. |
 | **💡 LED Sim** | Superpose une grille pixel sur la preview DMD — simule l'aspect physique d'une dalle HUB75 · **activé par défaut** |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
 | **Trim / extrait** | Définit un début et une fin — mode fichier unique uniquement |
@@ -443,7 +453,7 @@ En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas
 Cliquer sur le bouton **🔧 Advanced Settings ▼** en bas du panneau Paramètres.  
 Toutes les valeurs par défaut = « aucun effet » — la sortie standard est identique à v2.0.
 
-#### 🚀 Laisse-moi gérer ça — mode tout-automatique *(nouveau en v4.0.0)*
+#### 🚀 Laisse-moi gérer ça — mode tout-automatique *(nouveau en v5.0.0)*
 
 > Voir la [section dédiée complète](#-laisse-moi-gerer-ca--mode-tout-automatique-nouveau-en-v330) en tête de ce README.
 
@@ -918,9 +928,9 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 | Config par GIF : configs perdues après redémarrage | Les configs sont uniquement en session (RAM) — l'export n'est pas encore supporté |
 | Smart Auto Crop donne de mauvais résultats | Désactivez-le et activez chaque option individuellement — utilisez `Auto bottom crop`, `Auto top crop`, `Auto floor detect` indépendamment |
 | Smart Auto Crop n'active rien | Pas assez de détections dans le scan de 60 images — essayez un autre mode de détection (`motion` ou `hybrid`) |
-| Visage coupé au niveau des épaules | Problème corrigé en v4.0.0 — mettez à jour vers la dernière version ; le moteur utilise désormais la détection au niveau du menton (20 % de la hauteur du corps) avec un rembourrage asymétrique |
-| Auto Action échoue avec une source GIF | Corrigé en v4.0.0 — les GIFs sont maintenant pré-convertis via FFmpeg avant le traitement OpenCV pour éviter les problèmes de transparence BGRA |
-| `[ACTION] … FFmpeg pipe encoding failed` | Consultez le message complet dans le log (stderr FFmpeg inclus désormais). Cause probable : GIF avec palette de transparence — mettez à jour vers v4.0.0 |
+| Visage coupé au niveau des épaules | Problème corrigé en v5.0.0 — mettez à jour vers la dernière version ; le moteur utilise désormais la détection au niveau du menton (20 % de la hauteur du corps) avec un rembourrage asymétrique |
+| Auto Action échoue avec une source GIF | Corrigé en v5.0.0 — les GIFs sont maintenant pré-convertis via FFmpeg avant le traitement OpenCV pour éviter les problèmes de transparence BGRA |
+| `[ACTION] … FFmpeg pipe encoding failed` | Consultez le message complet dans le log (stderr FFmpeg inclus désormais). Cause probable : GIF avec palette de transparence — mettez à jour vers v5.0.0 |
 | "Let Me Handle It" grise des curseurs dont j'ai besoin | Désactivez-le pour récupérer le contrôle manuel complet — toutes les valeurs précédentes sont restaurées |
 | "Let Me Handle It" activé mais Auto Action ne tourne pas | Vérifiez que OpenCV et onnxruntime sont installés (`pip install opencv-python onnxruntime`) |
 

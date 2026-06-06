@@ -251,7 +251,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     aspect        = median_height / max(1.0, median_w)
     face_priority = tall_ratio > TALL_FACTOR
     if face_priority:
-        pad_top_px    = frame_h * 0.15
+        # Increase top padding heavily for face priority to protect tall hair (like Goku)
+        pad_top_px    = frame_h * 0.35
         pad_bottom_px = frame_h * 0.10
     else:
         if aspect < 1.3:

@@ -102,10 +102,11 @@ except ImportError:
 #  DMDConverterApp — main window
 # ─────────────────────────────────────────────────────────────────────────────
 from .panels.left import LeftPanelMixin
+from .panels.middle import MiddlePanelMixin
 from .panels.preview import PreviewPanelMixin
 from .panels.settings import SettingsPanelMixin
 from .panels.actions import ActionsPanelMixin
-class DMDConverterApp(ctk.CTk, LeftPanelMixin, PreviewPanelMixin, SettingsPanelMixin, ActionsPanelMixin):
+class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMixin, SettingsPanelMixin, ActionsPanelMixin):
 
     def __init__(self):
         super().__init__()
@@ -115,9 +116,14 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, PreviewPanelMixin, SettingsPanelM
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # ── State ─────────────────────────────────────────────────────────────
-        self._file_data:    dict = {}
+        self._file_data:    dict = {}   # Pending files mapping (iid -> path)
         self._file_paths:   set  = set()
+        
+        self._converted_data: dict = {} # Converted files mapping (iid -> path)
+        self._converted_paths: set = set()
+        
         self._selected_iid: str  = ""
+        self._selected_converted_iid: str = ""
         self._busy                  = False
         self._source_duration       = 0.0
 
@@ -236,7 +242,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, PreviewPanelMixin, SettingsPanelM
         self._pre_auto_color_values: dict = {}  # saved custom-mode slider values
 
         # ── Tkinter vars — "Let me handle it" ─────────────────────────────────
-        self.v_let_me_handle_it = tk.BooleanVar(value=False)
+        self.v_let_me_handle_it = tk.BooleanVar(value=True)
         self._lmh_widgets: list = []          # widgets to gray in LMH mode
         self._lmh_saved_state: dict = {}      # saved 4-flag state before LMH
 
@@ -295,10 +301,41 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, PreviewPanelMixin, SettingsPanelM
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=1) # Settings/preview expands
         self.grid_rowconfigure(0, weight=1)
-        self._build_left_panel()
-        self._build_right_panel()
+        self.grid_rowconfigure(1, weight=0) # Log panel
+        self._build_left_panel()    # Column 0
+        self._build_middle_panel()  # Column 1
+        self._build_right_panel()   # Column 2
+        self._build_global_log_panel()
+        
+        # Initialize default state for 'Let me handle it'
+        self.after(50, lambda: self._on_let_me_handle_toggle() if hasattr(self, '_on_let_me_handle_toggle') else None)
+
+    def _build_global_log_panel(self):
+        self._log_panel = ctk.CTkFrame(self, fg_color="#1a1a2e", corner_radius=0)
+        # Hidden by default
+        self._log_panel.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(
+            self._log_panel, text="📋  Conversion log",
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+        ).grid(row=0, column=0, padx=12, pady=(4, 2), sticky="w")
+        
+        self._log_box = ctk.CTkTextbox(
+            self._log_panel, font=ctk.CTkFont(size=11, family="Courier"), wrap="word", height=120
+        )
+        self._log_box.grid(row=1, column=0, padx=8, pady=(0, 8), sticky="nsew")
+        self._log_box.configure(state="disabled")
+        
+        self._log_visible = False
+
+    def toggle_log_panel(self):
+        if self._log_visible:
+            self._log_panel.grid_remove()
+        else:
+            self._log_panel.grid(row=1, column=0, columnspan=3, sticky="ew")
+        self._log_visible = not self._log_visible
 
     # ── Left panel : file list ────────────────────────────────────────────────
     def _on_close(self):

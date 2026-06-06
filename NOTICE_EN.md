@@ -11,8 +11,9 @@ When converting videos to very low resolutions (e.g. 128x32 or 256x64), the most
 1. **Smart Auto Crop** 🤖: Analyses the video to determine if it should track a character's face, stick to the floor (for platformer games), or ignore the sky.
 2. **Platformer Mode** 🎮: Specially tuned for 2D side-scrolling games (like Mario, Sonic, Metroid). It locks the floor to the bottom of the display and smoothly scrolls ahead of the character.
 3. **Action Tracking** 🏃: Uses a lightweight AI (YOLO) combined with motion detection to follow the subject seamlessly.
-4. **DMD Visibility & Readability Scoring** 👁️: The engine will test multiple crop options internally and pick the one that gives the best contrast, shape separation, and size for your exact LED resolution.
-5. **Auto Tuning & Debug** 🛠️: If something looks wrong, you can enable the debug dataset to see exactly what the engine sees.
+4. **DMD Quality & Readability Scoring** 👁️: The engine will evaluate all generated GIFs and give them a score from 0-100% based on contrast, occupancy, and shape separation.
+5. **Smart Conversion Management (GUI)** 📋: The new UI separates your pending files from converted ones. Converted files are automatically sorted by Quality Score, allowing you to use the **Cleanup Assistant** to instantly trash bad conversions and only keep the best ones.
+6. **Auto Tuning & Debug** 🛠️: If something looks wrong, you can enable the debug dataset to see exactly what the engine sees.
 
 ## Quick Start (Command Line)
 

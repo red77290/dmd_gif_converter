@@ -12,3 +12,4 @@ onnxruntime>=1.16.0
 # 'duckduckgo_search' was renamed to 'ddgs' — install both for compatibility
 ddgs>=7.0.0
 requests>=2.31.0
+send2trash>=1.8.0

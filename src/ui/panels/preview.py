@@ -81,13 +81,14 @@ class PreviewPanelMixin:
         )
         self._btn_led_sim.pack(side="left", padx=3)
 
-        # Dual canvas row
+        # Preview container
         dc = ctk.CTkFrame(pf, fg_color="transparent")
-        dc.grid(row=1, column=0, padx=6, pady=4)
+        dc.grid(row=1, column=0, padx=6, pady=4, sticky="nsew")
+        dc.grid_columnconfigure((0, 1), weight=1)
 
-        # Source canvas (left)
+        # Source canvas (top left)
         src_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
-        src_wrap.pack(side="left", padx=(0, 4))
+        src_wrap.grid(row=0, column=0, padx=(0, 4), pady=4, sticky="ne")
         ctk.CTkLabel(
             src_wrap, text="SOURCE",
             font=ctk.CTkFont(size=10, weight="bold"), text_color="#556677"
@@ -100,9 +101,9 @@ class PreviewPanelMixin:
         self._src_info = _InfoBadge(src_wrap, width=SRC_CANVAS_W)
         self._src_info.pack(pady=(0, 4))
 
-        # Auto-action canvas (middle)
+        # Auto-action canvas (top right)
         auto_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
-        auto_wrap.pack(side="left", padx=4)
+        auto_wrap.grid(row=0, column=1, padx=(4, 0), pady=4, sticky="nw")
         ctk.CTkLabel(
             auto_wrap, text="AUTO ACTION",
             font=ctk.CTkFont(size=10, weight="bold"), text_color="#4f7bd9"
@@ -115,9 +116,9 @@ class PreviewPanelMixin:
         self._auto_info = _InfoBadge(auto_wrap, width=AUTO_CANVAS_W)
         self._auto_info.pack(pady=(0, 4))
 
-        # DMD canvas (right)
+        # DMD canvas (bottom center)
         dmd_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
-        dmd_wrap.pack(side="left", padx=(4, 0))
+        dmd_wrap.grid(row=1, column=0, columnspan=2, padx=4, pady=(8, 4), sticky="n")
         self._dmd_title_label = ctk.CTkLabel(
             dmd_wrap,
             text=f"DMD OUTPUT {DEFAULT_PARAMS['target_width']}×{DEFAULT_PARAMS['target_height']}",
@@ -187,6 +188,17 @@ class PreviewPanelMixin:
         ).grid(row=1, column=3, rowspan=2, padx=(4, 10))
 
         self._trim_frame.grid_remove()
+
+        # Diagnosis info for converted files
+        self._diagnosis_frame = ctk.CTkFrame(pf, fg_color="#1a1a2e", corner_radius=6)
+        self._diagnosis_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(4, 8))
+        self._diagnosis_frame.grid_columnconfigure(1, weight=1)
+        
+        self._lbl_score = ctk.CTkLabel(self._diagnosis_frame, text="", font=ctk.CTkFont(size=18, weight="bold"))
+        self._lbl_score.grid(row=0, column=0, padx=12, pady=10)
+        self._lbl_reasons = ctk.CTkLabel(self._diagnosis_frame, text="", justify="left", anchor="w")
+        self._lbl_reasons.grid(row=0, column=1, sticky="w", padx=10)
+        self._diagnosis_frame.grid_remove()
 
     # ── Bottom : params + actions ─────────────────────────────────────────────
     def _compute_led_sim_display_size(self):
@@ -279,9 +291,14 @@ class PreviewPanelMixin:
     def _stop_preview(self):
         self._stop_src_preview()
 
-    def _load_preview(self, file_path):
+    def _load_preview(self, file_path, is_converted=False, converted_data=None):
         self._stop_src_preview()
+        self._stop_auto_preview()
+        self._stop_dmd_preview()
         self._src_canvas.delete("all")
+        self._auto_canvas.delete("all")
+        self._dmd_canvas.delete("all")
+        
         self._src_canvas.create_text(
             SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
             text="⏳  Loading preview…",
@@ -290,16 +307,33 @@ class PreviewPanelMixin:
         w, h, fps, dur = get_metadata(file_path)
         self._source_duration = dur if dur and dur > 0 else 10.0
         self._update_trim_sliders()
-        self._trim_frame.grid()
-
-        threading.Thread(
-            target=self._extract_source_frames,
-            args=(file_path,), daemon=True
-        ).start()
-
-        # Keep all three previews in sync when a new file is selected.
-        self._start_auto_generation(file_path)
-        self._start_dmd_generation(file_path)
+        
+        if is_converted:
+            self._trim_frame.grid_remove()
+            self._diagnosis_frame.grid()
+            
+            if converted_data:
+                score = converted_data.get("score", 0)
+                color = converted_data.get("color", "")
+                rating = converted_data.get("rating", "")
+                reasons = converted_data.get("reasons", [])
+                self._lbl_score.configure(text=f"{score}%\n{rating}", text_color=color if color and "#" in color else "#ffffff")
+                self._lbl_reasons.configure(text=" • " + "\n • ".join(reasons) if reasons else "No specific reasons.")
+            
+            # For converted files, just load it into DMD preview
+            # We don't generate source/auto because it's already a DMD GIF
+            self._start_dmd_generation(file_path, is_already_converted=True)
+            self._draw_canvas_idle()
+            self._draw_auto_canvas_idle()
+        else:
+            self._trim_frame.grid()
+            self._diagnosis_frame.grid_remove()
+            threading.Thread(
+                target=self._extract_source_frames,
+                args=(file_path,), daemon=True
+            ).start()
+            self._start_auto_generation(file_path)
+            self._start_dmd_generation(file_path)
 
     def _extract_source_frames(self, file_path):
         tmpdir = tempfile.mkdtemp(prefix="dmd_src_")
@@ -354,13 +388,22 @@ class PreviewPanelMixin:
     def _animate_src(self):
         if not self._src_pil_frames:
             return
-        idx = self._src_idx % len(self._src_pil_frames)
+        num_frames = len(self._src_pil_frames)
+        idx = self._src_idx % (num_frames + 1)
+        
+        if idx == num_frames:
+            self._src_canvas.delete("all")
+            self._src_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+            self._src_idx += 1
+            self._src_job = self.after(1000, self._animate_src)
+            return
+            
         # Lazy PhotoImage creation — one frame at a time on the main thread
         if self._src_frames[idx] is None:
             self._src_frames[idx] = ImageTk.PhotoImage(self._src_pil_frames[idx])
         self._src_canvas.delete("all")
         self._src_canvas.create_image(0, 0, anchor="nw", image=self._src_frames[idx])
-        self._src_idx = idx + 1
+        self._src_idx += 1
         delay = self._src_delays[idx] if self._src_delays else 80
         self._src_job = self.after(delay, self._animate_src)
 
@@ -535,13 +578,22 @@ class PreviewPanelMixin:
     def _animate_auto(self):
         if not self._auto_pil_frames:
             return
-        idx = self._auto_idx % len(self._auto_pil_frames)
+        num_frames = len(self._auto_pil_frames)
+        idx = self._auto_idx % (num_frames + 1)
+        
+        if idx == num_frames:
+            self._auto_canvas.delete("all")
+            self._auto_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+            self._auto_idx += 1
+            self._auto_job = self.after(1000, self._animate_auto)
+            return
+
         # Lazy PhotoImage creation — one frame at a time on the main thread
         if self._auto_frames[idx] is None:
             self._auto_frames[idx] = ImageTk.PhotoImage(self._auto_pil_frames[idx])
         self._auto_canvas.delete("all")
         self._auto_canvas.create_image(0, 0, anchor="nw", image=self._auto_frames[idx])
-        self._auto_idx = idx + 1
+        self._auto_idx += 1
         delay = self._auto_delays[idx] if self._auto_delays else 80
         self._auto_job = self.after(delay, self._animate_auto)
 
@@ -570,7 +622,7 @@ class PreviewPanelMixin:
             return
         self._start_dmd_generation(src)
 
-    def _start_dmd_generation(self, src):
+    def _start_dmd_generation(self, src, is_already_converted=False):
         if self._dmd_rendering:
             # Queue the latest request — will start once the current render finishes
             self._dmd_pending_src = src
@@ -583,9 +635,6 @@ class PreviewPanelMixin:
         current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
 
         # ── Keep the canvas visible during re-render in ALL cases ────────────────
-        # Never blank the canvas while a render is in progress: the old content
-        # (animation or idle text) remains visible.  A subtle ↻ badge signals
-        # activity without wiping the preview.
         self._dmd_canvas.delete("refresh_tag")
         self._dmd_canvas.create_text(
             current_dmd_width - 4, 4,
@@ -596,7 +645,6 @@ class PreviewPanelMixin:
 
         params  = self._collect_params()
         start_s, end_s = self._get_trim()
-        # Capture display dimensions on the main thread (Tkinter is not thread-safe)
         led_sim = self.v_led_sim.get()
         if led_sim:
             dmd_display_w, dmd_display_h, sim_scale = self._compute_led_sim_display_size()
@@ -604,40 +652,53 @@ class PreviewPanelMixin:
             dmd_display_w = current_dmd_width
             dmd_display_h = current_dmd_height
             sim_scale = 0
-        threading.Thread(
-            target=self._generate_dmd_preview,
-            args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h,
-                  led_sim, sim_scale), daemon=True
-        ).start()
+            
+        if is_already_converted:
+            threading.Thread(
+                target=self._generate_dmd_preview,
+                args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h,
+                      led_sim, sim_scale, True), daemon=True
+            ).start()
+        else:
+            threading.Thread(
+                target=self._generate_dmd_preview,
+                args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h,
+                      led_sim, sim_scale, False), daemon=True
+            ).start()
 
     def _generate_dmd_preview(self, src, params, start_s, end_s,
                               dmd_display_w, dmd_display_h,
-                              led_sim: bool = False, sim_scale: int = 0):
+                              led_sim: bool = False, sim_scale: int = 0, is_already_converted: bool = False):
         """Run in a background thread. Returns PIL images (NOT PhotoImage) to the main thread."""
         tmpdir  = tempfile.mkdtemp(prefix="dmd_dmd_")
         try:
-            out_gif = os.path.join(tmpdir, "preview.gif")
-            success, msg = process_file(src, out_gif, params, start_s, end_s)
+            if is_already_converted:
+                out_gif = src
+            else:
+                out_gif = os.path.join(tmpdir, "preview.gif")
+                success, msg = process_file(src, out_gif, params, start_s, end_s)
 
-            if not success or not os.path.isfile(out_gif):
-                self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
-                return
+                if not success or not os.path.isfile(out_gif):
+                    self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
+                    return
 
             # Decode frames as plain PIL Images — PhotoImage must be created on the main thread
             pil_frames, delays = [], []
             try:
+                from PIL import ImageSequence
                 img = Image.open(out_gif)
-                while True:
-                    frame = img.copy().convert("RGB").resize(
+                # FFmpeg often optimizes GIFs by only saving transparent delta pixels.
+                # Accumulating them onto a black background prevents glitches and transparent black artifacts.
+                bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
+                for frame in ImageSequence.Iterator(img):
+                    bg.paste(frame, (0, 0), frame.convert("RGBA"))
+                    comp = bg.copy().convert("RGB").resize(
                         (dmd_display_w, dmd_display_h), Image.NEAREST
                     )
                     if led_sim and sim_scale >= 2:
-                        frame = self._apply_led_grid(frame, sim_scale)
-                    pil_frames.append(frame)
+                        comp = self._apply_led_grid(comp, sim_scale)
+                    pil_frames.append(comp)
                     delays.append(max(img.info.get("duration", 80), 20))
-                    img.seek(img.tell() + 1)
-            except EOFError:
-                pass
             except Exception as exc:
                 _msg = str(exc)
                 self.after(0, lambda _m=_msg, _td=tmpdir: self._on_dmd_fail(_m, _td))
@@ -742,13 +803,22 @@ class PreviewPanelMixin:
         if not self._dmd_pil_frames:
             return
         try:
-            idx = self._dmd_idx % len(self._dmd_pil_frames)
+            num_frames = len(self._dmd_pil_frames)
+            idx = self._dmd_idx % (num_frames + 1)
+            
+            if idx == num_frames:
+                self._dmd_canvas.delete("all")
+                self._dmd_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+                self._dmd_idx += 1
+                self._dmd_job = self.after(1000, self._animate_dmd)
+                return
+
             # Lazy PhotoImage creation — one frame at a time on the main thread
             if self._dmd_frames[idx] is None:
                 self._dmd_frames[idx] = ImageTk.PhotoImage(self._dmd_pil_frames[idx])
             self._dmd_canvas.delete("all")
             self._dmd_canvas.create_image(0, 0, anchor="nw", image=self._dmd_frames[idx])
-            self._dmd_idx = idx + 1
+            self._dmd_idx += 1
             delay = self._dmd_delays[idx] if self._dmd_delays else 80
             self._dmd_job = self.after(delay, self._animate_dmd)
         except Exception as _exc:

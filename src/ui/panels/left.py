@@ -100,8 +100,16 @@ class LeftPanelMixin:
 
         self._tree = ttk.Treeview(
             tree_host, style="File.Treeview",
-            show="tree", selectmode="extended"
+            columns=("Duration", "Status"),
+            show="tree headings", selectmode="extended"
         )
+        self._tree.heading("#0", text="File", anchor="w")
+        self._tree.heading("Duration", text="Duration", anchor="w")
+        self._tree.heading("Status", text="Status", anchor="w")
+        
+        self._tree.column("#0", width=140, stretch=True)
+        self._tree.column("Duration", width=60, stretch=False)
+        self._tree.column("Status", width=60, stretch=False)
         sb = ttk.Scrollbar(tree_host, orient="vertical",
                            command=self._tree.yview, style="File.Vertical.TScrollbar")
         self._tree.configure(yscrollcommand=sb.set)
@@ -125,19 +133,7 @@ class LeftPanelMixin:
         bot.grid(row=5, column=0, padx=6, pady=6, sticky="ew")
         bot.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(bot, text="📤 Output folder", font=ctk.CTkFont(size=12)).grid(
-            row=0, column=0, columnspan=2, padx=4, pady=(6, 1), sticky="w"
-        )
-        of = ctk.CTkFrame(bot, fg_color="transparent")
-        of.grid(row=1, column=0, columnspan=2, sticky="ew")
-        of.grid_columnconfigure(0, weight=1)
-        ctk.CTkEntry(
-            of, textvariable=self.v_output_dir,
-            placeholder_text="(same folder as source)", height=28
-        ).grid(row=0, column=0, padx=(4, 2), sticky="ew")
-        ctk.CTkButton(
-            of, text="…", width=28, height=28, command=self.browse_output
-        ).grid(row=0, column=1, padx=(0, 4))
+        # Output folder moved to middle panel
 
         ctk.CTkButton(
             bot, text="🗑  Clear list", command=self.clear_files,
@@ -505,8 +501,8 @@ class LeftPanelMixin:
         ext  = Path(path).suffix.lower()
         icon = "🎞" if ext == ".gif" else "🎬"
         name = Path(path).name
-        disp = (name[:30] + "…") if len(name) > 32 else name
-        iid  = self._tree.insert("", "end", text=f"  {icon}  {disp}", tags=("idle",))
+        disp = (name[:20] + "…") if len(name) > 22 else name
+        iid  = self._tree.insert("", "end", text=f"  {icon}  {disp}", values=("", "Pending"), tags=("idle",))
         self._file_data[iid]  = path
         self._file_paths.add(path)
 
@@ -589,6 +585,24 @@ class LeftPanelMixin:
             self._tree.delete(iid)
         self._update_count()
 
+    def _remove_specific_file(self, iid):
+        if self._selected_iid == iid:
+            self._stop_src_preview()
+            self._stop_auto_preview()
+            self._stop_dmd_preview()
+            self._selected_iid = ""
+            self._trim_frame.grid_remove()
+            self._draw_canvas_idle()
+            self._draw_auto_canvas_idle()
+            self._draw_dmd_canvas_idle()
+        path = self._file_data.pop(iid, None)
+        if path:
+            self._file_paths.discard(path)
+            self._per_gif_configs.pop(path, None)
+        if self._tree.exists(iid):
+            self._tree.delete(iid)
+        self._update_count()
+
     def clear_files(self):
         self._stop_src_preview()
         self._stop_auto_preview()
@@ -609,6 +623,11 @@ class LeftPanelMixin:
     def _set_file_status(self, iid, status):
         try:
             self._tree.item(iid, tags=(status,))
+            vals = self._tree.item(iid, "values")
+            if vals:
+                dur = vals[0]
+                status_text = status.capitalize()
+                self._tree.item(iid, values=(dur, status_text))
         except tk.TclError:
             pass
 

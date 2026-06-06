@@ -159,15 +159,18 @@ class TestBuildCameraRectAutoFloor(unittest.TestCase):
     # ── Positionnement vertical ───────────────────────────────────────────────
 
     def test_auto_floor_roi_floor_visible(self):
-        """Le bas de la ROI (sol estimé) doit être dans la moitié basse du crop."""
+        """Si la caméra est trop petite pour filmer la tête et le sol en même temps, 
+        elle doit prioriser la tête (sommet de la ROI) et abandonner le sol."""
         cfg = self._cfg()
-        roi = (100, 200, 80, 180)  # floor_y = 200 + 180 = 380
-        floor_y_est = float(roi[1] + roi[3])  # 380, comme le ferait _FloorEstimator
+        roi = (100, 200, 80, 180)  # floor_y = 380, height = 180
+        floor_y_est = float(roi[1] + roi[3])
         cx, cy, cw, ch = _build_camera_rect(1280, 480, roi, cfg,
                                              floor_y_est=floor_y_est)
-        crop_bottom = cy + ch / 2.0
-        self.assertGreaterEqual(crop_bottom, floor_y_est - 1.0,
-                                "Le sol doit être visible dans le crop (crop_bottom >= floor_y)")
+        
+        crop_top = cy - ch / 2.0
+        # The crop must include the top of the ROI (the head)
+        self.assertLessEqual(crop_top, roi[1],
+                             "La caméra doit prioriser et inclure la tête (top of crop <= roi y)")
 
     def test_auto_floor_roi_floor_near_bottom_of_crop(self):
         """Avec auto floor, le sol doit se trouver dans les ~80-100 % du crop."""
@@ -183,15 +186,15 @@ class TestBuildCameraRectAutoFloor(unittest.TestCase):
         self.assertGreaterEqual(relative_pos, 0.7,
                                 f"Sol trop haut dans le crop : {relative_pos:.2f}")
 
-    def test_auto_floor_no_roi_leans_downward(self):
-        """Sans ROI, auto_floor doit décaler la caméra vers le bas vs bias=0."""
+    def test_auto_floor_no_roi_leans_upward(self):
+        """Sans ROI, auto_vertical_bias (-1.0) doit décaler la caméra vers le haut vs bias=0."""
         cfg_auto = self._cfg()
         cfg_neutral = AutoActionConfig(auto_vertical_bias=False, vertical_bias=0.0)
         frame_w, frame_h = 1280, 720
         _, cy_auto, _, _ = _build_camera_rect(frame_w, frame_h, None, cfg_auto)
         _, cy_neutral, _, _ = _build_camera_rect(frame_w, frame_h, None, cfg_neutral)
-        self.assertGreater(cy_auto, cy_neutral,
-                           "auto_floor sans ROI doit décaler la caméra vers le bas")
+        self.assertLess(cy_auto, cy_neutral,
+                           "auto_vertical_bias sans ROI doit décaler la caméra vers le haut")
 
     # ── Indépendance par rapport à vertical_bias ──────────────────────────────
 
@@ -245,13 +248,14 @@ class TestBuildCameraRectAutoFloor(unittest.TestCase):
         roi_air = (200, 50, 100, 150)  # floor_y=200
         for _ in range(8):
             fy_air = fe.update(float(roi_air[1] + roi_air[3]))
-        _, cy_air, _, _ = _build_camera_rect(frame_w, frame_h, roi_air, cfg,
+        _, cy_air, _, ch_air = _build_camera_rect(frame_w, frame_h, roi_air, cfg,
                                               floor_y_est=fy_air)
 
-        # cy ne doit pas avoir remonté de plus de 35 px pendant le saut
-        # (sans stabilisateur, la différence serait ~150 px → réduction > 75 %)
-        self.assertLess(cy_ground - cy_air, 35.0,
-                        "La caméra ne doit pas remonter significativement pendant un saut")
+        # Avec la nouvelle règle de "head protection", si le saut sort la tête du cadre,
+        # la caméra doit abandonner le sol et suivre le personnage en l'air.
+        crop_top_air = cy_air - ch_air / 2.0
+        self.assertLessEqual(crop_top_air, roi_air[1],
+                        "La caméra doit suivre le personnage en l'air si le sol le fait sortir du cadre")
 
 class TestCropFrame(unittest.TestCase):
 
