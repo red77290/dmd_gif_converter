@@ -36,27 +36,32 @@ def available_detectors() -> list[str]:
     return ["person", "motion", "hybrid", "center"]
 
 
-def _fuse_rois(hits: list) -> Optional[Tuple[int, int, int, int]]:
+def _fuse_rois(hits: list, roi_persistence_score: float = 1.0) -> Optional[Tuple[int, int, int, int]]:
     """Fuse multiple (score, (x, y, w, h)) detections into one weighted box.
 
-    The fused box is the confidence-weighted centroid of all input boxes.
-    The width/height are the weighted average of individual w/h values so the
-    camera frame is large enough to contain the crowd without becoming the
-    union (which over-zooms when subjects are far apart).
-
-    Returns None if *hits* is empty.
+    VNext Priority 5: The fused box is weighted by confidence * area * persistence.
     """
     if not hits:
         return None
     if len(hits) == 1:
         return hits[0][1]
-    total_w  = sum(s for s, _ in hits)
+        
+    def _weight(s, r):
+        area = max(1.0, float(r[2] * r[3]))
+        # Scale area to avoid massive boxes completely dominating tiny but high-conf boxes?
+        # Actually area is fine if we want important ROIs to dominate.
+        # We can take sqrt of area to balance.
+        import math
+        return s * math.sqrt(area) * roi_persistence_score
+
+    total_w  = sum(_weight(s, r) for s, r in hits)
     if total_w <= 0:
         return hits[0][1]
-    wcx = sum(s * (r[0] + r[2] / 2.0) for s, r in hits) / total_w
-    wcy = sum(s * (r[1] + r[3] / 2.0) for s, r in hits) / total_w
-    ww  = sum(s * r[2] for s, r in hits) / total_w
-    wh  = sum(s * r[3] for s, r in hits) / total_w
+        
+    wcx = sum(_weight(s, r) * (r[0] + r[2] / 2.0) for s, r in hits) / total_w
+    wcy = sum(_weight(s, r) * (r[1] + r[3] / 2.0) for s, r in hits) / total_w
+    ww  = sum(_weight(s, r) * r[2] for s, r in hits) / total_w
+    wh  = sum(_weight(s, r) * r[3] for s, r in hits) / total_w
     x   = int(wcx - ww / 2.0)
     y   = int(wcy - wh / 2.0)
     return (max(0, x), max(0, y), int(ww), int(wh))
@@ -105,12 +110,10 @@ class _FrameDetector:
         except Exception:
             self._onnx_session = None
 
-    def _detect_yolo(self, frame, min_conf: float = _YOLO_CONF_THRESH) -> Optional[Tuple[int, int, int, int]]:
+    def _detect_yolo(self, frame, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0) -> Optional[Tuple[int, int, int, int]]:
         """Run YOLOv8n inference; return best person box (x, y, w, h) or None.
 
-        The frame is resized to 640×640 (YOLOv8 native input) for inference and
-        the resulting bounding box is scaled back to the original frame dimensions.
-        Only the highest-confidence "person" (COCO class 0) detection is returned.
+        VNext Priority 8: dynamic_confidence allows lower raw confidence if persistence is high.
         """
         cv2 = self.cv2
         h, w = frame.shape[:2]
@@ -128,10 +131,14 @@ class _FrameDetector:
         class_prob = pred[4:].T          # [8400, 80] — direct class probabilities
         person_scores = class_prob[:, 0]  # COCO class 0 = person
 
-        mask = person_scores > min_conf
+        # Dynamic confidence threshold
+        effective_min_conf = max(0.05, min_conf * (1.0 - 0.5 * roi_persistence_score))
+        
+        mask = person_scores > effective_min_conf
         if not np.any(mask):
             return None
 
+        # Best score is raw score * persistence factor (not needed for single best, max is max)
         best_i = int(np.argmax(person_scores * mask))
         cx, cy, bw, bh = boxes_raw[best_i]
 
@@ -153,7 +160,7 @@ class _FrameDetector:
 
     # ── Public detection methods ──────────────────────────────────────────────
 
-    def _detect_yolo_multi(self, frame, min_conf: float = _YOLO_CONF_THRESH) -> list:
+    def _detect_yolo_multi(self, frame, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0) -> list:
         """Return ALL person boxes above the confidence threshold.
 
         Returns a list of (score, (x, y, w, h)) sorted by score descending.
@@ -170,7 +177,9 @@ class _FrameDetector:
         pred       = self._onnx_session.run(None, {input_name: img})[0][0]
         boxes_raw     = pred[:4].T
         person_scores = pred[4:].T[:, 0]
-        mask    = person_scores > min_conf
+        
+        effective_min_conf = max(0.05, min_conf * (1.0 - 0.5 * roi_persistence_score))
+        mask    = person_scores > effective_min_conf
         indices = np.where(mask)[0]
         if len(indices) == 0:
             return []
@@ -189,7 +198,7 @@ class _FrameDetector:
         return results
 
     def detect_person(
-        self, frame, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH
+        self, frame, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0
     ) -> Optional[Tuple[int, int, int, int]]:
         """Return person bounding box via ONNX YOLOv8n, or None.
 
@@ -199,9 +208,9 @@ class _FrameDetector:
         if self._onnx_session is None:
             return None
         if multi_fusion:
-            hits = self._detect_yolo_multi(frame, min_conf=min_conf)
-            return _fuse_rois(hits) if hits else None
-        return self._detect_yolo(frame, min_conf=min_conf)
+            hits = self._detect_yolo_multi(frame, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
+            return _fuse_rois(hits, roi_persistence_score=roi_persistence_score) if hits else None
+        return self._detect_yolo(frame, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
 
     def detect_motion(self, frame) -> Optional[Tuple[int, int, int, int]]:
         cv2 = self.cv2
@@ -236,7 +245,7 @@ class _FrameDetector:
         return (int(x), int(y), int(w), int(h))
 
     def detect(
-        self, frame, mode: str, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH
+        self, frame, mode: str, multi_fusion: bool = False, min_conf: float = _YOLO_CONF_THRESH, roi_persistence_score: float = 1.0
     ) -> Optional[Tuple[int, int, int, int]]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
@@ -246,7 +255,7 @@ class _FrameDetector:
             return None
 
         if mode == "person":
-            p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf)
+            p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
             if p is not None:
                 return p
             return self.detect_motion(frame)
@@ -255,10 +264,10 @@ class _FrameDetector:
             m = self.detect_motion(frame)
             if m is not None:
                 return m
-            return self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf)
+            return self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
 
         # hybrid
-        p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf)
+        p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf, roi_persistence_score=roi_persistence_score)
         m = self.detect_motion(frame)
         if p and m:
             # Merge boxes for broader action framing.

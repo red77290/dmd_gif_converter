@@ -58,6 +58,17 @@ def _compute_auto_crop_margins(  # noqa: C901
     if total_frames <= 0:
         return 0.0, 0.0, False
 
+    # VNext Priority 7: Smart Auto Crop Optimizer
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    duration_s = total_frames / max(1.0, float(fps))
+    if duration_s < 10.0:
+        sample_count = min(total_frames, int(duration_s * 5))
+    elif duration_s < 60.0:
+        sample_count = min(total_frames, int(duration_s * 2))
+    else:
+        sample_count = min(total_frames, int(duration_s * 1))
+    sample_count = max(20, min(sample_count, 150))
+
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     dmd_crop_h   = frame_w / target_ratio
 
@@ -145,6 +156,17 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     if total_frames <= 0:
         return {**_EMPTY, "reasons": ["could not determine frame count"]}
+
+    # VNext Priority 7: Smart Auto Crop Optimizer
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    duration_s = total_frames / max(1.0, float(fps))
+    if duration_s < 10.0:
+        sample_count = min(total_frames, int(duration_s * 5))
+    elif duration_s < 60.0:
+        sample_count = min(total_frames, int(duration_s * 2))
+    else:
+        sample_count = min(total_frames, int(duration_s * 1))
+    sample_count = max(20, min(sample_count, 150))
 
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     dmd_crop_h   = frame_w / target_ratio
@@ -260,7 +282,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     }
 
 
-def _calculate_dmd_visibility_score(dmd_frame: np.ndarray) -> float:
+def _calculate_dmd_visibility_score(dmd_frame: np.ndarray, subject_dmd_rect: Optional[Tuple[int, int, int, int]] = None) -> float:
     import cv2
     import numpy as np
 
@@ -300,14 +322,35 @@ def _calculate_dmd_visibility_score(dmd_frame: np.ndarray) -> float:
     w_contour_density = 0.2
     w_occupation = 0.1
 
-    score = (
+    base_score = (
         w_non_black * non_black_ratio +
         w_contrast * (mean_gradient / 255.0) +
         w_contour_density * contour_density +
         w_occupation * ((h_occupation + v_occupation) / 2.0)
     )
 
-    return score
+    # VNext Priority 2: DMD Visibility Score v2 (subject_visibility_bonus)
+    subject_visibility_bonus = 0.0
+    if subject_dmd_rect is not None:
+        sx, sy, sw, sh = subject_dmd_rect
+        # Bonus for good size (ideal is occupying ~30-90% of height)
+        sub_h_ratio = sh / dmd_frame.shape[0] if dmd_frame.shape[0] > 0 else 0
+        sub_w_ratio = sw / dmd_frame.shape[1] if dmd_frame.shape[1] > 0 else 0
+        
+        if 0.3 < sub_h_ratio < 0.9:
+            subject_visibility_bonus += 0.2
+        if 0.1 < sub_w_ratio < 0.6:
+            subject_visibility_bonus += 0.1
+            
+        # Optional: Verify contrast inside the subject rect
+        if sx >= 0 and sy >= 0 and sx+sw <= dmd_frame.shape[1] and sy+sh <= dmd_frame.shape[0]:
+            sub_grad = gradient_magnitude[sy:sy+sh, sx:sx+sw]
+            if sub_grad.size > 0:
+                sub_mean_grad = float(np.mean(sub_grad))
+                if sub_mean_grad > mean_gradient * 1.2:
+                    subject_visibility_bonus += 0.1
+
+    return min(1.0, float(base_score + subject_visibility_bonus))
 
 
 def _compute_scene_change_score(frame_a: np.ndarray, frame_b: np.ndarray) -> float:
@@ -333,6 +376,49 @@ def _compute_scene_change_score(frame_a: np.ndarray, frame_b: np.ndarray) -> flo
             corr = cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL)
             scores.append(float(corr))
 
-        return max(0.0, float(np.mean(scores)))
+        # VNext Priority 3: Scene Change Detection v2
+        gray_a = cv2.cvtColor(small_a, cv2.COLOR_BGR2GRAY)
+        gray_b = cv2.cvtColor(small_b, cv2.COLOR_BGR2GRAY)
+        diff = cv2.absdiff(gray_a, gray_b)
+        mean_diff = float(np.mean(diff)) / 255.0
+        struct_sim = max(0.0, 1.0 - mean_diff * 2.0)
+        
+        hist_sim = max(0.0, float(np.mean(scores)))
+
+        return 0.5 * hist_sim + 0.5 * struct_sim
     except Exception:
         return 1.0
+
+def _calculate_dmd_readability_score(dmd_frame: np.ndarray) -> float:
+    # VNext Priority 9 — DMD Readability Predictor
+    import cv2
+    import numpy as np
+
+    if dmd_frame is None or dmd_frame.size == 0:
+        return 0.0
+
+    gray_dmd = cv2.cvtColor(dmd_frame, cv2.COLOR_BGR2GRAY)
+    
+    # 1. Local Contrast (Standard Deviation)
+    std_dev = float(np.std(gray_dmd))
+    contrast_score = min(1.0, std_dev / 80.0) 
+    
+    # 2. Separation of shapes
+    _, thresh = cv2.threshold(gray_dmd, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh, connectivity=8)
+    
+    if num_labels > 1:
+        valid_shapes = sum(1 for stat in stats[1:] if stat[cv2.CC_STAT_AREA] > 5)
+        if valid_shapes == 0:
+            shape_score = 0.2
+        elif valid_shapes < 5:
+            shape_score = 1.0
+        elif valid_shapes < 15:
+            shape_score = 0.6
+        else:
+            shape_score = 0.3
+    else:
+        shape_score = 0.1
+        
+    readability_score = 0.6 * contrast_score + 0.4 * shape_score
+    return min(1.0, readability_score)

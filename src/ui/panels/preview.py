@@ -436,6 +436,7 @@ class PreviewPanelMixin:
             auto_vertical_bias=bool(self.v_action_auto_vertical_bias.get()),
             smart_auto_crop=bool(self.v_action_smart_auto_crop.get()),
             dmd_visibility_score_enabled=bool(self.v_dmd_visibility_score_enabled.get()), # NEW
+            dmd_readability_score_enabled=bool(self.v_dmd_readability_score_enabled.get()), # NEW
             start_s=start_s,
             end_s=end_s,
             target_width=self.v_target_width.get(),

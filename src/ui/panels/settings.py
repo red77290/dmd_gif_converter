@@ -465,6 +465,35 @@ class SettingsPanelMixin:
             text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
         ).pack(padx=14, pady=(0, 6), anchor="w")
 
+        row_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        row_frame.pack(fill="x", padx=14, pady=(0, 4))
+        self._cb_dmd_visibility_score_enabled = ctk.CTkCheckBox(
+            row_frame,
+            text="DMD Visibilité",
+            variable=self.v_dmd_visibility_score_enabled,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        self._cb_dmd_visibility_score_enabled.pack(side="left")
+        self._lmh_widgets.append(self._cb_dmd_visibility_score_enabled)
+
+        self._cb_dmd_readability_score_enabled = ctk.CTkCheckBox(
+            row_frame,
+            text="DMD Lisibilité",
+            variable=self.v_dmd_readability_score_enabled,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        self._cb_dmd_readability_score_enabled.pack(side="left", padx=(10, 0))
+        self._lmh_widgets.append(self._cb_dmd_readability_score_enabled)
+
+        ctk.CTkLabel(
+            parent,
+            text="    Active un ou deux scores pour limiter les zooms automatiques :\n"
+                 "    - Visibilité seule : empêche les zooms qui rendent le sujet moins visible.\n"
+                 "    - Lisibilité seule : empêche les zooms qui dégradent le contraste des formes.\n"
+                 "    - Les deux : calcule une moyenne des deux métriques.",
+            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+        ).pack(padx=14, pady=(0, 6), anchor="w")
+
         adv_slider(parent, "Action strength", self.v_action_strength, 0.0, 1.0,
                    "{:.2f}", "", steps=100)
         adv_slider(parent, "Camera smooth", self.v_action_smoothness, 0.0, 0.98,
@@ -475,24 +504,6 @@ class SettingsPanelMixin:
                    "{:.2f}", "", steps=60)
         adv_slider(parent, "Intro panoramic", self.v_action_intro, 0.0, 5.0,
                    "{:.1f}", " s", steps=50)
-
-        # NEW: DMD Visibility Score Checkbox
-        dmd_vis_row = ctk.CTkFrame(parent, fg_color="transparent")
-        dmd_vis_row.pack(fill="x", padx=14, pady=(0, 4))
-        self._cb_dmd_visibility_score_enabled = ctk.CTkCheckBox(
-            dmd_vis_row,
-            text="Enable DMD Visibility Score (prevents zooms that reduce legibility)",
-            variable=self.v_dmd_visibility_score_enabled,
-            font=ctk.CTkFont(size=12), text_color="#aaddaa",
-        )
-        self._cb_dmd_visibility_score_enabled.pack(side="left")
-        self._lmh_widgets.append(self._cb_dmd_visibility_score_enabled)
-        ctk.CTkLabel(
-            parent,
-            text="    This will prevent the auto-framing engine from zooming in if the resulting\n"
-                 "    DMD output would have a lower visibility score than the current view.",
-            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
-        ).pack(padx=14, pady=(0, 6), anchor="w")
 
         # ════════════════════════════════════════════════════════════════════
         # SECTION: Crop & Vertical Bias
@@ -949,6 +960,7 @@ class SettingsPanelMixin:
                 "action_smart_auto_crop": self.v_action_smart_auto_crop.get(),
                 "bg_sub_enable":         self.v_bg_sub_enable.get(),
                 "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(),
+                "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(),
             }
             # Force all 5 flags ON (visual feedback)
             self.v_auto_color_enabled.set(True)
@@ -956,6 +968,7 @@ class SettingsPanelMixin:
             self.v_action_smart_auto_crop.set(True)
             self.v_bg_sub_enable.set(True)
             self.v_dmd_visibility_score_enabled.set(True)
+            self.v_dmd_readability_score_enabled.set(True)
             # Grey out every registered widget
             for w in self._lmh_widgets:
                 try:
@@ -970,6 +983,7 @@ class SettingsPanelMixin:
             self.v_action_smart_auto_crop.set(saved.get("action_smart_auto_crop", False))
             self.v_bg_sub_enable.set(saved.get("bg_sub_enable", False))
             self.v_dmd_visibility_score_enabled.set(saved.get("dmd_visibility_score_enabled", False))
+            self.v_dmd_readability_score_enabled.set(saved.get("dmd_readability_score_enabled", True))
             # Re-enable all registered widgets
             for w in self._lmh_widgets:
                 try:
@@ -994,6 +1008,7 @@ class SettingsPanelMixin:
         self.v_action_smart_auto_crop.set(False)
         self.v_bg_sub_enable.set(False) # Reset background subtraction
         self.v_dmd_visibility_score_enabled.set(False) # NEW: Reset DMD Visibility Score
+        self.v_dmd_readability_score_enabled.set(True) # NEW: Reset DMD Readability Score
         self.v_target_preset.set("128x32 (1x1)") # Reset tiling preset
         self.v_target_width.set(DEFAULT_PARAMS["target_width"])
         self.v_target_height.set(DEFAULT_PARAMS["target_height"])
@@ -1091,6 +1106,7 @@ class SettingsPanelMixin:
             "action_smart_auto_crop":     self.v_action_smart_auto_crop.get(),
             "bg_sub_enable":              self.v_bg_sub_enable.get(),
             "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(), # NEW
+            "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(), # NEW
             "target_width":               self.v_target_width.get(),
             "target_height":              self.v_target_height.get(),
             "target_preset":              self.v_target_preset.get(),
@@ -1149,6 +1165,7 @@ class SettingsPanelMixin:
         self.v_action_smart_auto_crop.set(s.get("action_smart_auto_crop", False))
         self.v_bg_sub_enable.set(s.get("bg_sub_enable", False))
         self.v_dmd_visibility_score_enabled.set(s.get("dmd_visibility_score_enabled", False)) # NEW
+        self.v_dmd_readability_score_enabled.set(s.get("dmd_readability_score_enabled", True)) # NEW
         self.v_target_width.set(s.get("target_width", 128))
         self.v_target_height.set(s.get("target_height", 32))
         self.v_target_preset.set(s.get("target_preset", "128x32 (1x1)"))
@@ -1349,6 +1366,7 @@ class SettingsPanelMixin:
             "action_smart_auto_crop":    self.v_action_smart_auto_crop.get(),
             "bg_sub_enable": self.v_bg_sub_enable.get(),
             "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(), # NEW
+            "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(), # NEW
             "target_width": self.v_target_width.get(),
             "target_height": self.v_target_height.get(),
             "text_overlay_enabled": self.v_text_overlay_enabled.get(), # Collect text overlay params
@@ -1372,6 +1390,7 @@ class SettingsPanelMixin:
                 "action_smart_auto_crop": True,
                 "bg_sub_enable":          True,
                 "dmd_visibility_score_enabled": True,
+                "dmd_readability_score_enabled": True,
             } if self.v_let_me_handle_it.get() else {}
         )
 

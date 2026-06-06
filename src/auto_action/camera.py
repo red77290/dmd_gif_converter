@@ -128,30 +128,31 @@ def _crop_frame(frame, cam_rect):
 
 def _apply_look_ahead(
     cam_rect: Tuple[float, float, float, float],
-    prev_roi_cx: Optional[float],
-    curr_roi_cx: Optional[float],
-    prev_roi_cy: Optional[float],
-    curr_roi_cy: Optional[float],
+    scroll_vx: float,
+    scroll_vy: float,
     frame_w: int,
     frame_h: int,
     look_ahead_factor: float,
+    roi_persistence: float = 1.0,
 ) -> Tuple[float, float, float, float]:
-    if look_ahead_factor <= 0.0 or prev_roi_cx is None or curr_roi_cx is None:
+    if look_ahead_factor <= 0.0 or (abs(scroll_vx) < 1e-3 and abs(scroll_vy) < 1e-3):
         return cam_rect
 
     cx, cy, cw, ch = cam_rect
 
-    vx = curr_roi_cx - prev_roi_cx
-    vy = (curr_roi_cy - prev_roi_cy) if (prev_roi_cy is not None and curr_roi_cy is not None) else 0.0
-
+    # VNext Priority 4: Adaptive Look Ahead
     # Smoothly scale offset with velocity (pixels per frame).
     # look_ahead_factor (0.0 - 1.0) determines responsiveness. We multiply by a constant
     # to project several frames ahead. Max offset is capped at 25% of crop width.
     max_offset_x = cw * 0.25
     max_offset_y = ch * 0.25
     
-    offset_x = _clamp(vx * look_ahead_factor * 5.0, -max_offset_x, max_offset_x)
-    offset_y = _clamp(vy * look_ahead_factor * 5.0, -max_offset_y, max_offset_y)
+    # Adaptive multiplier based on speed
+    speed = (scroll_vx**2 + scroll_vy**2)**0.5
+    adaptive_factor = look_ahead_factor * (1.0 + min(1.5, speed / 15.0)) * roi_persistence
+    
+    offset_x = _clamp(scroll_vx * adaptive_factor * 5.0, -max_offset_x, max_offset_x)
+    offset_y = _clamp(scroll_vy * adaptive_factor * 5.0, -max_offset_y, max_offset_y)
 
     cx = _clamp(cx + offset_x, cw / 2.0, float(frame_w) - cw / 2.0)
     cy = _clamp(cy + offset_y, ch / 2.0, float(frame_h) - ch / 2.0)
