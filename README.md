@@ -740,6 +740,9 @@ my_folder/
 # Tune scroll
 ./dmd_gif_converter.py --scroll-speed 32 --scroll-cycles 1.75
 
+# Let Me Handle It (Full Auto-Action + Colorimetry)
+./dmd_gif_converter.py --let-me-handle-it gifs_Arcade
+
 # Help
 ./dmd_gif_converter.py --help
 ```

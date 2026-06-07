@@ -764,6 +764,9 @@ mon_dossier/
 # Régler le scroll
 ./dmd_gif_converter.py --scroll-speed 32 --scroll-cycles 1.75
 
+# Mode Automatique : Let Me Handle It (Auto-Action + Auto-Color)
+./dmd_gif_converter.py --let-me-handle-it gifs_Arcade
+
 # Aide
 ./dmd_gif_converter.py --help
 ```
