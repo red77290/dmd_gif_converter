@@ -151,6 +151,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Smart Auto Crop: engine analyses context and activates the optimal combination of "
              "auto-bottom-crop, auto-top-crop and auto-floor-tracking (default: disabled).",
     )
+    
+    # ── Automation (Let me handle it) ──────────────────────────────────────────
+    am = p.add_argument_group("Automation (Magic Mode)")
+    am.add_argument(
+        "--let-me-handle-it", action="store_true", default=False,
+        help="Magic mode: overrides several settings to automatically enable Auto-Action, "
+             "Smart Auto Crop, Auto-Colorimetry, and DMD Scoring.",
+    )
+    am.add_argument(
+        "--auto-color", action="store_true", default=False,
+        help="Enable heuristic auto-colorimetry (brightness/contrast injection).",
+    )
 
     # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
     mg = p.add_argument_group("Multi-dalle / Tiling")
@@ -249,7 +261,18 @@ if __name__ == "__main__":
         "text_style": args.text_style,
         "text_bg": args.text_bg,
         "text_bg_opacity": args.text_bg_opacity,
+        "auto_color_enabled": args.auto_color,
     }
+    
+    # Apply "Let Me Handle It" overrides
+    if args.let_me_handle_it:
+        params.update({
+            "auto_color_enabled":     True,
+            "auto_action_enabled":    True,
+            "action_smart_auto_crop": True,
+            "dmd_visibility_score_enabled": True,
+            "dmd_readability_score_enabled": True,
+        })
     prefix = args.prefix
 
     if args.folders:
