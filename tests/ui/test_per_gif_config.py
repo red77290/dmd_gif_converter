@@ -237,7 +237,9 @@ def _make_app():
     app.v_auto_action_enabled       = tk.BooleanVar(value=False)
     app.v_action_detector           = tk.StringVar(value="person")
     app.v_action_strength           = tk.DoubleVar(value=0.65)
+    app.v_action_auto_strength      = tk.BooleanVar(value=False)
     app.v_action_smoothness         = tk.DoubleVar(value=0.85)
+    app.v_action_auto_smoothness    = tk.BooleanVar(value=False)
     app.v_action_zoom_max           = tk.DoubleVar(value=2.0)
     app.v_action_padding            = tk.DoubleVar(value=0.20)
     app.v_action_intro              = tk.DoubleVar(value=1.5)
@@ -301,8 +303,9 @@ class TestSnapshotParams(unittest.TestCase):
             "scroll_enabled", "zoom", "manual_x", "manual_y",
             "hue_shift", "noise_reduction", "film_grain", "vignette",
             "auto_action_enabled", "action_detector",
-            "action_strength", "action_smoothness", "action_zoom_max",
-            "action_padding", "action_intro",
+            "action_strength", "action_auto_strength",
+            "action_smoothness", "action_auto_smoothness",
+            "action_zoom_max", "action_padding", "action_intro",
             "action_bottom_crop", "action_auto_bottom_crop",
             "action_top_crop", "action_auto_top_crop",
             "action_vertical_bias", "action_auto_vertical_bias",

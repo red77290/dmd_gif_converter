@@ -223,8 +223,10 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `auto_action_enabled` | Case à cocher | `OFF` | Interrupteur principal — active le cadrage IA |
 | `action_detector` | Mode de détection | `person` | `person` · `motion` · `hybrid` · `center` |
 | `action_intro` | Intro panoramique | `1,5 s` | Durée du plan large ajouté en préfixe (première image gelée, source rejouée intégralement) |
-| `action_strength` | Action strength | `0,65` | `0` = cadrage large · `1` = zoom serré sur le sujet |
-| `action_smoothness` | Camera smooth | `0,85` | `0` = instantané · `0,98` = caméra très lente |
+| `action_strength` | Action strength | `0.65` | `0` = cadrage large · `1` = zoom serré sur le sujet |
+| `action_auto_strength` | Auto strength | `OFF` | Adapte automatiquement la force en fonction du type de contenu (0.55 anime, 0.65 jeux) |
+| `action_smoothness` | Camera smooth | `0.65` | `0` = instantané · `0.98` = caméra très lente |
+| `action_auto_smoothness`| Auto smooth | `OFF` | Adapte automatiquement le lissage en fonction du type de contenu (0.85 anime, 0.70 jeux) |
 | `action_zoom_max` | Zoom max | `1,8×` | Zoom dynamique maximum que la caméra IA peut appliquer |
 | `action_padding` | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
 | `action_bottom_crop` | Bottom crop % | `0 %` | Exclut les N % inférieurs du frame de la détection (manuel — ignoré si auto actif) |
@@ -500,9 +502,11 @@ Toutes les valeurs par défaut = « aucun effet » — la sortie standard est id
 | Case à cocher | `OFF` | Interrupteur principal |
 | Mode de détection | `person` | `person` · `motion` · `hybrid` · `center` |
 | **Intro panoramique** | `1,5 s` | Plan large en préfixe (première image gelée, source rejouée intégralement) |
-| Action strength | `0,65` | Serrage du cadre autour du sujet |
-| Camera smooth | `0,85` | Lissage exponentiel — plus élevé = caméra plus lente |
-| Zoom max | `1,8×` | Zoom maximum autorisé |
+| Action strength | `0,65` | Force de suivi du sujet (1 = zoom très serré) |
+| Auto strength | `OFF` | Adapte automatiquement la force en fonction du type de contenu |
+| Camera smooth | `0,65` | Lissage exponentiel (plus c'est élevé, plus la caméra est lente) |
+| Auto smooth | `OFF` | Adapte automatiquement le lissage en fonction du type de contenu |
+| Zoom max | `1,8×` | Limite de zoom dynamique autorisé |
 | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
 | Bottom crop % | `0 %` | Exclut les N % inférieurs du cadre de la détection (pieds / sol / HUD) |
 | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol), `-1,0` = caméra vers le haut |
@@ -825,9 +829,11 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `auto_action_enabled` | `False` | 🤖 Caméra IA cinématique — voir section dédiée |
 | `action_detector` | `person` | `person` · `motion` · `hybrid` · `center` |
 | `action_intro` | `1.5` | Durée du plan large d'introduction en secondes |
-| `action_strength` | `0.65` | Serrage du cadre autour du sujet |
-| `action_smoothness` | `0.85` | Facteur de lissage exponentiel de la caméra |
-| `action_zoom_max` | `1.8` | Zoom IA maximum |
+| `action_strength` | `0.65` | Force de zoom autour du sujet |
+| `action_auto_strength` | `False` | Force automatique basée sur le contenu |
+| `action_smoothness` | `0.65` | Lissage exponentiel de la caméra |
+| `action_auto_smoothness`| `False` | Lissage automatique basé sur le contenu |
+| `action_zoom_max` | `1.8` | Facteur de zoom IA maximum |
 | `action_padding` | `0.20` | Marge autour du ROI détecté |
 | `bg_sub_enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
 | `action_bottom_crop` | `0.0` | Exclut les N % inférieurs du cadre (manuel, 0 = désactivé) |
