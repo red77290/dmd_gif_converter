@@ -7,10 +7,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 ---
 
 ## What is New in v5.1.0?
-- **🏛️ Full OOP Architecture**: The entire codebase has been refactored using Abstract Base Classes, interfaces, and an MVC pattern. Every layer now defines strict contracts (`IConverter`, `IDetector`, `ITracker`, `IRenderer`, `IModel`, `IController`). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full class diagrams and sequence diagrams.
-- **🔩 Service Layer**: `FFmpegConverter`, `BatchOrchestrator`, and `PillowOverlayService` are now standalone injectable services implementing their respective interfaces — making them independently testable and replaceable.
-- **🧩 MVC UI Layer**: `AppState` (Model), `ConversionController`, and `PreviewController` separate state from logic from rendering.
-- **🏭 DetectorFactory**: Instantiation of the ONNX detector is now handled by a Factory, making it trivial to swap or extend the detection backend.
+
 
 ## What is New in v5.0.0?
 - **🏗️ Under-the-hood Refactoring**: Massive architectural overhaul splitting the monolithic scripts into a modular `src/` package (`auto_action`, `converter`, `ui`) for easier debugging and maintainability.
@@ -32,7 +29,6 @@ Now ships with a **full cross-platform graphical interface** — no command line
 - [⚙️ Parameters](#-parameters)
 - [🔍 How it works](#-how-it-works)
 - [❓ Troubleshooting](#-troubleshooting)
-- [🏛️ Technical Architecture](ARCHITECTURE.md)
 - [📄 License](#-license)
 - [🙏 Credits](#-credits)
 
