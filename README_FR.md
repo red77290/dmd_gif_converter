@@ -6,11 +6,7 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ---
 
-## Nouveautés de la v5.1.0
-- **🏛️ Architecture OOP complète** : Toute la base de code a été refactorisée avec des classes abstraites, des interfaces et un pattern MVC. Chaque couche définit des contrats stricts (`IConverter`, `IDetector`, `ITracker`, `IRenderer`, `IModel`, `IController`). Voir [ARCHITECTURE.md](ARCHITECTURE.md) pour les diagrammes de classes et de séquence complets.
-- **🔩 Couche de services** : `FFmpegConverter`, `BatchOrchestrator` et `PillowOverlayService` sont maintenant des services injectables standalone implémentant leurs interfaces respectives — indépendamment testables et remplacables.
-- **🧩 UI MVC** : `AppState` (Modèle), `ConversionController` et `PreviewController` séparent l'état de la logique du rendu.
-- **🏭 DetectorFactory** : L'instanciation du détecteur ONNX est gérée par une Factory, permettant de changer ou étendre le backend de détection facilement.
+
 
 ## Nouveautés de la v5.0.0
 - **🏗️ Refonte Architecturale** : Séparation des scripts monolithiques en un paquet `src/` modulaire (`auto_action`, `converter`, `ui`) pour faciliter le débogage et la maintenance.
@@ -32,7 +28,6 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 - [⚙️ Paramètres](#-parametres)
 - [🔍 Comportement détaillé](#-comportement-detaille)
 - [❓ Dépannage](#-depannage)
-- [🏛️ Architecture Technique](ARCHITECTURE.md)
 - [📄 Licence](#-licence)
 - [🙏 Remerciements](#-remerciements)
 

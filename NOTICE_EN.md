@@ -1,42 +1,31 @@
-# DMD GIF Converter - User Manual
+# Quickstart: Let's Start Converting
 
-Welcome to the DMD GIF Converter! This tool automatically converts your videos, GIFs, and images into highly optimized sequences for low-resolution LED matrix displays (like Pinball DMDs or LED panels).
+Welcome to the DMD GIF Converter. This tool makes it trivial to convert folders of videos into 128x32 pixel GIFs optimized for Retro Pixel LED Lite.
 
-## Core Philosophy
+## 🖥️ 1. Using the GUI
 
-When converting videos to very low resolutions (e.g. 128x32 or 256x64), the most important thing is **readability**. A perfect 4K tracking algorithm is useless if the subject is too small to recognize on a pixel display. Our engine is designed to focus on the action, stabilize the framing, and guarantee that the result will look great on your LED matrix.
+To launch the graphical interface:
+- **Windows**: Double-click `launch_ui.bat`
+- **Mac/Linux**: Run `./launch_ui.sh`
 
-## Key Features
+### The Ultimate "Zero Config" Workflow:
+1. Look at the top right of the application (in the `⚙️ Parameters` panel).
+2. Check the **`🚀 Let Me Handle It ✓`** box.
+   *(This instantly turns on all 5 AI systems: Auto-Action, Smart Crop, Auto-Colorimetry, Background Subtraction, and DMD Scoring).*
+3. Ensure **`Workers`** is set to a high number (e.g. `8` if you have a modern computer) to convert files much faster.
+4. Set the **`Cleanup Assistant`** slider to `50%` (or your preferred rejection threshold). The system will automatically discard low-quality results!
+5. Click **`Batch Convert Folder`** on the left panel, pick a folder, and grab a coffee.
 
-1. **Smart Auto Crop** 🤖: Analyses the video to determine if it should track a character's face, stick to the floor (for platformer games), or ignore the sky.
-2. **Platformer Mode** 🎮: Specially tuned for 2D side-scrolling games (like Mario, Sonic, Metroid). It locks the floor to the bottom of the display and smoothly scrolls ahead of the character.
-3. **Action Tracking** 🏃: Uses a lightweight AI (YOLO) combined with motion detection to follow the subject seamlessly.
-4. **DMD Quality & Readability Scoring** 👁️: The engine will evaluate all generated GIFs and give them a score from 0-100% based on contrast, occupancy, and shape separation.
-5. **Smart Conversion Management (GUI)** 📋: The new UI separates your pending files from converted ones. Converted files are automatically sorted by Quality Score, allowing you to use the **Cleanup Assistant** to instantly trash bad conversions and only keep the best ones.
-6. **Auto Tuning & Debug** 🛠️: If something looks wrong, you can enable the debug dataset to see exactly what the engine sees.
+---
 
-## Quick Start (Command Line)
+## 💻 2. Using the CLI (No GUI)
 
-To simply convert a video with the smartest defaults:
+If you prefer the command line or want to automate the process, the same "zero config" magic is available via the CLI.
+
+To process a folder called `gifs_MyFolder` with 8 parallel workers, fully automated AI framing/colors, and an automatic trash mechanism for anything scoring below 50%:
 
 ```bash
-python main.py input.mp4 --smart-crop --platformer
+python3 -m src.converter.cli gifs_MyFolder --let-me-handle-it --workers 8 --reject-threshold 50
 ```
 
-### Important Flags
-- `--smart-crop`: Let the engine decide how to frame the video.
-- `--platformer`: Use this for 2D games to keep the floor level.
-- `--look-ahead 0.25`: Makes the camera look slightly ahead of where the character is moving.
-- `--detect hybrid`: Combines AI person tracking with motion tracking for best results.
-- `--intro-duration 1.5`: Shows the full scene for 1.5 seconds before zooming in on the action.
-
-## Troubleshooting
-
-- **The camera is too jittery!** 
-  Increase smoothness: `--smoothness 0.95`
-- **It keeps zooming in on random background movement.**
-  Use a higher confidence limit: `--roi-conf 0.4`
-- **I'm playing a fighting game and it only follows one player!**
-  Make sure multi-fusion is on (it is by default in smart mode).
-
-For more advanced configuration, you can edit the script directly or pass the additional pipeline arguments described in the developer documentation.
+That's it. The script will crunch the videos and delete any `.gif` files that do not meet the 50% visibility threshold.
