@@ -4,7 +4,8 @@ from .analysis import _clamp
 
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        floor_y_est: Optional[float] = None,
-                       frame_top: float = 0.0):
+                       frame_top: float = 0.0,
+                       face_priority_mode: bool = False):
     target_ratio = float(cfg.target_width) / cfg.target_height
     _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
     _auto = getattr(cfg, "auto_vertical_bias", False)
@@ -101,7 +102,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         crop_h = float(frame_h)
         crop_w = crop_h * target_ratio
 
-    if _auto or _platformer:
+    if face_priority_mode:
+        # User requested: when sprites are too big (face priority), pin the top of the screen close to the top of the head
+        # so we see as much of the body downward as possible.
+        cy = ideal_top + crop_h / 2.0
+    elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
         

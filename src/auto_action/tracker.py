@@ -177,7 +177,8 @@ class TrackingEngine(ITracker):
         # 8. Build Base Camera
         cam_now_proposed = _build_camera_rect(
             self.frame_w, self.cam_frame_h, roi, self.cfg,
-            floor_y_est=floor_y_est, frame_top=self.cam_frame_top
+            floor_y_est=floor_y_est, frame_top=self.cam_frame_top,
+            face_priority_mode=self.face_priority_mode
         )
 
         # 9. Score Validation Loop
