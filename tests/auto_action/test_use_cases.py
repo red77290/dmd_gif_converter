@@ -47,7 +47,8 @@ class TestUseCases(unittest.TestCase):
             target_width=128,
             target_height=32,
             intro_duration=0.0,
-            smoothness=0.0
+            smoothness=0.0,
+            platformer_mode=("platformer" in filename)
         )
         
         # We will intercept the camera bounds and the detected ROIs
