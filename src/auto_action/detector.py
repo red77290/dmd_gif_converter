@@ -204,9 +204,9 @@ class _FrameDetector(AbstractDetector):
             return None
 
         if platformer_mode:
-            leftness = 1.0 - (boxes_raw[:, 0] / self._model_w)
             bottomness = boxes_raw[:, 1] / self._model_h
-            platformer_scores = person_scores * mask * (1.0 + 2.0 * leftness + 1.0 * bottomness)
+            # Extreme floor tracking: 100x advantage for floor, effectively ignoring ceiling pareidolia
+            platformer_scores = person_scores * mask * (0.01 + 100.0 * (bottomness ** 4))
             best_i = int(np.argmax(platformer_scores))
         else:
             best_i = int(np.argmax(person_scores * mask))
@@ -310,8 +310,8 @@ class _FrameDetector(AbstractDetector):
                 x, y, w, h = cv2.boundingRect(c)
                 bottom_y = y + h
                 bottomness = bottom_y / frame_h
-                # In platformer mode, elements closer to the floor get a multiplier (up to 3x)
-                return area * (1.0 + 2.0 * bottomness)
+                # Extreme floor tracking: massive penalty for ceiling to prevent boss/fx tracking
+                return area * (0.01 + 100.0 * (bottomness ** 4))
             return area
 
         c_best = max(contours, key=score_contour)
