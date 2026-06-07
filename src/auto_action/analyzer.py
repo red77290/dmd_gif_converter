@@ -43,6 +43,13 @@ class VideoAnalyzer:
                 self.smart_reasons        = _decision["reasons"]
                 _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
                 _smart_face_priority = _decision.get("face_priority", False)
+                
+                # Apply dynamic strength and smoothness based on content type analysis
+                if "suggested_strength" in _decision:
+                    self.cfg.strength = _decision["suggested_strength"]
+                if "suggested_smoothness" in _decision:
+                    self.cfg.smoothness = _decision["suggested_smoothness"]
+                    
             except Exception as _e:
                 self.smart_reasons = [f"smart scan error ({_e!r}) → all manual"]
 
