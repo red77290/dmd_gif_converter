@@ -64,9 +64,9 @@ def apply_led_grid(pil_img: "_Image.Image", sim_scale: int,
     cell_x = xs % sim_scale
     cell_y = ys % sim_scale
 
-    # True where the display pixel falls inside the dark border
-    gap_x = (cell_x < gap) | (cell_x >= sim_scale - gap)   # shape (W,)
-    gap_y = (cell_y < gap) | (cell_y >= sim_scale - gap)   # shape (H,)
+    # True where the display pixel falls inside the dark border (bottom/right edge only)
+    gap_x = (cell_x >= sim_scale - gap)                    # shape (W,)
+    gap_y = (cell_y >= sim_scale - gap)                    # shape (H,)
     mask  = gap_x[np.newaxis, :] | gap_y[:, np.newaxis]    # shape (H, W)
 
     arr[mask] = 0   # black gap
