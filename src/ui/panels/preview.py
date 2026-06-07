@@ -203,16 +203,22 @@ class PreviewPanelMixin:
     # ── Bottom : params + actions ─────────────────────────────────────────────
     def _compute_led_sim_display_size(self):
         """Return (display_w, display_h, scale) for LED sim mode, clamped to LED_SIM_MAX_W."""
-        w = self.v_target_width.get()
-        h = self.v_target_height.get()
+        try:
+            w = self.v_target_width.get()
+            h = self.v_target_height.get()
+        except Exception:
+            w, h = 128, 32
         scale = LED_SIM_SCALE
         while w * scale > LED_SIM_MAX_W and scale > 2:
             scale -= 1
         return w * scale, h * scale, scale
 
     def _update_dmd_canvas_size(self, *_):
-        w = self.v_target_width.get()
-        h = self.v_target_height.get()
+        try:
+            w = self.v_target_width.get()
+            h = self.v_target_height.get()
+        except Exception:
+            return
         if getattr(self, "v_led_sim", None) and self.v_led_sim.get():
             new_width, new_height, _ = self._compute_led_sim_display_size()
         else:
@@ -243,8 +249,12 @@ class PreviewPanelMixin:
     def _draw_dmd_canvas_idle(self):
         self._dmd_canvas.delete("all")
         # Use current target dimensions for idle text positioning
-        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
-        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+        try:
+            current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
+            current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+        except Exception:
+            current_dmd_width = int(128 * DMD_DISPLAY_SCALE_FACTOR)
+            current_dmd_height = int(32 * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(
             current_dmd_width // 2, current_dmd_height // 2,
             text="← Select a file then\n  click 🔬 Refresh DMD",
