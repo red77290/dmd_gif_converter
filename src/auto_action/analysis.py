@@ -226,7 +226,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     TOP_SPACE_THRESH  = 0.08
     BOTTOM_GAP_THRESH = 0.08
-    TALL_FACTOR       = 0.80
+    TALL_FACTOR       = 1.30
     FLOOR_LOWER       = 0.50
     FLOOR_VAR_MAX     = 0.25
 
