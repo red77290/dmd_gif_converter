@@ -270,12 +270,16 @@ class LeftPanelMixin:
             _ui(lambda: self._search_status.configure(
                 text=f"🔍 Querying DuckDuckGo…", text_color="#5ba3d9"
             ))
-            results = list(_DDGS().images(
+            results = []
+            for r in _DDGS().images(
                 keyword + " gif",       # positional 'query' (ddgs v7+) — replaces keywords=
                 safesearch="off",
                 type_image="gif",
                 max_results=qty,
-            ))
+            ):
+                if self._download_cancel:
+                    break
+                results.append(r)
         except Exception as exc:
             logger.warning("DuckDuckGo search failed: %s", exc)
             _err = f"Search failed: {exc}"   # capture before lambda — exc is cleared after except block
