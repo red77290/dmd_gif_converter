@@ -62,7 +62,7 @@ class AppState(IModel):
         self.v_auto_action_enabled       = tk.BooleanVar(value=False)
         self.v_action_detector           = tk.StringVar(value="person")
         self.v_action_strength           = tk.DoubleVar(value=0.65)
-        self.v_action_smoothness         = tk.DoubleVar(value=0.98)
+        self.v_action_smoothness         = tk.DoubleVar(value=0.65)
         self.v_action_zoom_max           = tk.DoubleVar(value=2.0)
         self.v_action_padding            = tk.DoubleVar(value=0.20)
         self.v_action_intro              = tk.DoubleVar(value=1.5)
