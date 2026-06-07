@@ -213,17 +213,36 @@ class PreviewPanelMixin:
             scale -= 1
         return w * scale, h * scale, scale
 
+    def _get_final_canvas_size(self):
+        try:
+            w = self.v_target_width.get()
+            h = self.v_target_height.get()
+        except Exception:
+            w, h = 128, 32
+            
+        if getattr(self, "v_led_sim", None) and self.v_led_sim.get():
+            display_w, display_h, _ = self._compute_led_sim_display_size()
+        else:
+            display_w = int(w * DMD_DISPLAY_SCALE_FACTOR)
+            display_h = int(h * DMD_DISPLAY_SCALE_FACTOR)
+            
+        # Clamp to max dimensions to prevent UI pushing
+        MAX_W, MAX_H = 640, 360
+        if display_w > MAX_W or display_h > MAX_H:
+            scale = min(MAX_W / display_w, MAX_H / display_h)
+            display_w = int(display_w * scale)
+            display_h = int(display_h * scale)
+            
+        return display_w, display_h
+
     def _update_dmd_canvas_size(self, *_):
         try:
             w = self.v_target_width.get()
             h = self.v_target_height.get()
         except Exception:
             return
-        if getattr(self, "v_led_sim", None) and self.v_led_sim.get():
-            new_width, new_height, _ = self._compute_led_sim_display_size()
-        else:
-            new_width  = int(w * DMD_DISPLAY_SCALE_FACTOR)
-            new_height = int(h * DMD_DISPLAY_SCALE_FACTOR)
+            
+        new_width, new_height = self._get_final_canvas_size()
         self._dmd_canvas.configure(width=new_width, height=new_height)
         # Update the title label to reflect the current output dimensions
         if hasattr(self, "_dmd_title_label"):
@@ -250,8 +269,7 @@ class PreviewPanelMixin:
         self._dmd_canvas.delete("all")
         # Use current target dimensions for idle text positioning
         try:
-            current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
-            current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+            current_dmd_width, current_dmd_height = self._get_final_canvas_size()
         except Exception:
             current_dmd_width = int(128 * DMD_DISPLAY_SCALE_FACTOR)
             current_dmd_height = int(32 * DMD_DISPLAY_SCALE_FACTOR)
@@ -641,8 +659,10 @@ class PreviewPanelMixin:
         self._dmd_rendering = True
         self._btn_dmd.configure(state="disabled", text="⏳ DMD…")
 
-        current_dmd_width  = int(self.v_target_width.get()  * DMD_DISPLAY_SCALE_FACTOR)
-        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+        try:
+            current_dmd_width, current_dmd_height = self._get_final_canvas_size()
+        except Exception:
+            current_dmd_width, current_dmd_height = 128, 32
 
         # ── Keep the canvas visible during re-render in ALL cases ────────────────
         self._dmd_canvas.delete("refresh_tag")
@@ -667,18 +687,20 @@ class PreviewPanelMixin:
             threading.Thread(
                 target=self._generate_dmd_preview,
                 args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h,
-                      led_sim, sim_scale, True), daemon=True
+                      led_sim, sim_scale, current_dmd_width, current_dmd_height, True), daemon=True
             ).start()
         else:
             threading.Thread(
                 target=self._generate_dmd_preview,
                 args=(src, params, start_s, end_s, dmd_display_w, dmd_display_h,
-                      led_sim, sim_scale, False), daemon=True
+                      led_sim, sim_scale, current_dmd_width, current_dmd_height, False), daemon=True
             ).start()
 
     def _generate_dmd_preview(self, src, params, start_s, end_s,
                               dmd_display_w, dmd_display_h,
-                              led_sim: bool = False, sim_scale: int = 0, is_already_converted: bool = False):
+                              led_sim: bool = False, sim_scale: int = 0, 
+                              final_canvas_w: int = 128, final_canvas_h: int = 32,
+                              is_already_converted: bool = False):
         """Run in a background thread. Returns PIL images (NOT PhotoImage) to the main thread."""
         tmpdir  = tempfile.mkdtemp(prefix="dmd_dmd_")
         try:
@@ -707,6 +729,10 @@ class PreviewPanelMixin:
                     )
                     if led_sim and sim_scale >= 2:
                         comp = self._apply_led_grid(comp, sim_scale)
+                        
+                    if comp.size != (final_canvas_w, final_canvas_h):
+                        comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
+                        
                     pil_frames.append(comp)
                     delays.append(max(img.info.get("duration", 80), 20))
             except Exception as exc:
@@ -755,8 +781,11 @@ class PreviewPanelMixin:
         self._stop_dmd_preview()
         self._dmd_canvas.delete("all")
         # Use current target dimensions for idle text positioning
-        current_dmd_width = int(self.v_target_width.get() * DMD_DISPLAY_SCALE_FACTOR)
-        current_dmd_height = int(self.v_target_height.get() * DMD_DISPLAY_SCALE_FACTOR)
+        try:
+            current_dmd_width, current_dmd_height = self._get_final_canvas_size()
+        except Exception:
+            current_dmd_width = int(128 * DMD_DISPLAY_SCALE_FACTOR)
+            current_dmd_height = int(32 * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(
             current_dmd_width // 2, current_dmd_height // 2,
             text="❌  DMD render failed", fill="#e74c3c", font=("Helvetica", 11)
