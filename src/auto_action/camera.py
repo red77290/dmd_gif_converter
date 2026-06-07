@@ -105,13 +105,16 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
         
-        # Priority: Keep head+hair visible over floor.
-        # If the floor-tracked camera top is lower than the ideal top of the hair,
-        # pull the camera up to perfectly frame the hair and face.
-        if (cy_floor - crop_h / 2.0) > ideal_top:
-            cy = ideal_top + crop_h / 2.0
-        else:
+        if _platformer:
+            # Platformers: the floor is sacred. Even if the head is cropped (due to jumps or tall bounding boxes), 
+            # keep the camera anchored to the floor to prevent extreme jitter from bounding box height fluctuations.
             cy = cy_floor
+        else:
+            # Auto-floor but not platformer: Keep head+hair visible over floor.
+            if (cy_floor - crop_h / 2.0) > ideal_top:
+                cy = ideal_top + crop_h / 2.0
+            else:
+                cy = cy_floor
     else:
         cy = _apply_bias(cy, crop_h)
         
