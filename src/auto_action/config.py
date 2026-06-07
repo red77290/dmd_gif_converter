@@ -5,7 +5,7 @@ from typing import Optional
 class AutoActionConfig:
     detector: str = "person"          # person | motion | hybrid | center
     strength: float = 0.65             # 0..1, larger = tighter framing
-    smoothness: float = 0.85           # 0..0.98, larger = smoother / slower
+    smoothness: float = 0.65           # 0..0.98, larger = smoother / slower
     zoom_max: float = 2.0              # max dynamic zoom factor (hard limit)
     padding: float = 0.20              # extra padding around ROI
     intro_duration: float = 1.5        # seconds of full-frame overview before focusing
@@ -17,6 +17,8 @@ class AutoActionConfig:
     vertical_bias: float = 0.0        # shift camera center: +1.0 = down (show floor), -1.0 = up (show sky)
     auto_vertical_bias: bool = False  # auto floor detection: places ROI bottom (floor) at ~85 % of crop height
     smart_auto_crop: bool = False      # let the engine choose the optimal crop/tracking combination
+    auto_strength: bool = False        # auto-detect optimal strength based on content type
+    auto_smoothness: bool = False      # auto-detect optimal smoothness based on content type
     dmd_visibility_score_enabled: bool = False # Enable DMD Visibility Score
     # ── PRIORITY 2 — Temporal Scene Memory ───────────────────────────────────
     # Sliding window (seconds) of past ROI detections used to interpolate the

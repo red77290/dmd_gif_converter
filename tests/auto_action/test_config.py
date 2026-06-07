@@ -38,7 +38,7 @@ class TestAutoActionConfig(unittest.TestCase):
         cfg = AutoActionConfig()
         self.assertEqual(cfg.detector, "person")
         self.assertAlmostEqual(cfg.strength, 0.65)
-        self.assertAlmostEqual(cfg.smoothness, 0.85)
+        self.assertAlmostEqual(cfg.smoothness, 0.65)
         self.assertAlmostEqual(cfg.zoom_max, 2.0)
         self.assertAlmostEqual(cfg.padding, 0.20)
         self.assertAlmostEqual(cfg.intro_duration, 1.5)

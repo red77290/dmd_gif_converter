@@ -34,24 +34,31 @@ class VideoAnalyzer:
         _smart_crop_margins: Optional[Tuple[float, float]] = None
         _smart_face_priority: bool = False
         
-        if getattr(self.cfg, "smart_auto_crop", False):
+        _auto_str = getattr(self.cfg, "auto_strength", False)
+        _auto_sm = getattr(self.cfg, "auto_smoothness", False)
+        _smart = getattr(self.cfg, "smart_auto_crop", False)
+        
+        if _smart or _auto_str or _auto_sm:
             try:
                 _decision = _smart_auto_crop_decision(cap, self.cfg, self.frame_w, self.frame_h)
-                _auto_bc                  = _decision["auto_bottom_crop"]
-                _auto_tc                  = _decision["auto_top_crop"]
-                self.cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
-                self.smart_reasons        = _decision["reasons"]
-                _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
-                _smart_face_priority = _decision.get("face_priority", False)
+                
+                if _smart:
+                    _auto_bc                  = _decision["auto_bottom_crop"]
+                    _auto_tc                  = _decision["auto_top_crop"]
+                    self.cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
+                    self.smart_reasons        = _decision["reasons"]
+                    _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
+                    _smart_face_priority = _decision.get("face_priority", False)
                 
                 # Apply dynamic strength and smoothness based on content type analysis
-                if "suggested_strength" in _decision:
+                if (_smart or _auto_str) and "suggested_strength" in _decision:
                     self.cfg.strength = _decision["suggested_strength"]
-                if "suggested_smoothness" in _decision:
+                if (_smart or _auto_sm) and "suggested_smoothness" in _decision:
                     self.cfg.smoothness = _decision["suggested_smoothness"]
                     
             except Exception as _e:
-                self.smart_reasons = [f"smart scan error ({_e!r}) → all manual"]
+                if _smart:
+                    self.smart_reasons = [f"smart scan error ({_e!r}) → all manual"]
 
         self.face_priority_mode = False
         if _auto_bc or _auto_tc:

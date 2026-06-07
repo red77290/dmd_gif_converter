@@ -207,7 +207,9 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         self.v_auto_action_enabled = tk.BooleanVar(value=False)
         self.v_action_detector     = tk.StringVar(value="person")
         self.v_action_strength     = tk.DoubleVar(value=0.65)
+        self.v_action_auto_strength = tk.BooleanVar(value=False)
         self.v_action_smoothness   = tk.DoubleVar(value=0.65)
+        self.v_action_auto_smoothness = tk.BooleanVar(value=False)
         self.v_action_zoom_max     = tk.DoubleVar(value=2.0)
         self.v_action_padding      = tk.DoubleVar(value=0.20)
         self.v_action_intro        = tk.DoubleVar(value=1.5)
@@ -286,7 +288,8 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
             self.v_manual_x, self.v_manual_y, self.v_hue_shift,
             self.v_noise_reduction, self.v_film_grain, self.v_vignette,
             self.v_auto_action_enabled, self.v_action_detector,
-            self.v_action_strength, self.v_action_smoothness,
+            self.v_action_strength, self.v_action_auto_strength,
+            self.v_action_smoothness, self.v_action_auto_smoothness,
             self.v_action_zoom_max, self.v_action_padding,
             self.v_action_intro, self.v_action_bottom_crop, self.v_action_auto_bottom_crop,
             self.v_action_top_crop, self.v_action_auto_top_crop,

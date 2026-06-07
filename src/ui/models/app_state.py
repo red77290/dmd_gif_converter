@@ -62,7 +62,9 @@ class AppState(IModel):
         self.v_auto_action_enabled       = tk.BooleanVar(value=False)
         self.v_action_detector           = tk.StringVar(value="person")
         self.v_action_strength           = tk.DoubleVar(value=0.65)
+        self.v_action_auto_strength      = tk.BooleanVar(value=False)
         self.v_action_smoothness         = tk.DoubleVar(value=0.65)
+        self.v_action_auto_smoothness    = tk.BooleanVar(value=False)
         self.v_action_zoom_max           = tk.DoubleVar(value=2.0)
         self.v_action_padding            = tk.DoubleVar(value=0.20)
         self.v_action_intro              = tk.DoubleVar(value=1.5)
@@ -194,7 +196,9 @@ class AppState(IModel):
             "auto_action_enabled": s.v_auto_action_enabled.get(),
             "action_detector":     s.v_action_detector.get(),
             "action_strength":     s.v_action_strength.get(),
+            "action_auto_strength": s.v_action_auto_strength.get(),
             "action_smoothness":   s.v_action_smoothness.get(),
+            "action_auto_smoothness": s.v_action_auto_smoothness.get(),
             "action_zoom_max":     s.v_action_zoom_max.get(),
             "action_padding":      s.v_action_padding.get(),
             "action_intro":        s.v_action_intro.get(),

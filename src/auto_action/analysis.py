@@ -257,8 +257,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         stability   = "stable" if floor_var_score < 0.10 else "dynamic"
         # Video games (Platformers): fast movement, need to follow action closely.
         # More strength (tighter framing), less smoothness (snappy tracking).
-        suggested_strength = 0.75
-        suggested_smoothness = 0.45
+        suggested_strength = 0.65
+        suggested_smoothness = 0.70
         reasons.append(f"GROUP 2 — floor@{median_bottom/frame_h*100:.0f}% var={floor_var_score*100:.0f}% ({stability}) → floor-tracking ✓ / top-crop ✗ (redundant)")
     else:
         auto_floor  = False
@@ -266,8 +266,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         auto_bottom = (bottom_gap > BOTTOM_GAP_THRESH) or auto_top
         # Video games (Top-down, RPGs, generic action): fast movement.
         # More strength (tighter framing), less smoothness (snappy tracking).
-        suggested_strength = 0.75
-        suggested_smoothness = 0.45
+        suggested_strength = 0.65
+        suggested_smoothness = 0.70
         reasons.append(f"GROUP 3 — no trackable floor")
 
     median_w      = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)

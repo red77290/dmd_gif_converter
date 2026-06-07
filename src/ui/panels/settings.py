@@ -494,10 +494,45 @@ class SettingsPanelMixin:
             text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
         ).pack(padx=14, pady=(0, 6), anchor="w")
 
-        adv_slider(parent, "Action strength", self.v_action_strength, 0.0, 1.0,
+        self._slider_action_strength = adv_slider(parent, "Action strength", self.v_action_strength, 0.0, 1.0,
                    "{:.2f}", "", steps=100)
-        adv_slider(parent, "Camera smooth", self.v_action_smoothness, 0.0, 0.98,
+                   
+        strength_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
+        strength_auto_row.pack(fill="x", padx=14, pady=(0, 4))
+        self._cb_auto_strength = ctk.CTkCheckBox(
+            strength_auto_row,
+            text="Auto strength  (overrides slider · detects game/anime type)",
+            variable=self.v_action_auto_strength,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        )
+        self._cb_auto_strength.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_strength)
+        
+        def _toggle_auto_strength(*_):
+            if self.v_action_smart_auto_crop.get(): return
+            state = "disabled" if self.v_action_auto_strength.get() else "normal"
+            self._slider_action_strength.configure(state=state)
+        self.v_action_auto_strength.trace_add("write", _toggle_auto_strength)
+
+        self._slider_action_smoothness = adv_slider(parent, "Camera smooth", self.v_action_smoothness, 0.0, 0.98,
                    "{:.2f}", "", steps=98)
+                   
+        smoothness_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
+        smoothness_auto_row.pack(fill="x", padx=14, pady=(0, 4))
+        self._cb_auto_smoothness = ctk.CTkCheckBox(
+            smoothness_auto_row,
+            text="Auto smooth  (overrides slider · detects game/anime type)",
+            variable=self.v_action_auto_smoothness,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        )
+        self._cb_auto_smoothness.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_smoothness)
+
+        def _toggle_auto_smoothness(*_):
+            if self.v_action_smart_auto_crop.get(): return
+            state = "disabled" if self.v_action_auto_smoothness.get() else "normal"
+            self._slider_action_smoothness.configure(state=state)
+        self.v_action_auto_smoothness.trace_add("write", _toggle_auto_smoothness)
         adv_slider(parent, "Zoom max", self.v_action_zoom_max, 1.0, 3.0,
                    "{:.2f}", "×", steps=100)
         adv_slider(parent, "ROI padding", self.v_action_padding, 0.0, 0.6,
@@ -961,13 +996,17 @@ class SettingsPanelMixin:
                 "bg_sub_enable":         self.v_bg_sub_enable.get(),
                 "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(),
                 "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(),
+                "action_auto_strength": self.v_action_auto_strength.get(),
+                "action_auto_smoothness": self.v_action_auto_smoothness.get(),
             }
-            # Force all 5 flags ON (visual feedback)
+            # Force all flags ON (visual feedback)
             self.v_auto_color_enabled.set(True)
             self.v_auto_action_enabled.set(True)
             self.v_action_smart_auto_crop.set(True)
             self.v_dmd_visibility_score_enabled.set(True)
             self.v_dmd_readability_score_enabled.set(True)
+            self.v_action_auto_strength.set(True)
+            self.v_action_auto_smoothness.set(True)
             # Grey out every registered widget
             for w in self._lmh_widgets:
                 try:
@@ -983,6 +1022,8 @@ class SettingsPanelMixin:
             self.v_bg_sub_enable.set(saved.get("bg_sub_enable", False))
             self.v_dmd_visibility_score_enabled.set(saved.get("dmd_visibility_score_enabled", False))
             self.v_dmd_readability_score_enabled.set(saved.get("dmd_readability_score_enabled", True))
+            self.v_action_auto_strength.set(saved.get("action_auto_strength", False))
+            self.v_action_auto_smoothness.set(saved.get("action_auto_smoothness", False))
             # Re-enable all registered widgets
             for w in self._lmh_widgets:
                 try:
@@ -994,7 +1035,9 @@ class SettingsPanelMixin:
         self.v_auto_action_enabled.set(False)
         self.v_action_detector.set("person")
         self.v_action_strength.set(0.65)
+        self.v_action_auto_strength.set(False)
         self.v_action_smoothness.set(0.65)
+        self.v_action_auto_smoothness.set(False)
         self.v_action_zoom_max.set(2.0)
         self.v_action_padding.set(0.20)
         self.v_action_intro.set(1.5)
@@ -1092,7 +1135,9 @@ class SettingsPanelMixin:
             "auto_action_enabled":        self.v_auto_action_enabled.get(),
             "action_detector":            self.v_action_detector.get(),
             "action_strength":            self.v_action_strength.get(),
+            "action_auto_strength":       self.v_action_auto_strength.get(),
             "action_smoothness":          self.v_action_smoothness.get(),
+            "action_auto_smoothness":     self.v_action_auto_smoothness.get(),
             "action_zoom_max":            self.v_action_zoom_max.get(),
             "action_padding":             self.v_action_padding.get(),
             "action_intro":               self.v_action_intro.get(),
@@ -1151,7 +1196,9 @@ class SettingsPanelMixin:
         self.v_auto_action_enabled.set(s.get("auto_action_enabled", False))
         self.v_action_detector.set(s.get("action_detector", "person"))
         self.v_action_strength.set(s.get("action_strength", 0.65))
+        self.v_action_auto_strength.set(s.get("action_auto_strength", False))
         self.v_action_smoothness.set(s.get("action_smoothness", 0.65))
+        self.v_action_auto_smoothness.set(s.get("action_auto_smoothness", False))
         self.v_action_zoom_max.set(s.get("action_zoom_max", 2.0))
         self.v_action_padding.set(s.get("action_padding", 0.20))
         self.v_action_intro.set(s.get("action_intro", 1.5))
