@@ -229,7 +229,9 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_detector` | Detection mode menu | `person` | `person` · `motion` · `hybrid` · `center` |
 | `action_intro` | Intro panoramic | `1.5 s` | Duration of the wide establishing shot prepended before AI tracking |
 | `action_strength` | Action strength | `0.65` | `0` = loose framing · `1` = tight zoom on subject |
-| `action_smoothness` | Camera smooth | `0.85` | `0` = instant · `0.98` = very slow camera |
+| `action_auto_strength` | Auto strength | `OFF` | Automatically adapt action strength based on content type (0.55 for anime, 0.65 for games) |
+| `action_smoothness` | Camera smooth | `0.65` | `0` = instant · `0.98` = very slow camera |
+| `action_auto_smoothness`| Auto smooth | `OFF` | Automatically adapt camera smoothness based on content type (0.85 for anime, 0.70 for games) |
 | `action_zoom_max` | Zoom max | `1.8×` | Maximum dynamic zoom the AI camera can apply |
 | `action_padding` | ROI padding | `0.20` | Extra space added around the detected subject |
 | `action_bottom_crop` | Bottom crop % | `0 %` | Exclude the bottom N % of the frame from detection (manual — overridden when auto is active) |
@@ -489,7 +491,9 @@ All values default to "no effect" — standard output is 100% identical to v2.0.
 | Detection mode | `person` | `person` / `motion` / `hybrid` / `center` |
 | **Intro panoramic** | `1.5 s` | Wide establishing shot prepended (first frame frozen, full source replayed) |
 | Action strength | `0.65` | How tightly the camera frames the subject |
-| Camera smooth | `0.85` | Exponential smoothing — higher = slower camera |
+| Auto strength | `OFF` | Automatically tune strength based on content type |
+| Camera smooth | `0.65` | Exponential smoothing — higher = slower camera |
+| Auto smooth | `OFF` | Automatically tune smoothness based on content type |
 | Zoom max | `1.8×` | Maximum allowed zoom-in |
 | ROI padding | `0.20` | Breathing room around the detected subject |
 | Bottom crop % | `0 %` | Exclude bottom N % of frame from detection (feet / floor / HUD from dragging the camera down) |
@@ -803,7 +807,9 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
 | `action_intro` | `1.5` | Establishing shot duration in seconds |
 | `action_strength` | `0.65` | Framing tightness around subject |
-| `action_smoothness` | `0.85` | Camera exponential smoothing factor |
+| `action_auto_strength` | `False` | Auto strength based on content type |
+| `action_smoothness` | `0.65` | Camera exponential smoothing factor |
+| `action_auto_smoothness`| `False` | Auto smooth based on content type |
 | `action_zoom_max` | `1.8` | Maximum AI zoom factor |
 | `action_padding` | `0.20` | Padding around detected ROI |
 | `bg_sub_enable` | `False` | Replace background with black (maximises subject contrast) |
