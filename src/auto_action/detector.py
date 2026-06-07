@@ -102,10 +102,10 @@ class AbstractDetector(IDetector):
             p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
                                    roi_persistence_score=roi_persistence_score,
                                    platformer_mode=platformer_mode)
-            return p if p is not None else self.detect_motion(frame)
+            return p if p is not None else self.detect_motion(frame, platformer_mode=platformer_mode)
 
         if mode == "motion":
-            m = self.detect_motion(frame)
+            m = self.detect_motion(frame, platformer_mode=platformer_mode)
             return m if m is not None else self.detect_person(
                 frame, multi_fusion=multi_fusion, min_conf=min_conf,
                 roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode)
@@ -114,7 +114,7 @@ class AbstractDetector(IDetector):
         p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
                                 roi_persistence_score=roi_persistence_score,
                                 platformer_mode=platformer_mode)
-        m = self.detect_motion(frame)
+        m = self.detect_motion(frame, platformer_mode=platformer_mode)
         if p and m:
             x1 = min(p[0], m[0])
             y1 = min(p[1], m[1])
@@ -276,7 +276,7 @@ class _FrameDetector(AbstractDetector):
                                   roi_persistence_score=roi_persistence_score,
                                   platformer_mode=platformer_mode)
 
-    def detect_motion(self, frame: np.ndarray) -> Optional[BoundingBox]:
+    def detect_motion(self, frame: np.ndarray, platformer_mode: bool = False) -> Optional[BoundingBox]:
         cv2 = self.cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -300,12 +300,25 @@ class _FrameDetector(AbstractDetector):
         if not contours:
             return None
 
-        c = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(c)
-        if area < 120.0:
+        frame_h = frame.shape[0]
+
+        def score_contour(c):
+            area = cv2.contourArea(c)
+            if area < 120.0:
+                return 0.0
+            if platformer_mode:
+                x, y, w, h = cv2.boundingRect(c)
+                bottom_y = y + h
+                bottomness = bottom_y / frame_h
+                # In platformer mode, elements closer to the floor get a multiplier (up to 3x)
+                return area * (1.0 + 2.0 * bottomness)
+            return area
+
+        c_best = max(contours, key=score_contour)
+        if score_contour(c_best) == 0.0:
             return None
 
-        x, y, w, h = cv2.boundingRect(c)
+        x, y, w, h = cv2.boundingRect(c_best)
         return (int(x), int(y), int(w), int(h))
 
 
