@@ -47,11 +47,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
 
     x, y, w, h = roi
     
-    # Anime Hair Protection: hair can extend significantly above YOLO's box.
+    # Anime Face: hair can extend above the face box.
     if getattr(cfg, 'detector', 'person') == 'anime_face':
-        hair_headroom = h * 0.80
+        hair_headroom = h * 0.30
     else:
-        hair_headroom = h * 0.25
+        # User requested: just a few pixels of headroom above the head to maximize body visibility downwards.
+        # 0.05 of bounding box height is typically 2-6 pixels.
+        hair_headroom = h * 0.05
         
     ideal_top = max(0.0, y - hair_headroom)
     total_h = h + (y - ideal_top)
@@ -121,12 +123,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
             else:
                 cy = cy_floor
     else:
+        # Standard generic tracking (e.g. top-down games like Zelda).
+        # Simply apply vertical bias. We do NOT force pin the camera to the top of the bounding box,
+        # as a large motion bounding box (e.g. screen scrolling) would snap the camera to the HUD/ceiling.
         cy = _apply_bias(cy, crop_h)
-        
-        # Head protection: if the camera window is shorter than the subject+hair,
-        # pin the camera to the top so the hair and face are guaranteed visible.
-        if crop_h < total_h:
-            cy = ideal_top + crop_h / 2.0
 
     if crop_w >= frame_w:
         cx = frame_w / 2.0
