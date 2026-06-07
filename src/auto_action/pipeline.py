@@ -173,6 +173,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
     plat_tag = " plat" if cfg.platformer_mode else ""
     
     msg = (f"Auto action OK ({frame_idx} frames{intro_info}, "
-           f"{analyzer.out_w}×{analyzer.out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag}{plat_tag}).")
+           f"{analyzer.out_w}×{analyzer.out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag}{plat_tag} "
+           f"str={cfg.strength:.2f} sm={cfg.smoothness:.2f}).")
            
     return True, writer.out_path, msg

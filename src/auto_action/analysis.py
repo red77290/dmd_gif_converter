@@ -245,17 +245,29 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         auto_bottom = True
         auto_floor  = False
         auto_top    = True
+        # Anime / Movies: large sprites, cinematic feel. 
+        # Less strength (looser framing), more smoothness (slower panning).
+        suggested_strength = 0.55
+        suggested_smoothness = 0.85
         reasons.append(f"GROUP 1 — tall-char {tall_ratio*100:.0f}% of DMD window → bottom-crop+face-priority ✓ / top-crop ✓ (narrows to head) / floor-track ✗ (contradictory)")
     elif floor_in_lower and floor_var_score <= FLOOR_VAR_MAX:
         auto_floor  = True
         auto_top    = False
         auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
         stability   = "stable" if floor_var_score < 0.10 else "dynamic"
+        # Video games (Platformers): fast movement, need to follow action closely.
+        # More strength (tighter framing), less smoothness (snappy tracking).
+        suggested_strength = 0.75
+        suggested_smoothness = 0.45
         reasons.append(f"GROUP 2 — floor@{median_bottom/frame_h*100:.0f}% var={floor_var_score*100:.0f}% ({stability}) → floor-tracking ✓ / top-crop ✗ (redundant)")
     else:
         auto_floor  = False
         auto_top    = top_space > TOP_SPACE_THRESH
         auto_bottom = (bottom_gap > BOTTOM_GAP_THRESH) or auto_top
+        # Video games (Top-down, RPGs, generic action): fast movement.
+        # More strength (tighter framing), less smoothness (snappy tracking).
+        suggested_strength = 0.75
+        suggested_smoothness = 0.45
         reasons.append(f"GROUP 3 — no trackable floor")
 
     median_w      = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
@@ -291,6 +303,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         "bottom_pct":         pre_bottom_pct,
         "face_priority":      face_priority,
         "reasons":            reasons,
+        "suggested_strength": suggested_strength,
+        "suggested_smoothness": suggested_smoothness,
     }
 
 
