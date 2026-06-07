@@ -163,6 +163,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--auto-color", action="store_true", default=False,
         help="Enable heuristic auto-colorimetry (brightness/contrast injection).",
     )
+    am.add_argument(
+        "--reject-threshold", type=int, default=0, metavar="N",
+        help="Automatically move generated GIFs to the trash if their DMD Visibility Score is strictly below N%% (0-100). Default: 0 (disabled).",
+    )
 
     # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
     mg = p.add_argument_group("Multi-dalle / Tiling")
@@ -309,5 +313,35 @@ if __name__ == "__main__":
             f"=== {folder_in} → {folder_out}  ({len(files)} file(s)) | mode={args.mode} ==="
         )
         process_folder(folder_in, folder_out, params=params)
+
+        # ── Auto-Cleanup Phase ────────────────────────────────────────────────
+        if args.reject_threshold > 0:
+            import json
+            try:
+                from send2trash import send2trash
+            except ImportError:
+                def send2trash(path):
+                    import os
+                    os.remove(path)
+            
+            logger.info(f"=== Auto-Cleanup: Rejecting files scoring < {args.reject_threshold}% ===")
+            rejected_count = 0
+            for f in os.listdir(folder_out):
+                if f.endswith(".gif"):
+                    gif_path = os.path.join(folder_out, f)
+                    score_path = gif_path + ".scores.json"
+                    if os.path.exists(score_path):
+                        try:
+                            with open(score_path, "r", encoding="utf-8") as file:
+                                data = json.load(file)
+                            if data.get("score", 100) < args.reject_threshold:
+                                logger.info(f"[TRASH] {f} — Score: {data.get('score')}%")
+                                send2trash(gif_path)
+                                send2trash(score_path)
+                                rejected_count += 1
+                        except Exception as e:
+                            logger.error(f"Error checking score for {f}: {e}")
+            
+            logger.info(f"=== Auto-Cleanup Complete: Trashed {rejected_count} file(s) ===")
 
     logger.info("Done.")

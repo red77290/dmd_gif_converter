@@ -1,42 +1,31 @@
-# DMD GIF Converter - Manuel Utilisateur
+# Démarrage Rapide : Let's Start
 
-Bienvenue dans le DMD GIF Converter ! Cet outil convertit automatiquement vos vidéos, GIF et images en séquences ultra-optimisées pour les écrans matrices LED basse résolution (comme les DMD de flipper ou les panneaux LED).
+Bienvenue dans le DMD GIF Converter. Cet outil permet de convertir très facilement des dossiers de vidéos en GIFs de 128x32 pixels optimisés pour les dalles LED.
 
-## Notre Philosophie
+## 🖥️ 1. Utilisation de l'Interface Graphique (GUI)
 
-Lors de la conversion de vidéos vers de très basses résolutions (par ex. 128x32 ou 256x64), le plus important est la **lisibilité**. Un algorithme de tracking 4K parfait ne sert à rien si le sujet est trop petit pour être reconnu sur un écran pixelisé. Notre moteur est conçu pour se concentrer sur l'action, stabiliser le cadrage, et garantir un rendu exceptionnel sur votre matrice LED.
+Pour lancer l'interface graphique :
+- **Windows** : Double-cliquez sur `launch_ui.bat`
+- **Mac/Linux** : Lancez `./launch_ui.sh`
 
-## Fonctionnalités Principales
+### Le workflow "Zéro Config" ultime :
+1. Regardez en haut à droite de l'application (dans le panneau `⚙️ Paramètres`).
+2. Cochez la case **`🚀 Let Me Handle It ✓`**.
+   *(Cela active instantanément les 5 moteurs IA : Auto-Action, Recadrage Intelligent, Auto-Colorimétrie, Soustraction de fond et Score DMD).*
+3. Assurez-vous que **`Workers`** est réglé sur un chiffre élevé (ex: `8` si vous avez un PC récent) pour convertir les fichiers beaucoup plus vite.
+4. Réglez le curseur **`Assistant de Nettoyage (Cleanup)`** sur `50%` (ou votre seuil de tolérance). Le système supprimera automatiquement les mauvais résultats !
+5. Cliquez sur **`Batch Convert Folder`** sur le panneau de gauche, choisissez un dossier de vidéos, et allez prendre un café.
 
-1. **Smart Auto Crop** 🤖 : Analyse la vidéo pour déterminer s'il faut suivre le visage d'un personnage, s'ancrer au sol (pour les jeux de plateforme), ou ignorer le ciel.
-2. **Mode Platformer** 🎮 : Spécialement calibré pour les jeux 2D à défilement horizontal (Mario, Sonic, Metroid). Il verrouille le sol en bas de l'écran et anticipe la direction du personnage de manière fluide.
-3. **Tracking d'Action** 🏃 : Utilise une IA légère (YOLO) combinée à la détection de mouvement pour suivre le sujet sans faille.
-4. **DMD Quality Score** 👁️ : Le moteur évalue toutes les conversions générées et leur attribue un score (0-100%) basé sur le contraste, l'occupation de l'écran et la séparation des formes.
-5. **Gestion Intelligente (GUI)** 📋 : La nouvelle interface sépare vos fichiers en attente des fichiers convertis. Les résultats sont triés par score, vous permettant d'utiliser l'**Assistant de Nettoyage (Cleanup Assistant)** pour jeter instantanément les mauvaises conversions.
-6. **Auto Tuning & Debug** 🛠️ : Si un recadrage semble incorrect, vous pouvez activer le dataset de debug pour voir exactement ce que le moteur analyse.
+---
 
-## Démarrage Rapide (Ligne de commande)
+## 💻 2. Utilisation en Ligne de Commande (CLI)
 
-Pour convertir simplement une vidéo avec les meilleurs paramètres automatiques :
+Si vous préférez la ligne de commande ou voulez automatiser le processus dans un script, la même magie "zéro config" est disponible via le CLI.
+
+Pour traiter un dossier nommé `gifs_MonDossier` avec 8 processus en parallèle, le cadrage/couleurs gérés par l'IA, et la mise à la corbeille automatique des fichiers avec un score inférieur à 50% :
 
 ```bash
-python main.py input.mp4 --smart-crop --platformer
+python3 -m src.converter.cli gifs_MonDossier --let-me-handle-it --workers 8 --reject-threshold 50
 ```
 
-### Options Importantes
-- `--smart-crop` : Laisse le moteur décider de la meilleure façon de cadrer la vidéo.
-- `--platformer` : À utiliser pour les jeux 2D afin de maintenir le niveau du sol.
-- `--look-ahead 0.25` : Permet à la caméra d'anticiper le mouvement du personnage en regardant légèrement devant lui.
-- `--detect hybrid` : Combine le tracking IA (personnes) avec le tracking de mouvement pour un résultat optimal.
-- `--intro-duration 1.5` : Affiche la scène entière pendant 1,5 seconde avant de zoomer sur l'action.
-
-## Dépannage
-
-- **La caméra tremble trop !** 
-  Augmentez la fluidité : `--smoothness 0.95`
-- **Ça n'arrête pas de zoomer sur des mouvements parasites en arrière-plan.**
-  Utilisez une limite de confiance plus élevée : `--roi-conf 0.4`
-- **Je joue à un jeu de combat et ça ne suit qu'un seul joueur !**
-  Assurez-vous que la fusion multiple est activée (elle l'est par défaut en mode smart).
-
-Pour une configuration plus avancée, vous pouvez modifier directement le script ou passer des arguments supplémentaires au pipeline décrits dans la documentation développeur.
+Et voilà ! Le script va convertir vos vidéos et supprimer automatiquement les fichiers `.gif` qui n'atteignent pas le seuil de visibilité de 50%.
