@@ -269,7 +269,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
 
         # ── Tkinter vars — GIF Search ─────────────────────────────────────────
         self.v_search_keyword = tk.StringVar(value="")
-        self.v_search_qty     = tk.IntVar(value=10)
+        self.v_search_qty     = tk.StringVar(value="10")
 
         # ── Tkinter vars — LED pixel simulation ───────────────────────────────
         self.v_led_sim = tk.BooleanVar(value=True)   # ON by default

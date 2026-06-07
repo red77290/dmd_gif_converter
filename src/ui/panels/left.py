@@ -34,6 +34,8 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 from src.ui.dmd_led_sim import LED_SIM_SCALE, LED_SIM_GAP, LED_SIM_MAX_W, apply_led_grid as _apply_led_grid
 
+logger = logging.getLogger(__name__)
+
 # ── GIF Search optional dependencies ─────────────────────────────────────────
 # Package was renamed duckduckgo_search → ddgs ; try both for backward compat.
 try:
