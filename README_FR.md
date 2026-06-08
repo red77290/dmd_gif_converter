@@ -116,6 +116,10 @@ Vous préférez utiliser le script sans interface ? Voici les commandes les plus
 
 Pour garder ce README clair, nos fonctionnalités les plus puissantes disposent de guides dédiés. Découvrez tout le potentiel du moteur :
 
+### [🤖 AI Moments & Studio Timeline](docs/AI_MOMENTS_FR.md)
+Fatigué de chercher manuellement le meilleur passage dans un film de 2 heures ? Le moteur **AI Moments** analyse votre vidéo pour trouver les scènes les plus épiques, pleines d'action, et parfaitement lisibles sur votre DMD. Découpez-les à la perfection grâce à la lecture en boucle de la **Studio Timeline**, ou laissez la CLI extraire les 5 meilleurs moments de façon 100% automatique !
+👉 **[Lire le Guide AI Moments](docs/AI_MOMENTS_FR.md)**
+
 ### [🎥 Caméra Cinématique par IA (Auto-Action)](docs/ADVANCED_FEATURES_FR.md#auto-action-framing)
 Lorsqu'on réduit une vidéo 1080p vers une matrice 128x32, les sujets deviennent microscopiques. Le **Auto-Action Framing** utilise l'IA YOLOv8 ONNX pour suivre dynamiquement les sujets, faire des travellings, et rogner intelligemment le sol/plafond pour garder l'action centrée et visible !
 👉 **[Lire le Guide des Fonctionnalités Avancées](docs/ADVANCED_FEATURES_FR.md)**
