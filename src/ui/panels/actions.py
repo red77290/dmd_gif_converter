@@ -117,12 +117,15 @@ class ActionsPanelMixin:
         )
         self._btn_stop.grid(row=6, column=0, padx=4, pady=(2, 4), sticky="ew")
 
+        logs_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        logs_frame.grid(row=2, column=0, padx=8, pady=(10, 4), sticky="ew")
+        
         self._btn_toggle_logs = ctk.CTkButton(
-            parent, text="📝 Show / Hide Logs", width=140, height=28,
+            logs_frame, text="📝 Show / Hide Logs", width=140, height=28,
             fg_color="#3a3a4a", hover_color="#50506b",
             command=self._toggle_global_logs
         )
-        self._btn_toggle_logs.grid(row=2, column=0, padx=12, pady=(10, 4), sticky="w")
+        self._btn_toggle_logs.pack(side="left", padx=4)
 
     def cancel_conversion(self):
         if hasattr(self, "_cancel_event"):
@@ -360,11 +363,28 @@ class ActionsPanelMixin:
             self.toggle_log_panel()
 
     def _log(self, message, level="info"):
-        if hasattr(self, "_log_box"):
-            self._log_box.configure(state="normal")
-            self._log_box.insert("end", message + "\n")
-            self._log_box.configure(state="disabled")
-            self._log_box.see("end")
+        if not hasattr(self, "_log_box"):
+            return
+            
+        levels = {"debug": 10, "info": 20, "warning": 30, "error": 40}
+        msg_lvl = levels.get(level.lower(), 20)
+        
+        if not hasattr(self, "_all_logs"):
+            self._all_logs = []
+            
+        self._all_logs.append((msg_lvl, message))
+        
+        current_lvl_str = getattr(self, "v_log_level", None)
+        current_lvl = levels.get(current_lvl_str.get().lower(), 20) if current_lvl_str else 20
+        
+        if msg_lvl >= current_lvl:
+            try:
+                self._log_box.configure(state="normal")
+                self._log_box.insert("end", message + "\n")
+                self._log_box.configure(state="disabled")
+                self._log_box.see("end")
+            except Exception:
+                pass
 
     # ══════════════════════════════════════════════════════════════════════════
     #  CLEANUP

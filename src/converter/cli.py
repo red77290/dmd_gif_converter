@@ -152,7 +152,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "auto-bottom-crop, auto-top-crop and auto-floor-tracking (default: disabled).",
     )
     
-    # ── Automation (Let me handle it) ──────────────────────────────────────────
+    # ── Automation (Magic Mode) ──────────────────────────────────────────
     am = p.add_argument_group("Automation (Magic Mode)")
     am.add_argument(
         "--let-me-handle-it", action="store_true", default=False,
@@ -166,6 +166,37 @@ def _build_parser() -> argparse.ArgumentParser:
     am.add_argument(
         "--reject-threshold", type=int, default=0, metavar="N",
         help="Automatically move generated GIFs to the trash if their DMD Visibility Score is strictly below N%% (0-100). Default: 0 (disabled).",
+    )
+    
+    # ── Output & Logs ────────────────────────────────────────────────────────
+    lg = p.add_argument_group("Output & Logs")
+    lg.add_argument(
+        "--verbose", "-v", action="store_true", default=False,
+        help="Alias for --log-level DEBUG. Show detailed FFMPEG processing logs.",
+    )
+    lg.add_argument(
+        "--log-level", type=str, default="WARNING",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Set the logging level. Default is WARNING (shows progress bar).",
+    )
+
+    # ── Search & Download (Integrated CLI) ───────────────────────────────────
+    sd = p.add_argument_group("Search & Download (Integrated CLI)")
+    sd.add_argument(
+        "--search-keyword", type=str, default="", metavar="STR",
+        help="Download GIFs before converting. If set, searches this keyword and creates a source folder automatically.",
+    )
+    sd.add_argument(
+        "--search-engine", type=str, default="DuckDuckGo", choices=["DuckDuckGo", "Tenor", "Giphy"],
+        help="Search engine to use (default: DuckDuckGo).",
+    )
+    sd.add_argument(
+        "--search-limit", type=int, default=10, metavar="N",
+        help="Number of GIFs to download (default: 10).",
+    )
+    sd.add_argument(
+        "--search-api-key", type=str, default="", metavar="STR",
+        help="API key if required (for Tenor or Giphy).",
     )
 
     # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
@@ -228,6 +259,17 @@ def _build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = _build_parser().parse_args()
 
+    # Configure logging based on verbosity
+    if args.verbose:
+        args.log_level = "DEBUG"
+        
+    log_level = getattr(logging, args.log_level)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)-7s] %(message)s",
+        datefmt="%H:%M:%S"
+    )
+
     params = {
         "mode":           args.mode,
         "max_workers":    args.workers,
@@ -266,6 +308,7 @@ if __name__ == "__main__":
         "text_bg": args.text_bg,
         "text_bg_opacity": args.text_bg_opacity,
         "auto_color_enabled": args.auto_color,
+        "log_level": args.log_level,
     }
     
     # Apply "Let Me Handle It" overrides
@@ -294,11 +337,44 @@ if __name__ == "__main__":
             if os.path.isdir(d) and d.startswith(prefix)
         ]
 
+    # ── Integrated Search & Download ──────────────────────────────────────────
+    if args.search_keyword:
+        logger.info(f"=== Search & Download: '{args.search_keyword}' via {args.search_engine} ===")
+        try:
+            from src.converter.services.gif_search_service import GifSearchService, GifSearchFilter
+            service = GifSearchService()
+            filters = GifSearchFilter(ratio="All")
+            results = service.search(args.search_keyword, args.search_limit, args.search_engine, filters, api_key=args.search_api_key)
+            
+            if results:
+                # Create a temporary source folder for the downloaded GIFs
+                safe_keyword = "".join(c if c.isalnum() else "_" for c in args.search_keyword).strip("_")
+                download_folder = f"{prefix}{safe_keyword}"
+                os.makedirs(download_folder, exist_ok=True)
+                
+                downloaded_count = 0
+                for i, result in enumerate(results):
+                    if downloaded_count >= args.search_limit:
+                        break
+                    logger.info(f"Downloading {i+1}/{len(results)}: {result.url}")
+                    file_path = service.download(result, download_folder, downloaded_count, args.search_keyword)
+                    if file_path:
+                        downloaded_count += 1
+                
+                logger.info(f"Downloaded {downloaded_count} GIFs to '{download_folder}'. Injecting into pipeline...")
+                if download_folder not in source_folders:
+                    source_folders.append(download_folder)
+            else:
+                logger.warning(f"No GIFs found for keyword '{args.search_keyword}'.")
+        except Exception as e:
+            logger.error(f"Search & Download failed: {e}")
+
     if not source_folders:
         logger.warning(
             f"No folder starting with '{prefix}' found in the current directory.\n"
             f"  Tip: place your source folders here as '{prefix}Arcade/', '{prefix}Consoles/', …\n"
-            f"  Or pass folder paths directly:  ./dmd_gif_converter.py {prefix}Arcade"
+            f"  Or pass folder paths directly:  ./dmd_gif_converter.py {prefix}Arcade\n"
+            f"  Or use search to auto-download: ./dmd_gif_converter.py --search-keyword \"pixel art\""
         )
         sys.exit(0)
 
@@ -312,7 +388,21 @@ if __name__ == "__main__":
         logger.info(
             f"=== {folder_in} → {folder_out}  ({len(files)} file(s)) | mode={args.mode} ==="
         )
-        process_folder(folder_in, folder_out, params=params)
+        
+        progress_cb = None
+        if args.log_level in ("WARNING", "ERROR") and len(files) > 0:
+            print(f"Processing '{folder_in}' ({len(files)} files)...")
+            def _progress(current, total):
+                bar_len = 40
+                filled = int(round(bar_len * current / float(total)))
+                bar = '=' * filled + '-' * (bar_len - filled)
+                sys.stdout.write(f'\r[{bar}] {current}/{total} ({current/total*100:.1f}%)')
+                sys.stdout.flush()
+                if current == total:
+                    sys.stdout.write('\n')
+            progress_cb = _progress
+
+        process_folder(folder_in, folder_out, params=params, progress_callback=progress_cb)
 
         # ── Auto-Cleanup Phase ────────────────────────────────────────────────
         if args.reject_threshold > 0:
