@@ -7,7 +7,8 @@ Now ships with a **full cross-platform graphical interface** — no command line
 ---
 
 ## What is New in v6.0.0 (Develop)?
-- **🪄 Text Magic (Text Overlay)**: Added full support for text overlays (Fonts, Styles, Background). *Note: Text animations (blink, scroll) currently have a known bug and are not functional.*
+- **🤖 AI Iconic Moments**: A brand new dedicated tab to automatically analyze entire videos and extract the absolute best "moments" using advanced criteria (Action, Epic cuts, Character presence, Loopability, and DMD Visibility). It even provides a seamless one-click bridge to open the discovered moment in the Converter! [Read the full guide here.](docs/AI_MOMENTS.md)
+- **🪄 Text Magic (Text Overlay)**: Added full support for text overlays (Fonts, Styles, Background) with built-in animations (`blink`, `scroll_left`, `scroll_up`) directly in the UI.
 
 ## What is New in v5.1.0?
 - **🧩 Generic Modularity Extended**: The application's core modular design (interfaces for Converter, Tracker, Detector) is now extended to the GIF Search Engine. A generic `ISearchEngine` interface orchestrates DuckDuckGo, Tenor, and Giphy seamlessly without code duplication, ensuring maximum reusability and scalability across the UI and utility scripts.
@@ -49,6 +50,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 | **Sortable List** | Click on the `File`, `Score`, or `Category` column headers in the Converted List to sort items in ascending/descending order. |
 | **Smart Temp Folder** | If no output directory is defined, all files are stored in a `dmd_tmp/` subfolder inside your source folder to prevent mixing converted GIFs with your source videos. |
 | **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity (up to 300), auto-populates the list |
+| **🤖 AI Iconic Moments** | Auto-extracts the best moments from long videos based on 5 AI metrics and exports directly to the Converter |
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **Diagnostic Preview** | Clicking a converted file shows its score, rating, and bullet-point reasons explaining the score. |
 | **💡 LED Sim** | Toggle pixel-grid overlay on the DMD preview — simulates the physical HUB75 LED matrix appearance · **ON by default** |
