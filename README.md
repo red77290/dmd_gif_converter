@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v5.1.0
+# 🎞️ DMD GIF Converter — v6.0.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -6,8 +6,9 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ---
 
-## What is New in v6.0.0 (Develop)?
+## What is New in v6.0.0?
 - **🤖 AI Iconic Moments**: A brand new dedicated tab to automatically analyze entire videos and extract the absolute best "moments" using advanced criteria (Action, Epic cuts, Character presence, Loopability, and DMD Visibility). It even provides a seamless one-click bridge to open the discovered moment in the Converter! [Read the full guide here.](docs/AI_MOMENTS.md)
+- **🎬 Studio Timeline & CLI Extraction**: A massive upgrade to the AI Moments engine. Features a brand new interactive Studio Timeline with IN/OUT points and looping playback. Full CLI parity added via the `--ai-moments` flag.
 - **🪄 Text Magic (Text Overlay)**: Added full support for text overlays (Fonts, Styles, Background) with built-in animations (`blink`, `scroll_left`, `scroll_up`) directly in the UI.
 
 ## What is New in v5.1.0?
