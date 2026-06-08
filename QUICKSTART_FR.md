@@ -29,3 +29,28 @@ python3 -m src.converter.cli gifs_MonDossier --let-me-handle-it --workers 8 --re
 ```
 
 Et voilà ! Le script va convertir vos vidéos et supprimer automatiquement les fichiers `.gif` qui n'atteignent pas le seuil de visibilité de 50%.
+
+---
+
+---
+
+## 🔍 3. Téléchargement et Conversion en une étape
+
+Grâce à l'architecture modulaire, la recherche de GIFs (via DuckDuckGo, Tenor ou Giphy) est directement intégrée dans l'outil ! Plus besoin de télécharger vos médias à la main. Vous pouvez tout faire en une seule commande :
+
+```bash
+python3 -m src.converter.cli --search-keyword "arcade" --engine DuckDuckGo --limit 5 --let-me-handle-it
+```
+
+Cette commande va télécharger 5 GIFs correspondant à "arcade", puis les convertir automatiquement dans la foulée en utilisant tous les paramètres IA !
+
+---
+
+## 📝 4. Suivi et Logs (UI & CLI)
+
+L'interface graphique intègre désormais un **panneau de logs dynamique** (cliquez sur "📝 Show / Hide Logs").
+Vous y trouverez un menu déroulant pour régler le niveau de verbosité à la volée :
+- **INFO** : (Par défaut) Affiche les scores de qualité, les résumés de conversion et les avertissements.
+- **DEBUG** : Affiche absolument tout le traitement interne, y compris les retours complexes de FFMPEG (très utile pour analyser un problème spécifique).
+
+Si vous utilisez le CLI, vous pouvez obtenir le même niveau de détail complet avec l'argument `--log-level DEBUG` (ou simplement `--verbose`).
