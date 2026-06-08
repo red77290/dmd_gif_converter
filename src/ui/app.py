@@ -342,7 +342,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         self.tabview.grid(row=0, column=0, sticky="nsew", padx=10, pady=(0, 5))
 
         self.tab_conversion = self.tabview.add("Conversion")
-        self.tab_ai_moments = self.tabview.add("AI Moments")
+        self.tab_ai_moments = self.tabview.add("Moments")
 
         # ── Setup Conversion Tab ──────────────────────────────────────────────
         self.tab_conversion.grid_columnconfigure(2, weight=1)

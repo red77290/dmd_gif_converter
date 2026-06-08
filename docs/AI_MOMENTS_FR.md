@@ -16,9 +16,21 @@ Le moteur AI Moments effectue une analyse en plusieurs passes sur votre vidéo :
 
 1. Ouvrez une vidéo dans l'interface.
 2. Allez dans l'onglet **AI Moments**.
-3. Cliquez sur "Generate Best Moments".
-4. Le système analysera la vidéo (cela peut prendre quelques minutes pour les longues vidéos).
-5. Une liste des moments les mieux classés apparaîtra. Cliquez sur un moment pour le prévisualiser instantanément et le convertir !
+3. Utilisez la **Studio Timeline** pour prévisualiser votre vidéo.
+4. Cliquez sur **Generate AI Moments** pour extraire automatiquement les meilleures scènes, ou utilisez les boutons **[ Set IN ]** et **[ Set OUT ]** pour extraire manuellement un moment précis.
+5. Les moments extraits manuellement ou par l'IA sont automatiquement ajoutés à votre liste de conversion !
+
+### Studio Timeline & Lecture (Playback)
+Vous pouvez utiliser le bouton **▶ Play Selection** pour lire en boucle infinie la sélection entre vos points IN et OUT. Cela vous permet de cadrer parfaitement vos coupes personnalisées avant de les extraire.
+
+## Utilisation via CLI
+
+Vous pouvez également automatiser l'extraction AI Moments depuis la ligne de commande :
+
+```bash
+# Analyse toutes les vidéos du dossier, extrait les 5 meilleurs moments par vidéo et les convertit en GIF DMD
+./dmd_gif_converter.py mes_videos/ --ai-moments --ai-moments-count 5 --ai-moments-strategy Action
+```
 
 ## Magie du Texte (Animations)
 
