@@ -1,5 +1,7 @@
 # AI Moments & Suivi Intelligent
 
+![AI Moments Studio Timeline](../media/AI_MOMENT_PREVIEW.png)
+
 DMD GIF Converter inclut une fonctionnalité avancée **AI Moments** conçue pour analyser automatiquement les longues vidéos et extraire les meilleurs moments pour vos écrans physiques DMD.
 
 ## Comment ça marche
