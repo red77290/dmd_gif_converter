@@ -6,6 +6,9 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ---
 
+## What is New in v6.0.0 (Develop)?
+- **🪄 Text Magic (Text Overlay)**: Added full support for text overlays (Fonts, Styles, Background). *Note: Text animations (blink, scroll) currently have a known bug and are not functional.*
+
 ## What is New in v5.1.0?
 - **🧩 Generic Modularity Extended**: The application's core modular design (interfaces for Converter, Tracker, Detector) is now extended to the GIF Search Engine. A generic `ISearchEngine` interface orchestrates DuckDuckGo, Tenor, and Giphy seamlessly without code duplication, ensuring maximum reusability and scalability across the UI and utility scripts.
 

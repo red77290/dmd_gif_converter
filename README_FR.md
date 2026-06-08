@@ -6,6 +6,9 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ---
 
+## Nouveautés de la v6.0.0 (Develop)
+- **🪄 Text Magic (Text Overlay)** : Ajout d'une fonctionnalité complète pour incrustation de texte (Polices, Styles, Background). *Note: L'animation de texte (clignotement, défilement) présente actuellement un bug connu qui empêche son fonctionnement.*
+
 ## Nouveautés de la v5.1.0
 - **🧩 Modularité Générique Étendue** : L'architecture modulaire de l'application (interfaces pour le Convertisseur, Tracker, Détecteur) s'étend désormais au moteur de recherche de GIFs. Une interface générique `ISearchEngine` orchestre DuckDuckGo, Tenor, et Giphy de façon transparente sans duplication de code, garantissant une réutilisabilité et extensibilité maximales pour l'UI et les scripts utilitaires.
 

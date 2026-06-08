@@ -39,6 +39,7 @@ def _apply_text_overlay_pillow(
     style: str = "outline",
     bg: bool = False,
     bg_opacity: int = 60,
+    animation: str = "none",
 ) -> tuple[bool, str]:
     """Burn text onto every frame of an existing GIF using Pillow.
 
@@ -89,24 +90,51 @@ def _apply_text_overlay_pillow(
 
     # ── Draw text on every frame ───────────────────────────────────────────────
     out_frames: list = []
-    for frame in frames_rgba:
+    current_time_ms = 0
+
+    for i, frame in enumerate(frames_rgba):
         draw = ImageDraw.Draw(frame)
         w, h = frame.size
+
+        # Time tracking for animations
+        t_sec = current_time_ms / 1000.0
+        current_time_ms += durations[i]
 
         # Bounding box including optional stroke so position maths is correct
         bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_w)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
 
-        if   position == "top_left":      x, y = margin,            margin
-        elif position == "top_center":    x, y = (w - tw) // 2,     margin
-        elif position == "top_right":     x, y = w - tw - margin,   margin
-        elif position == "middle_left":   x, y = margin,            (h - th) // 2
-        elif position == "middle_center": x, y = (w - tw) // 2,     (h - th) // 2
-        elif position == "middle_right":  x, y = w - tw - margin,   (h - th) // 2
-        elif position == "bottom_left":   x, y = margin,            h - th - margin
-        elif position == "bottom_right":  x, y = w - tw - margin,   h - th - margin
-        else:                             x, y = (w - tw) // 2,     h - th - margin  # bottom_center
+        if   position == "top_left":      base_x, base_y = margin,            margin
+        elif position == "top_center":    base_x, base_y = (w - tw) // 2,     margin
+        elif position == "top_right":     base_x, base_y = w - tw - margin,   margin
+        elif position == "middle_left":   base_x, base_y = margin,            (h - th) // 2
+        elif position == "middle_center": base_x, base_y = (w - tw) // 2,     (h - th) // 2
+        elif position == "middle_right":  base_x, base_y = w - tw - margin,   (h - th) // 2
+        elif position == "bottom_left":   base_x, base_y = margin,            h - th - margin
+        elif position == "bottom_right":  base_x, base_y = w - tw - margin,   h - th - margin
+        else:                             base_x, base_y = (w - tw) // 2,     h - th - margin  # bottom_center
+
+        # Animations
+        x, y = base_x, base_y
+        
+        if animation == "blink":
+            # Blink every 0.5s - start VISIBLE
+            if (t_sec % 1.0) > 0.5:
+                out_frames.append(frame.convert("RGB"))
+                continue  # Skip drawing text
+                
+        elif animation == "scroll_left":
+            # Scroll left at 100px/sec
+            offset_x = int(t_sec * 100) % (w + tw)
+            x = w - offset_x
+            y = base_y
+            
+        elif animation == "scroll_up":
+            # Scroll up at 30px/sec
+            offset_y = int(t_sec * 30) % (h + th)
+            x = base_x
+            y = h - offset_y
 
         # ── Optional background box ────────────────────────────────────────────
         if bg:
@@ -157,7 +185,7 @@ def _apply_text_overlay_pillow(
     except Exception as e:
         return False, "Failed to save GIF with text: %s" % e
 
-    return True, "text overlay (%s) applied via Pillow (ffmpeg drawtext unavailable)" % style
+    return True, f"text overlay ({style}, anim: {animation}) applied via Pillow"
 
 _CLEAN_GIF_FPS = [10.0, 12.5, 20.0, 25.0]
 

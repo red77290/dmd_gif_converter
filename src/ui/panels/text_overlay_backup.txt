@@ -1,0 +1,141 @@
+   760	        # ── SECTION 2: TEXT OVERLAY ───────────────────────────────────────────
+   761	        ctk.CTkLabel(
+   762	            parent, text="━━  💬  Text Overlay",
+   763	            font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
+   764	        ).pack(fill="x", padx=10, pady=(10, 4), anchor="w")
+   765	
+   766	        text_overlay_row = ctk.CTkFrame(parent, fg_color="transparent")
+   767	        text_overlay_row.pack(fill="x", padx=14, pady=(0, 4))
+   768	        self._text_overlay_checkbox = ctk.CTkCheckBox(
+   769	            text_overlay_row,
+   770	            text="Enable Text Overlay",
+   771	            variable=self.v_text_overlay_enabled,
+   772	            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+   773	            command=self._on_text_overlay_toggle
+   774	        )
+   775	        self._text_overlay_checkbox.pack(side="left")
+   776	
+   777	        self._text_overlay_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=6)
+   778	        # This frame will be packed/unpacked based on v_text_overlay_enabled
+   779	
+   780	        text_content_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   781	        text_content_row.pack(fill="x", padx=10, pady=2)
+   782	        text_content_row.grid_columnconfigure(1, weight=1)
+   783	        ctk.CTkLabel(text_content_row, text="Text Content", width=145, anchor="w",
+   784	                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+   785	        self._text_content_entry = ctk.CTkEntry(
+   786	            text_content_row, textvariable=self.v_text_content, width=200
+   787	        )
+   788	        self._text_content_entry.grid(row=0, column=1, sticky="ew", padx=4)
+   789	
+   790	        adv_slider(self._text_overlay_frame, "Font Size", self.v_text_font_size, 4, 32,
+   791	                   "{:.0f}", " px", steps=28, is_int=True, lmh=False)
+   792	
+   793	        text_color_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   794	        text_color_row.pack(fill="x", padx=10, pady=2)
+   795	        text_color_row.grid_columnconfigure(1, weight=1)
+   796	        ctk.CTkLabel(text_color_row, text="Text Color", width=145, anchor="w",
+   797	                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+   798	        self._text_color_menu = ctk.CTkOptionMenu(
+   799	            text_color_row,
+   800	            variable=self.v_text_color,
+   801	            values=["white", "yellow", "red", "green", "blue"],
+   802	            width=200,
+   803	        )
+   804	        self._text_color_menu.grid(row=0, column=1, sticky="w", padx=4)
+   805	
+   806	        text_position_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   807	        text_position_row.pack(fill="x", padx=10, pady=2)
+   808	        text_position_row.grid_columnconfigure(1, weight=1)
+   809	        ctk.CTkLabel(text_position_row, text="Text Position", width=145, anchor="w",
+   810	                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+   811	        self._text_position_menu = ctk.CTkOptionMenu(
+   812	            text_position_row,
+   813	            variable=self.v_text_position,
+   814	            values=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"],
+   815	            width=200,
+   816	        )
+   817	        self._text_position_menu.grid(row=0, column=1, sticky="w", padx=4)
+   818	
+   819	        text_font_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   820	        text_font_row.pack(fill="x", padx=10, pady=2)
+   821	        text_font_row.grid_columnconfigure(1, weight=1)
+   822	        ctk.CTkLabel(text_font_row, text="Font", width=145, anchor="w",
+   823	                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+   824	        _available_fonts = [
+   825	            "HelvetiPixel.ttf", "PixelMordred.ttf", "BitCasual.ttf",
+   826	            "CursivePixel.ttf", "justabit.ttf", "KarenBook.ttf",
+   827	            "OldWizard.ttf", "OrdinaryBasis.ttf", "Quintet.ttf", "TimesNewPixel.ttf",
+   828	        ]
+   829	        self._text_font_menu = ctk.CTkOptionMenu(
+   830	            text_font_row,
+   831	            variable=self.v_text_font_file,
+   832	            values=_available_fonts,
+   833	            width=200,
+   834	        )
+   835	        self._text_font_menu.grid(row=0, column=1, sticky="w", padx=4)
+   836	        ctk.CTkLabel(
+   837	            self._text_overlay_frame,
+   838	            text="    Fonts stored in media/fonts/ — pixel fonts optimised for 128×32 DMD panels.",
+   839	            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+   840	        ).pack(padx=14, pady=(0, 6), anchor="w")
+   841	
+   842	        # ── Text Style ────────────────────────────────────────────────────────
+   843	        text_style_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   844	        text_style_row.pack(fill="x", padx=10, pady=2)
+   845	        text_style_row.grid_columnconfigure(1, weight=1)
+   846	        ctk.CTkLabel(text_style_row, text="Text Style", width=145, anchor="w",
+   847	                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+   848	        self._text_style_menu = ctk.CTkOptionMenu(
+   849	            text_style_row,
+   850	            variable=self.v_text_style,
+   851	            values=["outline", "bold", "shadow", "none"],
+   852	            width=200,
+   853	        )
+   854	        self._text_style_menu.grid(row=0, column=1, sticky="w", padx=4)
+   855	        ctk.CTkLabel(
+   856	            self._text_overlay_frame,
+   857	            text="    outline = black border (best on 128×32)  ·  bold = thicker glyph  ·  shadow = drop shadow",
+   858	            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
+   859	        ).pack(padx=14, pady=(0, 4), anchor="w")
+   860	
+   861	        # ── Background box ────────────────────────────────────────────────────
+   862	        bg_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   863	        bg_row.pack(fill="x", padx=10, pady=(4, 2))
+   864	        self._text_bg_cb = ctk.CTkCheckBox(
+   865	            bg_row,
+   866	            text="Background box  (dark box behind text)",
+   867	            variable=self.v_text_bg,
+   868	            command=self._on_text_bg_toggle,
+   869	            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+   870	        )
+   871	        self._text_bg_cb.pack(side="left")
+   872	
+   873	        # Opacity slider — shown only when bg is on
+   874	        self._text_bg_opacity_frame = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
+   875	        self._text_bg_opacity_frame.pack(fill="x", padx=10, pady=2)
+   876	        self._text_bg_opacity_frame.grid_columnconfigure(1, weight=1)
+   877	        ctk.CTkLabel(self._text_bg_opacity_frame, text="Box opacity", width=145, anchor="w",
+   878	                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+   879	        self._text_bg_opacity_slider = ctk.CTkSlider(
+   880	            self._text_bg_opacity_frame,
+   881	            from_=10, to=100, number_of_steps=90,
+   882	            variable=self.v_text_bg_opacity,
+   883	        )
+   884	        self._text_bg_opacity_slider.grid(row=0, column=1, sticky="ew", padx=4)
+   885	        self._text_bg_opacity_lbl = ctk.CTkLabel(
+   886	            self._text_bg_opacity_frame,
+   887	            text="%d %%" % self.v_text_bg_opacity.get(),
+   888	            width=60, anchor="e", font=ctk.CTkFont(size=11),
+   889	        )
+   890	        self._text_bg_opacity_lbl.grid(row=0, column=2, padx=(4, 4))
+   891	        self.v_text_bg_opacity.trace_add(
+   892	            "write",
+   893	            lambda *_: self._text_bg_opacity_lbl.configure(
+   894	                text="%d %%" % self.v_text_bg_opacity.get()
+   895	            ),
+   896	        )
+   897	        self._on_text_bg_toggle()  # set initial visibility
+   898	
+   899	        self._on_text_overlay_toggle() # Set initial state
+   900	

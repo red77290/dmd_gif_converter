@@ -68,34 +68,84 @@ class ConversionController(IController):
         trim_end   = self._model.get("v_trim_end", 0.0)
 
         files = files or []
-        total = len(files)
+        
+        from src.converter.services.job_expander import expand_conversion_jobs
+        jobs = expand_conversion_jobs(files, params)
+        total_jobs = len(jobs)
 
-        for i, (iid, src_path) in enumerate(files):
+        for i, (iid, src_path, job_params, suffix) in enumerate(jobs):
             if self._cancel_flag:
-                logger.info("Conversion cancelled at file %d/%d", i + 1, total)
+                logger.info("Conversion cancelled at job %d/%d", i + 1, total_jobs)
                 break
 
             import os
             from pathlib import Path
             filename = os.path.basename(src_path)
-            out_name = Path(filename).stem + ".gif"
+            
+            # Apply suffix if we have one (e.g. _top1 from auto-cutter)
+            base_name = Path(filename).stem
+            if suffix:
+                base_name += suffix
+            out_name = base_name + ".gif"
+            
             out_path = os.path.join(output_dir, out_name) if output_dir else \
                        os.path.join(os.path.dirname(src_path), "dmd_out", out_name)
 
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            start_s = trim_start if trim_start > 0 else None
-            end_s   = trim_end   if trim_end   > 0 else None
+            start_s = job_params.get("trim_start")
+            end_s   = job_params.get("trim_end")
+            
+            # Fallback to model values if not in job_params explicitly
+            if start_s is None: start_s = trim_start if trim_start > 0 else None
+            if end_s is None:   end_s   = trim_end   if trim_end   > 0 else None
 
             def _callback(msg: str, level: str = "info") -> None:
-                if self._view and hasattr(self._view, "log"):
-                    self._view.log(msg, level)
+                if self._view:
+                    # Pass the message to the view
+                    self._view.after(0, lambda m=msg, l=level: getattr(self._view, "_log")(m, l))
+                else:
+                    getattr(logger, level)(msg)
+
+            # Pre-processing for Auto Action
+            pre_src = src_path
+            tmpdir = None
+            auto_action_was_enabled = job_params.get("auto_action_enabled", False)
+
+            if auto_action_was_enabled:
+                from src.auto_action.main import preprocess_video_for_dmd
+                ok, p_src, msg = preprocess_video_for_dmd(src_path, callback=_callback, trim_start=start_s, trim_end=end_s)
+                if ok and p_src:
+                    pre_src = p_src
+                    tmpdir = os.path.dirname(pre_src)
+                    start_s = None
+                    end_s = None
+                else:
+                    logger.warning("Auto action failed: %s", msg)
+
+            p_no_action = {**job_params, "auto_action_enabled": False}
 
             success, msg = process_file(
-                src_path, out_path, params=params,
-                start_s=start_s, end_s=end_s,
-                callback=_callback,
+                pre_src,
+                out_path,
+                trim_start=start_s,
+                trim_end=end_s,
+                params=p_no_action,
+                callback=_callback
             )
 
-            if self._view and hasattr(self._view, "on_file_converted"):
-                self._view.on_file_converted(iid, src_path, out_path, success, msg)
+            if tmpdir and os.path.isdir(tmpdir):
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+            if self._view:
+                if success:
+                    self._view.after(0, lambda p=out_path, _id=iid: self._view.on_conversion_success(p, _id))
+                else:
+                    self._view.after(0, lambda e=msg, _id=iid: self._view.on_conversion_error(e, _id))
+                # Update progress based on jobs
+                self._view.after(0, lambda c=i+1, t=total_jobs: self._view.on_conversion_progress(c, t))
+
+        if self._view:
+            self._view.after(0, self._view.on_conversion_finished)
+        self._active_thread = None
