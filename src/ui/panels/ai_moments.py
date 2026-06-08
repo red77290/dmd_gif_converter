@@ -35,13 +35,23 @@ class AiMomentsPanelMixin:
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self._on_generate_ai_moments
         )
-        self._btn_ai_start.pack(fill="x", pady=20)
+        self._btn_ai_start.pack(fill="x", pady=(20, 5))
         
-        # ── Right Column: Results & Progress ─────────────────────────────────
-        res_frame = ctk.CTkFrame(parent, corner_radius=0)
+        # Show Report Button
+        self._btn_ai_show_report = ctk.CTkButton(
+            cfg_frame, text="📊 Show AI Report", height=40,
+            fg_color="#444", hover_color="#555",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self._show_ai_report_popup,
+            state="disabled"
+        )
+        self._btn_ai_show_report.pack(fill="x", pady=(0, 20))
+        
+        # ── Right Column: Studio Timeline ────────────────────────────────────
+        res_frame = ctk.CTkFrame(parent, corner_radius=0, fg_color="black")
         res_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         
-        self._build_ai_results_area(res_frame)
+        self._build_studio_timeline(res_frame)
 
     def _build_ai_video_selection(self, parent):
         f = ctk.CTkFrame(parent)
@@ -139,10 +149,16 @@ class AiMomentsPanelMixin:
         
         row = ctk.CTkFrame(f, fg_color="transparent")
         row.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(row, text="Duration").pack(side="left")
-        self.v_ai_dur_mode = tk.StringVar(value="Auto")
-        ctk.CTkRadioButton(row, text="Auto", variable=self.v_ai_dur_mode, value="Auto").pack(side="left", padx=10)
-        ctk.CTkRadioButton(row, text="Fixed", variable=self.v_ai_dur_mode, value="Fixed").pack(side="left")
+        self.v_ai_dur_min = tk.StringVar(value="2.0")
+        self.v_ai_dur_max = tk.StringVar(value="5.0")
+        
+        ctk.CTkLabel(row, text="Duration Range (s):").pack(side="left")
+        
+        ctk.CTkLabel(row, text="Min", text_color="gray").pack(side="left", padx=(10, 5))
+        ctk.CTkEntry(row, textvariable=self.v_ai_dur_min, width=50).pack(side="left")
+        
+        ctk.CTkLabel(row, text="Max", text_color="gray").pack(side="left", padx=(10, 5))
+        ctk.CTkEntry(row, textvariable=self.v_ai_dur_max, width=50).pack(side="left")
         
         self.v_ai_auto_framing = tk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Auto Action Framing", variable=self.v_ai_auto_framing).pack(anchor="w", padx=10, pady=5)
@@ -150,12 +166,185 @@ class AiMomentsPanelMixin:
         self.v_ai_opt_dmd = tk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Optimize for DMD", variable=self.v_ai_opt_dmd).pack(anchor="w", padx=10, pady=5)
 
-    def _build_ai_results_area(self, parent):
+    def _build_studio_timeline(self, parent):
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(0, weight=1)
         
-        self._ai_right_container = ctk.CTkFrame(parent, fg_color="transparent")
-        self._ai_right_container.grid(row=0, column=0, sticky="nsew")
+        # 1. Huge Video Preview
+        preview_container = ctk.CTkFrame(parent, fg_color="black")
+        preview_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        preview_container.grid_columnconfigure(0, weight=1)
+        preview_container.grid_rowconfigure(0, weight=1)
+        
+        self._ai_studio_preview_lbl = tk.Label(preview_container, text="No Video Loaded", bg="black", fg="#555", font=("Arial", 24))
+        self._ai_studio_preview_lbl.grid(row=0, column=0, sticky="nsew")
+        
+        # 2. Timeline Controls Frame
+        controls_frame = ctk.CTkFrame(parent, fg_color="#1a1a1a", height=100)
+        controls_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        controls_frame.grid_columnconfigure(1, weight=1)
+        
+        self.v_playhead = tk.DoubleVar(value=0.0)
+        self.v_manual_start = tk.DoubleVar(value=0.0)
+        self.v_manual_end = tk.DoubleVar(value=5.0)
+        
+        # Scrubber
+        self._lbl_playhead = ctk.CTkLabel(controls_frame, text="00:00.0", width=60, font=ctk.CTkFont(family="monospace", size=14))
+        self._lbl_playhead.grid(row=0, column=0, padx=(15, 5), pady=15)
+        
+        self._sl_playhead = ctk.CTkSlider(controls_frame, variable=self.v_playhead, from_=0, to=100, command=self._on_playhead_change)
+        self._sl_playhead.grid(row=0, column=1, sticky="ew", padx=10, pady=15)
+        
+        # Tools row
+        tools_row = ctk.CTkFrame(controls_frame, fg_color="transparent")
+        tools_row.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 15))
+        tools_row.grid_columnconfigure(2, weight=1)
+        
+        btn_in = ctk.CTkButton(tools_row, text="[ Set IN Point", font=ctk.CTkFont(weight="bold"), width=120, height=32, command=self._set_in_point, fg_color="#C25A24", hover_color="#9A451A")
+        btn_in.grid(row=0, column=0, padx=5)
+        
+        btn_out = ctk.CTkButton(tools_row, text="Set OUT Point ]", font=ctk.CTkFont(weight="bold"), width=120, height=32, command=self._set_out_point, fg_color="#2471A3", hover_color="#1A5276")
+        btn_out.grid(row=0, column=1, sticky="w", padx=5)
+        
+        self._lbl_selection = ctk.CTkLabel(tools_row, text="Selected: 00.0s — 05.0s", text_color="#F1C40F", font=ctk.CTkFont(family="monospace", weight="bold", size=14))
+        self._lbl_selection.grid(row=0, column=2, padx=15)
+        
+        self._is_playing_selection = False
+        self._btn_play_selection = ctk.CTkButton(tools_row, text="▶ Play Selection", width=140, fg_color="#2b4b8a", hover_color="#234073", height=36, command=self._toggle_play_selection)
+        self._btn_play_selection.grid(row=0, column=3, padx=5)
+        
+        self._btn_add_manual = ctk.CTkButton(tools_row, text="✂️ Add Manual Moment", fg_color="#2FA572", hover_color="#1E7A52", height=36, command=self._on_add_manual_moment)
+        self._btn_add_manual.grid(row=0, column=4, padx=5)
+
+    def _on_playhead_change(self, val):
+        self._lbl_playhead.configure(text=f"{val:05.1f}s")
+        self._update_studio_preview(val)
+        
+    def _set_in_point(self):
+        val = self.v_playhead.get()
+        if val >= self.v_manual_end.get():
+            self.v_manual_end.set(val + 1.0)
+        self.v_manual_start.set(val)
+        self._lbl_selection.configure(text=f"Selected: {self.v_manual_start.get():04.1f}s — {self.v_manual_end.get():04.1f}s")
+        
+    def _set_out_point(self):
+        val = self.v_playhead.get()
+        if val <= self.v_manual_start.get():
+            self.v_manual_start.set(max(0.0, val - 1.0))
+        self.v_manual_end.set(val)
+        self._lbl_selection.configure(text=f"Selected: {self.v_manual_start.get():04.1f}s — {self.v_manual_end.get():04.1f}s")
+
+    def _update_studio_preview(self, time_sec):
+        if not getattr(self, '_ai_preview_cap', None):
+            return
+            
+        import cv2
+        from PIL import Image, ImageTk
+        
+        try:
+            self._ai_preview_cap.set(cv2.CAP_PROP_POS_MSEC, time_sec * 1000)
+            ret, frame = self._ai_preview_cap.read()
+            if ret:
+                # Resize to fit the label (max ~800x450)
+                h, w = frame.shape[:2]
+                target_w, target_h = 800, 450
+                ratio = min(target_w/w, target_h/h)
+                new_w, new_h = int(w*ratio), int(h*ratio)
+                frame = cv2.resize(frame, (new_w, new_h))
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                img = Image.fromarray(frame)
+                imgtk = ImageTk.PhotoImage(image=img)
+                self._ai_studio_preview_lbl.imgtk = imgtk
+                self._ai_studio_preview_lbl.configure(image=imgtk, width=new_w, height=new_h)
+        except Exception:
+            pass
+            
+    def _toggle_play_selection(self):
+        if not hasattr(self, '_ai_preview_cap') or not self._ai_preview_cap:
+            return
+            
+        if self._is_playing_selection:
+            self._is_playing_selection = False
+            self._btn_play_selection.configure(text="▶ Play Selection", fg_color="#2b4b8a", hover_color="#234073")
+        else:
+            self._is_playing_selection = True
+            self._btn_play_selection.configure(text="⏸ Pause", fg_color="#8a2b2b", hover_color="#732323")
+            # Restart playhead from IN point
+            self.v_playhead.set(self.v_manual_start.get())
+            self._on_playhead_change(self.v_playhead.get())
+            
+            import cv2
+            fps = self._ai_preview_cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0: fps = 25.0
+            delay_ms = int(1000 / fps)
+            self.after(delay_ms, self._play_loop, delay_ms)
+            
+    def _play_loop(self, delay_ms):
+        if not self._is_playing_selection:
+            return
+            
+        current = self.v_playhead.get()
+        # Advance by delay
+        next_time = current + (delay_ms / 1000.0)
+        
+        if next_time >= self.v_manual_end.get():
+            # Loop back to IN point
+            next_time = self.v_manual_start.get()
+            
+        self.v_playhead.set(next_time)
+        self._on_playhead_change(next_time)
+        
+        self.after(delay_ms, self._play_loop, delay_ms)
+            
+    def _on_add_manual_moment(self):
+        if not hasattr(self, '_ai_video_path') or not self._ai_video_path:
+            import tkinter.messagebox as msg
+            msg.showwarning("No Video", "Please select a video first.")
+            return
+            
+        start = self.v_manual_start.get()
+        end = self.v_manual_end.get()
+        
+        if end <= start:
+            import tkinter.messagebox as msg
+            msg.showwarning("Invalid Range", "End time must be greater than start time.")
+            return
+            
+        from src.auto_action.ai_moments import AiMoment
+        m = AiMoment(
+            start_time=start,
+            end_time=end,
+            start_frame=0,
+            end_frame=0,
+            scores={"Manual": 100},
+            overall_score=100.0
+        )
+        
+        # Append to current results (but don't force UI update on hidden popup)
+        if not hasattr(self, '_ai_results'):
+            self._ai_results = []
+        self._ai_results.append(m)
+        
+        # Add to extraction queue (this pushes it to the main left-panel treeview)
+        self._add_moments_to_queue([m])
+
+    def _show_ai_report_popup(self, mode="results"):
+        if getattr(self, "_report_popup", None) and self._report_popup.winfo_exists():
+            self._report_popup.focus()
+            if mode == "results":
+                self._show_ai_results_view()
+            else:
+                self._show_ai_analysis_view()
+            return
+            
+        self._report_popup = ctk.CTkToplevel(self)
+        self._report_popup.title("AI Moments Report")
+        self._report_popup.geometry("600x600")
+        self._report_popup.transient(self.winfo_toplevel())
+        
+        self._ai_right_container = ctk.CTkFrame(self._report_popup, fg_color="transparent")
+        self._ai_right_container.pack(fill="both", expand=True, padx=10, pady=10)
         self._ai_right_container.grid_columnconfigure(0, weight=1)
         self._ai_right_container.grid_rowconfigure(0, weight=1)
         
@@ -200,24 +389,29 @@ class AiMomentsPanelMixin:
         self._ai_results_view.grid_columnconfigure(0, weight=1)
         self._ai_results_view.grid_rowconfigure(0, weight=1)
         
-        # Use a fixed height so the ScrollableFrame can actually scroll.
-        # The height is generous enough to show content but constrained so overflow triggers the scrollbar.
         self._ai_results_scroll = ctk.CTkScrollableFrame(self._ai_results_view, height=400)
         self._ai_results_scroll.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self._ai_results_scroll.grid_columnconfigure(0, weight=1)
         
-        # Placeholder for empty state
         self._ai_empty_lbl = ctk.CTkLabel(self._ai_results_scroll, text="Select a video and generate AI moments.", text_color="gray")
         self._ai_empty_lbl.pack(pady=50)
-
+        
+        if mode == "results":
+            self._show_ai_results_view()
+        else:
+            self._show_ai_analysis_view()
 
     def _show_ai_analysis_view(self):
-        self._ai_results_view.grid_remove()
-        self._ai_analysis_view.grid(row=0, column=0, sticky="nsew")
+        if hasattr(self, '_ai_results_view'):
+            self._ai_results_view.grid_remove()
+        if hasattr(self, '_ai_analysis_view'):
+            self._ai_analysis_view.grid(row=0, column=0, sticky="nsew")
         
     def _show_ai_results_view(self):
-        self._ai_analysis_view.grid_remove()
-        self._ai_results_view.grid(row=0, column=0, sticky="nsew")
+        if hasattr(self, '_ai_analysis_view'):
+            self._ai_analysis_view.grid_remove()
+        if hasattr(self, '_ai_results_view'):
+            self._ai_results_view.grid(row=0, column=0, sticky="nsew")
 
     # ── Callbacks ────────────────────────────────────────────────────────────
     def _ai_select_video(self):
@@ -242,8 +436,34 @@ class AiMomentsPanelMixin:
         self._ai_video_path = path
         name = Path(path).name
         self._ai_video_label.configure(text=name, text_color="white")
-        # In the future, probe length/resolution
-        self._ai_video_meta.configure(text=f"Ready to analyze")
+        
+        # Load VideoCapture for preview
+        import cv2
+        if getattr(self, '_ai_preview_cap', None):
+            self._ai_preview_cap.release()
+        self._ai_preview_cap = cv2.VideoCapture(path)
+        
+        from src.converter.ffmpeg_utils import get_metadata
+        _, _, _, dur = get_metadata(path)
+        if dur > 0:
+            self._ai_video_meta.configure(text=f"Ready to analyze | Duration: {dur:.1f}s")
+            
+            # Configure playhead
+            self._sl_playhead.configure(to=dur)
+            self.v_playhead.set(0.0)
+            
+            if dur > 5.0:
+                self.v_manual_start.set(0.0)
+                self.v_manual_end.set(5.0)
+            else:
+                self.v_manual_start.set(0.0)
+                self.v_manual_end.set(dur)
+            self._lbl_selection.configure(text=f"Selected: {self.v_manual_start.get():04.1f}s — {self.v_manual_end.get():04.1f}s")
+        else:
+            self._ai_video_meta.configure(text=f"Ready to analyze")
+            
+        # Update preview with start time
+        self.after(100, lambda: self._update_studio_preview(self.v_playhead.get()))
 
     def _on_generate_ai_moments(self):
         if not hasattr(self, '_ai_video_path') or not self._ai_video_path:
@@ -251,8 +471,10 @@ class AiMomentsPanelMixin:
             msg.showwarning("No Video", "Please select a video first.")
             return
             
-        self._show_ai_analysis_view()
+        self._show_ai_report_popup(mode="analysis")
+        
         self._btn_ai_start.configure(state="disabled")
+        self._btn_ai_show_report.configure(state="disabled")
         self._ai_progress_bar.set(0)
         self._ai_progress_lbl.configure(text="0%")
         for var in self._ai_task_vars.values():
@@ -271,7 +493,8 @@ class AiMomentsPanelMixin:
             "w_character": self.v_ai_w_character.get(),
             "w_loopable": self.v_ai_w_loopable.get(),
             "w_dmd": self.v_ai_w_dmd.get(),
-            "dur_mode": self.v_ai_dur_mode.get(),
+            "dur_min": float(self.v_ai_dur_min.get() or 2.0),
+            "dur_max": float(self.v_ai_dur_max.get() or 5.0),
             "auto_framing": self.v_ai_auto_framing.get(),
             "opt_dmd": self.v_ai_opt_dmd.get()
         }
@@ -304,7 +527,9 @@ class AiMomentsPanelMixin:
                 var.set("[✓]")
     def _on_ai_analysis_complete(self, results):
         self._ai_results = results
-        self._show_ai_results_view()
+        self._btn_ai_show_report.configure(state="normal")
+        
+        self._show_ai_report_popup(mode="results")
         self._populate_results()
         
         # Add moments directly to the conversion queue
@@ -363,9 +588,15 @@ class AiMomentsPanelMixin:
         import subprocess
         import os
         
-        self._btn_ai_start.configure(state="disabled")
-        self._ai_progress_lbl.configure(text="Extracting moments to temporary files...")
-        self._ai_progress_bar.set(0.1)
+        if hasattr(self, '_btn_ai_start'):
+            self._btn_ai_start.configure(state="disabled")
+            
+        if hasattr(self, '_btn_add_manual'):
+            self._btn_add_manual.configure(state="disabled", text="Extracting...")
+            
+        if getattr(self, "_report_popup", None) and self._report_popup.winfo_exists() and hasattr(self, '_ai_progress_lbl'):
+            self._ai_progress_lbl.configure(text="Extracting moments to temporary files...")
+            self._ai_progress_bar.set(0.1)
         
         src_path = self._ai_video_path
         src_dir = Path(src_path).parent
@@ -379,7 +610,10 @@ class AiMomentsPanelMixin:
             ext = Path(src_path).suffix
             
             for i, m in enumerate(results):
-                out_name = f"{base_name}_M{i+1}{ext}"
+                if "Manual" in m.scores:
+                    out_name = f"{base_name}_Manual_{int(m.start_time)}s_to_{int(m.end_time)}s{ext}"
+                else:
+                    out_name = f"{base_name}_M{i+1}{ext}"
                 out_path = tmp_dir / out_name
                 
                 # Use ffmpeg to cut the moment
@@ -399,7 +633,8 @@ class AiMomentsPanelMixin:
                 except Exception as e:
                     print(f"Failed to extract moment {i+1}: {e}")
                     
-                self.after(0, lambda p=(i+1)/total: self._ai_progress_bar.set(0.1 + p * 0.9))
+                if getattr(self, "_report_popup", None) and self._report_popup.winfo_exists() and hasattr(self, '_ai_progress_bar'):
+                    self.after(0, lambda p=(i+1)/total: self._ai_progress_bar.set(0.1 + p * 0.9))
                 
             self.after(0, lambda: _finish(new_files))
             
@@ -407,8 +642,14 @@ class AiMomentsPanelMixin:
             if files and hasattr(self, '_batch_insert'):
                 self._batch_insert(files, 0)
                 
-            self._ai_progress_lbl.configure(text=f"Added {len(files)} extracted moments to the Conversion list!")
-            self._ai_progress_bar.set(1.0)
-            self._btn_ai_start.configure(state="normal")
+            if getattr(self, "_report_popup", None) and self._report_popup.winfo_exists() and hasattr(self, '_ai_progress_lbl'):
+                self._ai_progress_lbl.configure(text=f"Added {len(files)} extracted moments to the Conversion list!")
+                self._ai_progress_bar.set(1.0)
+                
+            if hasattr(self, '_btn_ai_start'):
+                self._btn_ai_start.configure(state="normal")
+                
+            if hasattr(self, '_btn_add_manual'):
+                self._btn_add_manual.configure(state="normal", text="✂️ Add Manual Moment")
             
         threading.Thread(target=_extract, daemon=True).start()

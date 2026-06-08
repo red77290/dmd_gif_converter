@@ -59,14 +59,18 @@ class AiMomentsEngine:
         analyze_fps = 2.0
         frame_step = max(1, int(fps / analyze_fps))
         
-        # Determine sliding window size (e.g. 3 seconds default)
-        dur_mode = self.options.get("dur_mode", "Auto")
-        window_duration = 3.0 # default
-        if dur_mode == "Fixed":
-            # For simplicity, default to 3s if fixed mode
-            window_duration = 3.0
+        # Determine sliding window sizes from min to max duration
+        dur_min = float(self.options.get("dur_min", 2.0))
+        dur_max = float(self.options.get("dur_max", 5.0))
+        if dur_min > dur_max:
+            dur_min, dur_max = dur_max, dur_min
             
-        window_frames_analyze = int(window_duration * analyze_fps)
+        # Evaluate multiple window durations between min and max (step 0.5s)
+        window_durations = np.arange(dur_min, dur_max + 0.1, 0.5).tolist()
+        if not window_durations:
+            window_durations = [dur_min]
+            
+        window_frames_list = [max(1, int(wd * analyze_fps)) for wd in window_durations]
         
         # Extract features frame by frame
         # We will collect metrics for each analyzed frame
@@ -148,46 +152,50 @@ class AiMomentsEngine:
         self.progress_cb("Subject Detection", 0.5)
         self.progress_cb("Motion Analysis", 0.6)
         
-        # Aggregate into sliding windows
+        # Aggregate into sliding windows of varying durations
         moments = []
         step = max(1, int(analyze_fps * 1.0)) # 1 second slide
         
-        for start_i in range(0, len(metrics) - window_frames_analyze, step):
-            end_i = start_i + window_frames_analyze
-            window = metrics[start_i:end_i]
-            
-            w_action = np.mean([m["action"] for m in window])
-            w_epic = np.max([m["epic"] for m in window]) # Scene cut usually spikes
-            w_char = np.mean([m["char"] for m in window])
-            
-            # 4. Loopable (MSE between first and last frame of window)
-            w_loop = 0.0
-            if self.options.get("crit_loopable", False):
-                f1 = window[0]["gray_frame"]
-                f2 = window[-1]["gray_frame"]
-                mse = np.mean((f1 - f2) ** 2)
-                # Lower MSE is better, invert it (max expected ~ 10000)
-                w_loop = max(0, 1.0 - (mse / 5000.0))
+        for start_i in range(0, len(metrics), step):
+            for wf in window_frames_list:
+                end_i = start_i + wf
+                if end_i > len(metrics):
+                    continue
+                    
+                window = metrics[start_i:end_i]
                 
-            # 5. DMD (Contrast of the center area as a proxy for LED readability)
-            w_dmd = 0.0
-            if self.options.get("crit_dmd", False):
-                # Just sample middle frame
-                mid_frame = window[len(window)//2]["gray_frame"]
-                # high contrast -> std dev
-                w_dmd = np.std(mid_frame)
+                w_action = np.mean([m["action"] for m in window])
+                w_epic = np.max([m["epic"] for m in window]) # Scene cut usually spikes
+                w_char = np.mean([m["char"] for m in window])
                 
-            moments.append({
-                "start_idx": window[0]["frame_idx"],
-                "end_idx": window[-1]["frame_idx"],
-                "start_time": window[0]["time"],
-                "end_time": window[-1]["time"],
-                "action": w_action,
-                "epic": w_epic,
-                "char": w_char,
-                "loop": w_loop,
-                "dmd": w_dmd
-            })
+                # 4. Loopable (MSE between first and last frame of window)
+                w_loop = 0.0
+                if self.options.get("crit_loopable", False):
+                    f1 = window[0]["gray_frame"]
+                    f2 = window[-1]["gray_frame"]
+                    mse = np.mean((f1 - f2) ** 2)
+                    # Lower MSE is better, invert it (max expected ~ 10000)
+                    w_loop = max(0, 1.0 - (mse / 5000.0))
+                    
+                # 5. DMD (Contrast of the center area as a proxy for LED readability)
+                w_dmd = 0.0
+                if self.options.get("crit_dmd", False):
+                    # Just sample middle frame
+                    mid_frame = window[len(window)//2]["gray_frame"]
+                    # high contrast -> std dev
+                    w_dmd = np.std(mid_frame)
+                    
+                moments.append({
+                    "start_idx": window[0]["frame_idx"],
+                    "end_idx": window[-1]["frame_idx"],
+                    "start_time": window[0]["time"],
+                    "end_time": window[-1]["time"],
+                    "action": w_action,
+                    "epic": w_epic,
+                    "char": w_char,
+                    "loop": w_loop,
+                    "dmd": w_dmd
+                })
             
         self.progress_cb("DMD Analysis", 0.8)
             
