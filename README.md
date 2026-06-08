@@ -117,6 +117,10 @@ Want to use the tool without the GUI? Here are the most powerful commands.
 
 To keep this README clean, our most powerful features have dedicated guides. Discover what the engine can really do:
 
+### [🤖 AI Moments & Studio Timeline](docs/AI_MOMENTS.md)
+Tired of manually searching for the best part of a 2-hour movie? The **AI Moments Engine** analyzes your video to find the most action-packed, epic, and DMD-friendly scenes. Trim them perfectly using the interactive **Studio Timeline** loop playback, or let the CLI extract the top 5 moments automatically! 
+👉 **[Read the AI Moments Guide](docs/AI_MOMENTS.md)**
+
 ### [🎥 Cinematic Auto-Action Framing](docs/ADVANCED_FEATURES.md#auto-action-framing)
 When scaling a 1080p video down to a 128x32 matrix, subjects become microscopic. The **Auto-Action Framing** feature uses YOLOv8 ONNX AI to dynamically track subjects, pan the camera, and smartly crop the floor/ceiling to keep the action centered and visible on your DMD!
 👉 **[Read the Advanced Features Guide](docs/ADVANCED_FEATURES.md)**
