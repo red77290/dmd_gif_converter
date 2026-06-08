@@ -299,7 +299,6 @@ class ActionsPanelMixin:
                     import send2trash
                     safe_delete = send2trash.send2trash
                 except ImportError:
-                    import os
                     self.after(0, lambda: self._log("send2trash module missing. Deleting permanently instead.", "warning"))
                     safe_delete = os.remove
                 
