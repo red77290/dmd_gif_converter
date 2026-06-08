@@ -56,6 +56,7 @@ from pathlib import Path
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
+import json
 
 # ── Module-level logger ───────────────────────────────────────────────────────
 logging.basicConfig(
@@ -272,6 +273,12 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         # ── Tkinter vars — GIF Search ─────────────────────────────────────────
         self.v_search_keyword = tk.StringVar(value="")
         self.v_search_qty     = tk.StringVar(value="10")
+        self.v_search_engine  = tk.StringVar(value="DuckDuckGo")
+        self.v_search_min_w   = tk.StringVar(value="")
+        self.v_search_min_h   = tk.StringVar(value="")
+        self.v_search_ratio   = tk.StringVar(value="All")
+        self.v_tenor_api_key  = tk.StringVar(value="")
+        self.v_giphy_api_key  = tk.StringVar(value="")
 
         # ── Tkinter vars — LED pixel simulation ───────────────────────────────
         self.v_led_sim = tk.BooleanVar(value=True)   # ON by default
@@ -323,6 +330,10 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         self._build_right_panel()   # Column 2
         self._build_global_log_panel()
         
+        self._load_api_keys()
+        self.v_tenor_api_key.trace_add("write", lambda *_: self._save_api_keys())
+        self.v_giphy_api_key.trace_add("write", lambda *_: self._save_api_keys())
+        
         # Initialize default state for 'Let me handle it'
         self.after(50, lambda: self._on_let_me_handle_toggle() if hasattr(self, '_on_let_me_handle_toggle') else None)
 
@@ -331,10 +342,23 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         # Hidden by default
         self._log_panel.grid_columnconfigure(0, weight=1)
         
+        top_bar = ctk.CTkFrame(self._log_panel, fg_color="transparent")
+        top_bar.grid(row=0, column=0, sticky="ew", padx=12, pady=(4, 2))
+        
         ctk.CTkLabel(
-            self._log_panel, text="📋  Conversion log",
+            top_bar, text="📋  Conversion log",
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
-        ).grid(row=0, column=0, padx=12, pady=(4, 2), sticky="w")
+        ).pack(side="left")
+        
+        self.v_log_level = tk.StringVar(value="INFO")
+        self._opt_log_level = ctk.CTkOptionMenu(
+            top_bar, variable=self.v_log_level,
+            values=["DEBUG", "INFO", "WARNING", "ERROR"],
+            width=90, height=24, font=ctk.CTkFont(size=11),
+            fg_color="#3a3a4a", button_color="#50506b", button_hover_color="#6a6a8b",
+            command=self._on_log_level_change
+        )
+        self._opt_log_level.pack(side="right")
         
         self._log_box = ctk.CTkTextbox(
             self._log_panel, font=ctk.CTkFont(size=11, family="Courier"), wrap="word", height=120
@@ -343,12 +367,33 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         self._log_box.configure(state="disabled")
         
         self._log_visible = False
+        self._all_logs = []
+
+    def _on_log_level_change(self, val):
+        levels = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
+        current_lvl = levels.get(val, 20)
+        
+        if hasattr(self, "_log_box"):
+            self._log_box.configure(state="normal")
+            self._log_box.delete("1.0", "end")
+            
+            for msg_lvl, msg in getattr(self, "_all_logs", []):
+                if msg_lvl >= current_lvl:
+                    self._log_box.insert("end", msg + "\n")
+                    
+            self._log_box.configure(state="disabled")
+            self._log_box.see("end")
 
     def toggle_log_panel(self):
         if self._log_visible:
             self._log_panel.grid_remove()
         else:
             self._log_panel.grid(row=1, column=0, columnspan=3, sticky="ew")
+            # Automatically enable detailed logs when unfolded
+            if hasattr(self, "v_log_level") and self.v_log_level.get() == "WARNING":
+                self.v_log_level.set("DEBUG")
+                if hasattr(self, "_on_log_level_change"):
+                    self._on_log_level_change("DEBUG")
         self._log_visible = not self._log_visible
 
     # ── Left panel : file list ────────────────────────────────────────────────
@@ -366,6 +411,26 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         # Clear per-gif configs on close
         self._per_gif_configs.clear()
         self.destroy()
+
+    def _load_api_keys(self):
+        conf = Path("dmd_api_keys.json")
+        if conf.exists():
+            try:
+                data = json.loads(conf.read_text())
+                self.v_tenor_api_key.set(data.get("tenor", ""))
+                self.v_giphy_api_key.set(data.get("giphy", ""))
+            except Exception as exc:
+                logger.warning("Could not read dmd_api_keys.json: %s", exc)
+
+    def _save_api_keys(self):
+        try:
+            data = {
+                "tenor": self.v_tenor_api_key.get(),
+                "giphy": self.v_giphy_api_key.get()
+            }
+            Path("dmd_api_keys.json").write_text(json.dumps(data, indent=4))
+        except Exception as exc:
+            logger.warning("Failed to save dmd_api_keys.json: %s", exc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

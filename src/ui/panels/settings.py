@@ -248,7 +248,30 @@ class SettingsPanelMixin:
             parent,
             text="  ↳ Move trim Start slider to place the window anywhere in the video.",
             text_color="#667788", font=ctk.CTkFont(size=10),
-        ).pack(padx=8, pady=(0, 6), anchor="w")
+            justify="left"
+        ).pack(fill="x", padx=10, pady=(0, 6), anchor="w")
+
+        # ── API Keys ──────────────────────────────────────────────────────────
+        section("🔑  Search API Keys (Optional)")
+        
+        api_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        api_frame.pack(fill="x", padx=8, pady=2)
+        api_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(api_frame, text="Tenor API Key", width=100, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6), pady=2)
+        ctk.CTkEntry(api_frame, textvariable=self.v_tenor_api_key, show="*").grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+        
+        ctk.CTkLabel(api_frame, text="Giphy API Key", width=100, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=1, column=0, padx=(4, 6), pady=2)
+        ctk.CTkEntry(api_frame, textvariable=self.v_giphy_api_key, show="*").grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+
+        ctk.CTkLabel(
+            parent,
+            text="  ↳ Required to unlock Tenor and Giphy in the GIF Search panel.\n  DuckDuckGo remains free and anonymous without any key.",
+            text_color="#667788", font=ctk.CTkFont(size=10),
+            justify="left"
+        ).pack(fill="x", padx=10, pady=(0, 6), anchor="w")
 
         self._on_max_dur_toggle()   # set initial state
 
@@ -1428,6 +1451,8 @@ class SettingsPanelMixin:
             "max_duration": self.v_max_duration.get() if self.v_max_dur_enabled.get() else 0.0,
             # auto-colorimetry
             "auto_color_enabled": self.v_auto_color_enabled.get(),
+            # Log level
+            "log_level": "DEBUG", # Always request debug logs so UI can filter them retroactively
         } | (
             # "Let Me Handle It" overrides — force the 5 managed params ON
             {

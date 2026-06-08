@@ -29,3 +29,28 @@ python3 -m src.converter.cli gifs_MyFolder --let-me-handle-it --workers 8 --reje
 ```
 
 That's it. The script will crunch the videos and delete any `.gif` files that do not meet the 50% visibility threshold.
+
+---
+
+---
+
+## 🔍 3. Download and Convert in One Step
+
+Thanks to the modular architecture, GIF search (via DuckDuckGo, Tenor, or Giphy) is directly integrated into the tool! No need to download your media manually. You can do everything in a single command:
+
+```bash
+python3 -m src.converter.cli --search-keyword "arcade" --engine DuckDuckGo --limit 5 --let-me-handle-it
+```
+
+This command will download 5 GIFs related to "arcade", and then automatically convert them on the fly using all the AI parameters!
+
+---
+
+## 📝 4. Monitoring and Logs (UI & CLI)
+
+The graphical interface now features a **dynamic log panel** (click on "📝 Show / Hide Logs").
+There you will find a dropdown menu to adjust the verbosity level on the fly:
+- **INFO**: (Default) Displays quality scores, conversion summaries, and warnings.
+- **DEBUG**: Displays absolutely all internal processing, including complex FFMPEG outputs (very useful for analyzing a specific issue).
+
+If you are using the CLI, you can get the exact same level of detail with the `--log-level DEBUG` argument (or simply `--verbose`).

@@ -708,7 +708,10 @@ class PreviewPanelMixin:
                 out_gif = src
             else:
                 out_gif = os.path.join(tmpdir, "preview.gif")
-                success, msg = process_file(src, out_gif, params, start_s, end_s)
+                success, msg = process_file(
+                    src, out_gif, params, start_s, end_s,
+                    callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: getattr(self, "_log", lambda x, y: None)(_m, _lv))
+                )
 
                 if not success or not os.path.isfile(out_gif):
                     self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))

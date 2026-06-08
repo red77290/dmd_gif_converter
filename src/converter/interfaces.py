@@ -3,35 +3,51 @@ from typing import Dict, Any, Optional, Tuple, List
 from pathlib import Path
 
 class IConverter(ABC):
-    """Contrat de base pour convertir un fichier."""
-    
+    """Base contract for converting a single file."""
+
     @abstractmethod
     def process(self, src_path: str, out_path: str, params: Dict[str, Any], start_s: Optional[float] = None, end_s: Optional[float] = None) -> Tuple[bool, str]:
-        """Traite le fichier source et génère le fichier de sortie.
-        Retourne un tuple (succès: bool, message: str).
+        """Process the source file and produce the output file.
+
+        Returns a tuple (success: bool, message: str).
         """
         pass
 
 class IMetadataExtractor(ABC):
-    """Contrat de base pour l'extraction de métadonnées d'une vidéo/GIF."""
-    
+    """Base contract for extracting metadata from a video / GIF."""
+
     @abstractmethod
     def get_metadata(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """Retourne les métadonnées ou None en cas d'échec."""
+        """Return a metadata dict or None on failure."""
         pass
 
 class IQualityScorer(ABC):
-    """Contrat de base pour l'évaluation de la qualité de la conversion."""
-    
+    """Base contract for evaluating conversion quality."""
+
     @abstractmethod
     def evaluate(self, gif_path: str) -> float:
-        """Evalue un GIF (ex: 128x32) et retourne un score entre 0.0 et 100.0."""
+        """Evaluate a GIF (e.g. 128×32) and return a score between 0.0 and 100.0."""
         pass
 
 class IBatchOrchestrator(ABC):
-    """Contrat de base pour l'orchestration du traitement par lots."""
-    
+    """Base contract for batch (folder) processing."""
+
     @abstractmethod
     def process_folder(self, input_folder: str, output_folder: str, params: Dict[str, Any], progress_callback=None) -> List[Tuple[str, str]]:
-        """Traite tous les fichiers d'un dossier. Retourne une liste de chemins générés."""
+        """Process all supported files in a folder. Returns a list of generated file paths."""
+        pass
+
+class ISearchEngine(ABC):
+    """Base contract for GIF search engines (DuckDuckGo, Tenor, Giphy, etc)."""
+    
+    @abstractmethod
+    def search(
+        self,
+        keyword: str,
+        qty: int,
+        filters: Any,  # GifSearchFilter
+        api_key: str,
+        cancelled: Any, # Callable[[], bool]
+    ) -> List[Any]: # List[GifSearchResult]
+        """Perform search and return a list of results."""
         pass

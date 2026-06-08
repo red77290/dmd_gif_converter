@@ -80,7 +80,10 @@ class AutoActionConfig:
     # ── VNext Priority 10 — Auto Tuning Dataset Generator ────────────────────
     auto_tuning_dataset_dir: Optional[str] = None  # None = disabled
 
-    
+    # ── Search Engines API Keys ─────────────────────────────────────────────
+    tenor_api_key: str = ""
+    giphy_api_key: str = ""
+
     # API backward-compatibility only
     out_w: int = 0
     out_h: int = 0

@@ -258,11 +258,12 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     # Resolve font path
     script_dir = Path(__file__).parent
-    font_path = script_dir / "media" / "fonts" / text_font_file
+    project_root = script_dir.parent.parent
+    font_path = project_root / "media" / "fonts" / text_font_file
     if not font_path.exists():
-        font_path = script_dir / "media" / text_font_file
+        font_path = project_root / "media" / text_font_file
         if not font_path.exists():
-            font_path = script_dir / text_font_file
+            font_path = Path(text_font_file) # Check if absolute or relative to CWD
             if not font_path.exists():
                 log(f"[TEXT  ] Font file '{text_font_file}' not found. Text overlay disabled.", "error")
                 text_overlay_enabled = False
@@ -501,6 +502,11 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         
     result_stderr = process.stderr.read()
     process.stderr.close()
+
+    if (p.get("verbose") or p.get("log_level") == "DEBUG") and result_stderr:
+        ffmpeg_log = result_stderr.decode(errors="replace").strip()
+        if ffmpeg_log:
+            log(f"[FFMPEG] {filename}:\n{ffmpeg_log}", "debug")
 
     if temp_pre_src and os.path.isdir(temp_pre_src):
         import shutil

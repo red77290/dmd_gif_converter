@@ -111,6 +111,14 @@ class AppState(IModel):
         # ── GIF Search ────────────────────────────────────────────────────────
         self.v_search_keyword = tk.StringVar(value="")
         self.v_search_qty     = tk.StringVar(value="10")
+        self.v_search_engine  = tk.StringVar(value="DuckDuckGo")
+        self.v_search_min_w   = tk.StringVar(value="")
+        self.v_search_min_h   = tk.StringVar(value="")
+        self.v_search_ratio   = tk.StringVar(value="All")
+        
+        # ── API Keys ──────────────────────────────────────────────────────────
+        self.v_tenor_api_key  = tk.StringVar(value="")
+        self.v_giphy_api_key  = tk.StringVar(value="")
 
         # ── LED pixel simulation ──────────────────────────────────────────────
         self.v_led_sim = tk.BooleanVar(value=True)

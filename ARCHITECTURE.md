@@ -147,6 +147,7 @@ All interfaces are defined using Python's `abc.ABC` mechanism, which **enforces 
 | `IMetadataExtractor` | `get_metadata(file_path)` | Contract for reading video metadata |
 | `IQualityScorer` | `evaluate(gif_path)` | Contract for DMD quality scoring |
 | `IBatchOrchestrator` | `process_folder(in, out, params, …)` | Contract for parallel batch processing |
+| `ISearchEngine` | `search(keyword, qty, filters, …)` | Contract for querying external GIF engines (DuckDuckGo, Tenor, Giphy) |
 
 ```python
 # Example: IConverter enforces a single method
@@ -209,6 +210,10 @@ classDiagram
         <<interface>>
         +process_folder(in, out, params, cb) list
     }
+    class ISearchEngine {
+        <<interface>>
+        +search(keyword, qty, filters, api_key, cancelled) list
+    }
 
     class FFmpegConverter {
         -default_params: dict
@@ -227,6 +232,18 @@ classDiagram
         +apply(gif_path, out_path, params) bool
     }
 
+    class GifSearchService {
+        -engines: dict
+        +search(keyword, qty, engine, filters, ...) list
+        +download(result, dest_dir, index, keyword) str
+    }
+    class DuckDuckGoSearchEngine {
+        +search(...) list
+    }
+    class TenorSearchEngine {
+        +search(...) list
+    }
+
     class core_process_file {
         <<function facade>>
         +process_file(src, out, params, ...) tuple
@@ -235,6 +252,9 @@ classDiagram
 
     IConverter <|.. FFmpegConverter : implements
     IBatchOrchestrator <|.. BatchOrchestrator : implements
+    ISearchEngine <|.. DuckDuckGoSearchEngine : implements
+    ISearchEngine <|.. TenorSearchEngine : implements
+    GifSearchService --> ISearchEngine : delegates to
     core_process_file --> FFmpegConverter : delegates to
     core_process_file --> BatchOrchestrator : delegates to
     FFmpegConverter --> PillowOverlayService : uses (text fallback)

@@ -32,7 +32,7 @@ class PillowOverlayService:
         # Resolve font file path
         import os
         _media_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
             "media", "fonts"
         )
         font_path = os.path.join(_media_dir, font_file) if font_file else None

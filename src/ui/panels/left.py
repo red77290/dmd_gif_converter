@@ -11,6 +11,8 @@ from pathlib import Path
 import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
+import customtkinter as ctk
+from PIL import Image, ImageTk
 
 from src.converter.core import (
     get_metadata, process_file, process_folder,
@@ -18,37 +20,16 @@ from src.converter.core import (
 )
 from src.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
 from src.converter.colorimetry import analyze_and_compensate as _ui_analyze_color
+from src.converter.services.gif_search_service import (
+    GifSearchService, GifSearchFilter, GIF_SEARCH_AVAILABLE,
+)
 from src.ui.widgets import _InfoBadge
 from src.ui.constants import *
-import os
-import glob
-import logging
-import shutil
-import tempfile
-import threading
-from pathlib import Path
-import tkinter as tk
-import tkinter.ttk as ttk
-from tkinter import filedialog, messagebox
-import customtkinter as ctk
-from PIL import Image, ImageTk
 from src.ui.dmd_led_sim import LED_SIM_SCALE, LED_SIM_GAP, LED_SIM_MAX_W, apply_led_grid as _apply_led_grid
 
 logger = logging.getLogger(__name__)
 
-# ── GIF Search optional dependencies ─────────────────────────────────────────
-# Package was renamed duckduckgo_search → ddgs ; try both for backward compat.
-try:
-    import requests as _requests
-    try:
-        from ddgs import DDGS as _DDGS          # new name (v9+)
-    except ImportError:
-        from duckduckgo_search import DDGS as _DDGS  # legacy name (<=8.x)
-    _gif_search_available = True
-except ImportError:
-    _requests = None
-    _DDGS = None
-    _gif_search_available = False
+_gif_search_available = GIF_SEARCH_AVAILABLE  # backward-compat alias
 
 
 class LeftPanelMixin:
@@ -153,7 +134,7 @@ class LeftPanelMixin:
         head.grid(row=0, column=0, padx=8, pady=(6, 2), sticky="ew")
         head.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            head, text="🔍  GIF Search  (DuckDuckGo)",
+            head, text="🔍  GIF Search",
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#5ba3d9"
         ).grid(row=0, column=0, sticky="w")
 
@@ -186,7 +167,42 @@ class LeftPanelMixin:
             command=self._search_and_download,
             state="normal" if _gif_search_available else "disabled"
         )
-        self._btn_search.grid(row=0, column=2)
+        # Filters toggle
+        self._filters_visible = False
+        self._btn_toggle_filters = ctk.CTkButton(
+            sf, text="▼ Advanced Filters & Engines", height=24,
+            fg_color="transparent", hover_color="#2a2a3e",
+            text_color="#888899", anchor="w",
+            command=self._toggle_search_filters
+        )
+        self._btn_toggle_filters.grid(row=2, column=0, padx=8, pady=(0, 2), sticky="ew")
+
+        # Filters frame
+        self._filters_frame = ctk.CTkFrame(sf, fg_color="transparent")
+        # Hidden by default, will grid at row=3 when toggled
+        
+        # Engine
+        self._engine_menu = ctk.CTkOptionMenu(
+            self._filters_frame, variable=self.v_search_engine,
+            values=["DuckDuckGo", "Tenor 🔒", "Giphy 🔒"], height=24
+        )
+        self._engine_menu.pack(fill="x", pady=(0, 4))
+        
+        # Dimensions & Layout
+        dim_f = ctk.CTkFrame(self._filters_frame, fg_color="transparent")
+        dim_f.pack(fill="x")
+        
+        self._min_w_entry = ctk.CTkEntry(dim_f, textvariable=self.v_search_min_w, placeholder_text="Min W", width=55, height=24)
+        self._min_w_entry.pack(side="left", padx=(0, 4))
+        
+        self._min_h_entry = ctk.CTkEntry(dim_f, textvariable=self.v_search_min_h, placeholder_text="Min H", width=55, height=24)
+        self._min_h_entry.pack(side="left", padx=(0, 4))
+        
+        self._ratio_menu = ctk.CTkOptionMenu(
+            dim_f, variable=self.v_search_ratio,
+            values=["All", "Landscape", "Portrait", "Square"], width=80, height=24
+        )
+        self._ratio_menu.pack(side="left", fill="x", expand=True)
 
         # Cancel button (hidden by default)
         self._btn_cancel_dl = ctk.CTkButton(
@@ -202,7 +218,17 @@ class LeftPanelMixin:
             sf, text="" if _gif_search_available else "⚠ duckduckgo-search / requests not installed",
             text_color="#556677", font=ctk.CTkFont(size=10)
         )
-        self._search_status.grid(row=3, column=0, padx=8, pady=(2, 6), sticky="w")
+        self._search_status.grid(row=5, column=0, padx=8, pady=(2, 6), sticky="w")
+
+    def _toggle_search_filters(self):
+        if self._filters_visible:
+            self._filters_frame.grid_remove()
+            self._btn_toggle_filters.configure(text="▼ Advanced Filters & Engines")
+            self._filters_visible = False
+        else:
+            self._filters_frame.grid(row=3, column=0, padx=8, pady=2, sticky="ew")
+            self._btn_toggle_filters.configure(text="▲ Hide Filters")
+            self._filters_visible = True
 
     def _search_and_download(self):
         """Validate inputs and launch the download thread."""
@@ -232,6 +258,34 @@ class LeftPanelMixin:
             messagebox.showwarning("Search", "Quantity must be a number between 1 and 300.")
             self._qty_entry.focus_set()
             return
+            
+        engine_full = self.v_search_engine.get()
+        engine = engine_full.split()[0]  # Remove 🔒 if present
+        
+        if engine == "Tenor" and not self.v_tenor_api_key.get().strip():
+            messagebox.showerror(
+                "🔑 API Key Required",
+                "The Tenor engine requires an API key.\n\n"
+                "Go to the 'Settings' panel (right side), scroll to the "
+                "'Search API Keys' section and enter your Tenor API key.",
+            )
+            return
+        if engine == "Giphy" and not self.v_giphy_api_key.get().strip():
+            messagebox.showerror(
+                "🔑 API Key Required",
+                "The Giphy engine requires an API key.\n\n"
+                "Go to the 'Settings' panel (right side), scroll to the "
+                "'Search API Keys' section and enter your Giphy API key.",
+            )
+            return
+            
+        try:
+            min_w = int(self.v_search_min_w.get()) if self.v_search_min_w.get().strip() else 0
+            min_h = int(self.v_search_min_h.get()) if self.v_search_min_h.get().strip() else 0
+        except ValueError:
+            min_w, min_h = 0, 0
+            
+        ratio = self.v_search_ratio.get()
 
         if self._download_active:
             messagebox.showwarning("Busy", "A download is already in progress.")
@@ -246,7 +300,7 @@ class LeftPanelMixin:
 
         # UI feedback
         self._btn_search.configure(state="disabled", text="⏳…")
-        self._btn_cancel_dl.grid(row=2, column=0, padx=8, pady=(0, 2), sticky="ew")
+        self._btn_cancel_dl.grid(row=4, column=0, padx=8, pady=(0, 2), sticky="ew")
         self._search_status.configure(
             text=f"🔍 Searching '{keyword}'…", text_color="#5ba3d9"
         )
@@ -256,38 +310,40 @@ class LeftPanelMixin:
 
         threading.Thread(
             target=self._run_download,
-            args=(keyword, qty, tmpdir),
+            args=(keyword, qty, tmpdir, engine, min_w, min_h, ratio),
             daemon=True
         ).start()
 
-    def _run_download(self, keyword: str, qty: int, tmpdir: str):
-        """Background thread: search + download GIFs one by one."""
+    def _run_download(self, keyword: str, qty: int, tmpdir: str, engine: str, min_w: int, min_h: int, ratio: str):
+        """Background thread: delegate search + download to :class:`GifSearchService`."""
         downloaded = 0
-        errors     = 0
+        errors = 0
 
         def _ui(fn):
             self.after(0, fn)
 
+        api_key = ""
+        if engine == "Tenor":
+            api_key = self.v_tenor_api_key.get().strip()
+        elif engine == "Giphy":
+            api_key = self.v_giphy_api_key.get().strip()
+
+        service = GifSearchService()
+        filters = GifSearchFilter(min_width=min_w, min_height=min_h, ratio=ratio)
+
         try:
             _ui(lambda: self._search_status.configure(
-                text=f"🔍 Querying DuckDuckGo…", text_color="#5ba3d9"
+                text=f"🔍 Querying {engine}…", text_color="#5ba3d9"
             ))
-            results = []
-            for r in _DDGS().images(
-                keyword + " gif",       # positional 'query' (ddgs v7+) — replaces keywords=
-                safesearch="off",
-                type_image="gif",
-                max_results=qty,
-            ):
-                if self._download_cancel:
-                    break
-                results.append(r)
+            results = service.search(
+                keyword, qty, engine, filters,
+                api_key=api_key,
+                cancel_flag=lambda: self._download_cancel,
+            )
         except Exception as exc:
-            logger.warning("DuckDuckGo search failed: %s", exc)
-            _err = f"Search failed: {exc}"   # capture before lambda — exc is cleared after except block
-            _ui(lambda: self._on_download_done(
-                keyword, 0, 0, qty, error=_err
-            ))
+            logger.warning("Search failed: %s", exc)
+            _err = str(exc)
+            _ui(lambda: self._on_download_done(keyword, 0, 0, qty, error=f"Search failed: {_err}"))
             return
 
         if not results:
@@ -303,72 +359,31 @@ class LeftPanelMixin:
             if self._download_cancel:
                 break
 
-            image_url = result.get("image")
-            if not image_url:
-                continue
-
-            # Build filename
-            basename = os.path.basename(image_url).split("?")[0]
-            if not basename or "." not in basename:
-                basename = f"{keyword.replace(' ', '_')}_{i + 1}.gif"
-            # Ensure .gif extension
-            if not basename.lower().endswith(".gif"):
-                basename = os.path.splitext(basename)[0] + ".gif"
-            # Sanitise
-            safe_name = "".join(c if c.isalnum() or c in ("_", "-", ".") else "_" for c in basename)
-            file_path  = os.path.join(tmpdir, safe_name)
-
-            # Avoid overwriting if same name
-            if os.path.exists(file_path):
-                stem, ext = os.path.splitext(safe_name)
-                file_path = os.path.join(tmpdir, f"{stem}_{i}{ext}")
-
             try:
-                resp = _requests.get(image_url, stream=True, timeout=12)
-                resp.raise_for_status()
-
-                # Validate Content-Type (best-effort)
-                ct = resp.headers.get("Content-Type", "")
-                if ct and "image" not in ct and "octet-stream" not in ct:
-                    logger.debug("Skipping non-image URL: %s (CT=%s)", image_url, ct)
-                    errors += 1
-                    continue
-
-                with open(file_path, "wb") as fh:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        if self._download_cancel:
-                            break
-                        fh.write(chunk)
-
-                if self._download_cancel:
-                    # Remove incomplete file
-                    try:
-                        os.remove(file_path)
-                    except OSError:
-                        pass
-                    break
-
-                downloaded += 1
-                _fp = file_path
-                _ui(lambda p=_fp: self._add_downloaded_gif(p))
-                prog = downloaded / total
-                _ui(lambda v=prog: self._progress.set(v))
-                _ui(lambda d=downloaded, t=total: self._search_status.configure(
-                    text=f"⬇ {d}/{t} downloaded…", text_color="#5ba3d9"
-                ))
-
-            except _requests.exceptions.Timeout:
-                errors += 1
-                logger.warning("Timeout downloading %s", image_url)
-                _ui(lambda u=image_url: self._log(f"   ⚠ Timeout: {u[:60]}…", "error"))
-            except _requests.exceptions.RequestException as exc:
-                errors += 1
-                logger.warning("Download error %s: %s", image_url, exc)
-                _ui(lambda e=str(exc): self._log(f"   ⚠ Download error: {e[:80]}", "error"))
+                file_path = service.download(
+                    result, tmpdir, i, keyword,
+                    cancel_flag=lambda: self._download_cancel,
+                )
             except Exception as exc:
                 errors += 1
-                logger.warning("Unexpected error for %s: %s", image_url, exc)
-                _ui(lambda e=str(exc): self._log(f"   ⚠ Unexpected: {e[:80]}", "error"))
+                logger.warning("Download error: %s", exc)
+                _ui(lambda e=str(exc): self._log(f"   ⚠ Download error: {e[:80]}", "error"))
+                continue
+
+            if file_path is None:
+                if not self._download_cancel:
+                    errors += 1  # skipped (non-image content-type)
+                continue
+
+            downloaded += 1
+            _fp = file_path
+            _ui(lambda p=_fp: self._add_downloaded_gif(p))
+            prog = downloaded / total
+            _ui(lambda v=prog: self._progress.set(v))
+            _ui(lambda d=downloaded, t=total: self._search_status.configure(
+                text=f"⬇ {d}/{t} downloaded…", text_color="#5ba3d9"
+            ))
+
 
         _ui(lambda: self._on_download_done(keyword, downloaded, errors, total))
 
