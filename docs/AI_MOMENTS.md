@@ -16,9 +16,21 @@ The AI Moments engine runs a multi-pass analysis on your video:
 
 1. Open a video in the UI.
 2. Go to the **AI Moments** tab.
-3. Click "Generate Best Moments". 
-4. The system will analyze the video (this may take a few minutes for long videos).
-5. A list of the top-ranked moments will appear. Click on any moment to instantly preview it and optionally convert it!
+3. Use the **Studio Timeline** to preview your video.
+4. Click **Generate AI Moments** to auto-extract the best scenes, or use the **[ Set IN ]** and **[ Set OUT ]** buttons to manually extract a specific moment.
+5. Manually extracted moments and AI moments are automatically added to your conversion queue!
+
+### Studio Timeline & Playback
+You can use the **▶ Play Selection** button to endlessly loop your currently selected IN/OUT points, allowing you to perfectly frame your custom cuts before extracting them.
+
+## Usage in the CLI
+
+You can also automate AI Moments extraction from the command line:
+
+```bash
+# Analyze all videos in the folder, extract the top 5 moments per video, and convert them to DMD GIFs
+./dmd_gif_converter.py my_videos/ --ai-moments --ai-moments-count 5 --ai-moments-strategy Action
+```
 
 ## Text Magic (Animations)
 

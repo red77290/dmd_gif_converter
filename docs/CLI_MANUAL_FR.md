@@ -37,6 +37,16 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `log-level` | `--log-level` | `WARNING` | Définit le niveau de log (DEBUG, INFO, WARNING, ERROR). Par défaut WARNING (affiche la barre de progression). |
 | `verbose` | `--verbose` / `-v` | `False` | Alias pour `--log-level DEBUG`. Affiche les logs détaillés de FFMPEG. |
 
+### Extraction AI Moments
+
+| Paramètre | Flag | Défaut | Description |
+|-----------|------|---------|-------------|
+| `ai_moments` | `--ai-moments` | `False` | Extrait automatiquement les meilleurs moments des vidéos avant la conversion. |
+| `ai_moments_count` | `--ai-moments-count` | `10` | Nombre maximum de moments à extraire par vidéo. |
+| `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`). |
+| `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes. |
+| `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes. |
+
 **Paramètres avancés** (interface uniquement — tous défaut = aucun changement) :
 
 | Paramètre | Défaut | Description |
