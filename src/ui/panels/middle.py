@@ -266,7 +266,6 @@ class MiddlePanelMixin:
             safe_delete = send2trash.send2trash
         except ImportError:
             self._log("send2trash module missing. Deleting permanently instead.", "warning")
-            import os
             safe_delete = os.remove
             
         for data in self._converted_data.values():
