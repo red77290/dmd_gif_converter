@@ -67,7 +67,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 ## 🚀 Quick start
 
 ```bash
-git https://github.com/red77290/dmd_gif_converter.git
+git clone https://github.com/red77290/dmd_gif_converter.git
 cd dmd_gif_converter
 ```
 
@@ -107,16 +107,25 @@ Want to use the tool without the GUI? Here are the most powerful commands.
 
 ---
 
-## 📚 Full Documentation
+## 🌟 Core Features & Documentation
 
-To keep this README short, all detailed documentation has been moved to the `docs/` folder:
+To keep this README clean, our most powerful features have dedicated guides. Discover what the engine can really do:
 
-- **[⚙️ CLI Manual & Full Parameters](docs/CLI_MANUAL.md)**
-  Complete reference for all 50+ CLI arguments, colorimetry tuning, and scroll settings.
-- **[🤖 Advanced Features & Architecture](docs/ADVANCED_FEATURES.md)**
-  Deep dives into the **AI Auto Action Framing**, **Smart Color Boost**, and the exact rendering pipeline.
-- **[❓ Troubleshooting](docs/TROUBLESHOOTING.md)**
-  Solutions for common errors, OpenCV installation issues, and FFmpeg configuration.
+### [🎥 Cinematic Auto-Action Framing](docs/ADVANCED_FEATURES.md#auto-action-framing)
+When scaling a 1080p video down to a 128x32 matrix, subjects become microscopic. The **Auto-Action Framing** feature uses YOLOv8 ONNX AI to dynamically track subjects, pan the camera, and smartly crop the floor/ceiling to keep the action centered and visible on your DMD!
+👉 **[Read the Advanced Features Guide](docs/ADVANCED_FEATURES.md)**
+
+### [🎨 Smart Color Boost & Filters](docs/ADVANCED_FEATURES.md#smart-color-boost)
+LED matrices wash out dark colors and overdrive bright ones. **Smart Color Boost** uses heuristic analysis to automatically inject the perfect amount of brightness, contrast, and saturation into your GIF.
+👉 **[Read the Advanced Features Guide](docs/ADVANCED_FEATURES.md)**
+
+### [💻 CLI Automation Mastery](docs/CLI_MANUAL.md)
+Everything you can do in the UI, you can automate in the Terminal. Download GIFs straight from DuckDuckGo, process entire folders in parallel, overlay pixel-art text, and automatically trash low-quality conversions!
+👉 **[Read the CLI Manual](docs/CLI_MANUAL.md)**
+
+### [❓ Troubleshooting & Setup](docs/TROUBLESHOOTING.md)
+Running into OpenCV or FFmpeg issues? Need help with installation on a specific OS?
+👉 **[Read the Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
 
 
 ---

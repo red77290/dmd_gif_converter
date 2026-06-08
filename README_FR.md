@@ -66,7 +66,7 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 ## 🚀 Démarrage rapide
 
 ```bash
-git clone hhttps://github.com/red77290/dmd_gif_converter.git
+git clone https://github.com/red77290/dmd_gif_converter.git
 cd dmd_gif_converter
 ```
 
@@ -106,16 +106,25 @@ Vous préférez utiliser le script sans interface ? Voici les commandes les plus
 
 ---
 
-## 📚 Documentation Complète
+## 🌟 Fonctionnalités Principales & Documentation
 
-Pour garder cette page d'accueil concise, toute la documentation détaillée a été déplacée dans le dossier `docs/` :
+Pour garder ce README clair, nos fonctionnalités les plus puissantes disposent de guides dédiés. Découvrez tout le potentiel du moteur :
 
-- **[⚙️ Manuel CLI & Paramètres complets](docs/CLI_MANUAL_FR.md)**
-  La référence complète pour les 50+ arguments en ligne de commande, le réglage de colorimétrie et les options de défilement.
-- **[🤖 Fonctionnalités Avancées & Architecture](docs/ADVANCED_FEATURES_FR.md)**
-  Explications techniques détaillées sur la **caméra cinématique (Auto Action Framing)**, la **colorimétrie IA (Smart Color Boost)**, et le fonctionnement de la conversion.
-- **[❓ Dépannage (Troubleshooting)](docs/TROUBLESHOOTING_FR.md)**
-  Solutions pour les erreurs courantes, l'installation d'OpenCV, et la configuration de FFmpeg.
+### [🎥 Caméra Cinématique par IA (Auto-Action)](docs/ADVANCED_FEATURES_FR.md#auto-action-framing)
+Lorsqu'on réduit une vidéo 1080p vers une matrice 128x32, les sujets deviennent microscopiques. Le **Auto-Action Framing** utilise l'IA YOLOv8 ONNX pour suivre dynamiquement les sujets, faire des travellings, et rogner intelligemment le sol/plafond pour garder l'action centrée et visible !
+👉 **[Lire le Guide des Fonctionnalités Avancées](docs/ADVANCED_FEATURES_FR.md)**
+
+### [🎨 Smart Color Boost & Filtres](docs/ADVANCED_FEATURES_FR.md#smart-color-boost)
+Les matrices LED délavent les couleurs sombres et saturent les couleurs claires. Le **Smart Color Boost** utilise une analyse heuristique pour injecter automatiquement la quantité parfaite de luminosité, contraste et saturation dans votre GIF.
+👉 **[Lire le Guide des Fonctionnalités Avancées](docs/ADVANCED_FEATURES_FR.md)**
+
+### [💻 Maîtrise de l'Automatisation CLI](docs/CLI_MANUAL_FR.md)
+Tout ce que vous pouvez faire dans l'interface est automatisable dans le Terminal. Téléchargez des GIFs via DuckDuckGo, traitez des dossiers complets en parallèle, ajoutez du texte pixel-art, et envoyez automatiquement à la corbeille les mauvaises conversions !
+👉 **[Lire le Manuel CLI](docs/CLI_MANUAL_FR.md)**
+
+### [❓ Dépannage & Installation](docs/TROUBLESHOOTING_FR.md)
+Un problème avec OpenCV ou FFmpeg ? Besoin d'aide pour l'installation sur un OS spécifique ?
+👉 **[Lire le Guide de Dépannage](docs/TROUBLESHOOTING_FR.md)**
 
 
 ---
