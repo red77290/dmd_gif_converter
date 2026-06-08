@@ -75,9 +75,8 @@ class TextOverlayPopup(ctk.CTkToplevel):
         self.geometry("450x380")
         self.resizable(False, False)
         
-        # Make it a modal tool window
+        # Keep on top but NOT modal (grab_set blocks after() callbacks during background renders)
         self.attributes("-topmost", True)
-        self.grab_set()
 
         self._app_state = app_state
         self._build_ui()
@@ -163,11 +162,6 @@ class TextOverlayPopup(ctk.CTkToplevel):
         text_anim_row.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(text_anim_row, text="Animation (Magic!)", width=145, anchor="w",
                      font=ctk.CTkFont(size=12, weight="bold"), text_color="#ffff99").grid(row=0, column=0, padx=(4, 6))
-        
-        # We need to create v_text_animation in app_state if it doesn't exist
-        if not hasattr(self._app_state, "v_text_animation"):
-            import tkinter as tk
-            self._app_state.v_text_animation = tk.StringVar(value="scroll_left")
             
         self._text_anim_menu = ctk.CTkOptionMenu(
             text_anim_row,

@@ -7,7 +7,8 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 ---
 
 ## Nouveautés de la v6.0.0 (Develop)
-- **🪄 Text Magic (Text Overlay)** : Ajout d'une fonctionnalité complète pour incrustation de texte (Polices, Styles, Background). *Note: L'animation de texte (clignotement, défilement) présente actuellement un bug connu qui empêche son fonctionnement.*
+- **🤖 AI Iconic Moments** : Un tout nouvel onglet dédié pour analyser automatiquement des vidéos entières et extraire les meilleurs "moments" en utilisant des critères avancés (Action, Cuts épiques, Présence de personnages, Bouclage parfait, et Visibilité DMD). Il offre même un bouton magique pour envoyer instantanément le moment découvert vers le Convertisseur ! [Lisez le guide complet ici.](docs/AI_MOMENTS_FR.md)
+- **🪄 Magie du Texte (Text Overlay)** : Ajout du support complet des superpositions de texte (Polices, Styles, Arrière-plan) avec des animations intégrées (`blink`, `scroll_left`, `scroll_up`) directement dans l'interface graphique.
 
 ## Nouveautés de la v5.1.0
 - **🧩 Modularité Générique Étendue** : L'architecture modulaire de l'application (interfaces pour le Convertisseur, Tracker, Détecteur) s'étend désormais au moteur de recherche de GIFs. Une interface générique `ISearchEngine` orchestre DuckDuckGo, Tenor, et Giphy de façon transparente sans duplication de code, garantissant une réutilisabilité et extensibilité maximales pour l'UI et les scripts utilitaires.
@@ -48,8 +49,9 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 | **Liste Triable** | Cliquez sur les en-têtes de colonnes `File`, `Score` ou `Category` de la liste des Fichiers Convertis pour trier les éléments par ordre croissant ou décroissant. |
 | **Dossier Temporaire Intelligent** | Si aucun dossier de destination n'est défini, les fichiers sont créés dans un sous-dossier `dmd_tmp/` au sein du dossier source, évitant de mélanger les sources avec les conversions. |
 | **Batch Auto-Cleanup** | Quand vous traitez un dossier complet, vous pouvez demander au programme de mettre à la corbeille automatiquement les conversions qui n'atteignent pas un certain score. |
-| **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), alimente la liste automatiquement |
-| **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
+| **🔍 Recherche de GIFs** | Cherchez et téléchargez des GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), remplit automatiquement la liste |
+| **🤖 AI Iconic Moments** | Extrait automatiquement les meilleurs moments des longues vidéos en se basant sur 5 métriques IA et les envoie directement vers le Convertisseur |
+| **Triple aperçu en direct** | SOURCE (gauche) + AUTO ACTION intermédiaire (centre) + RENDU DMD (droite) |
 | **Diagnostic DMD** | Cliquez sur un fichier converti pour voir son score, son classement, et les raisons expliquant son score. |
 | **💡 LED Sim** | Superpose une grille pixel sur la preview DMD — simule l'aspect physique d'une dalle HUB75 · **activé par défaut** |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |

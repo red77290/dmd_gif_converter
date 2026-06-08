@@ -506,6 +506,7 @@ class PreviewPanelMixin:
             vertical_bias=float(self.v_action_vertical_bias.get()),
             auto_vertical_bias=bool(self.v_action_auto_vertical_bias.get()),
             smart_auto_crop=bool(self.v_action_smart_auto_crop.get()),
+            auto_pillarbox_crop=bool(self.v_action_auto_pillarbox.get()),
             dmd_visibility_score_enabled=bool(self.v_dmd_visibility_score_enabled.get()), # NEW
             dmd_readability_score_enabled=bool(self.v_dmd_readability_score_enabled.get()), # NEW
             start_s=start_s,
@@ -875,12 +876,33 @@ class PreviewPanelMixin:
             self.after_cancel(self._adv_refresh_job)
         self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_pipeline)
 
+    def _schedule_dmd_only_refresh(self, *_):
+        """Like _schedule_pipeline_refresh but only re-runs DMD conversion.
+        
+        Used for parameters that do NOT affect auto-action framing (text overlay,
+        colorimetry-only changes, etc.) to avoid re-running the expensive
+        OpenCV auto-action preprocessing unnecessarily.
+        """
+        if self._restoring_params:
+            return
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
+        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_dmd_only)
+
     def _auto_refresh_pipeline(self):
         self._adv_refresh_job = None
         if self._selected_iid and not self._busy and not self._auto_rendering and not self._dmd_rendering:
             src = self._file_data.get(self._selected_iid)
             if src:
                 self._start_auto_generation(src)
+                self._start_dmd_generation(src)
+
+    def _auto_refresh_dmd_only(self):
+        """Only refresh the DMD preview — skip auto-action preprocessing."""
+        self._adv_refresh_job = None
+        if self._selected_iid and not self._busy and not self._dmd_rendering:
+            src = self._file_data.get(self._selected_iid)
+            if src:
                 self._start_dmd_generation(src)
 
     # ══════════════════════════════════════════════════════════════════════════

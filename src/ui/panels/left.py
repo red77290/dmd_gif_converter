@@ -33,8 +33,9 @@ _gif_search_available = GIF_SEARCH_AVAILABLE  # backward-compat alias
 
 
 class LeftPanelMixin:
-    def _build_left_panel(self):
-        lp = ctk.CTkFrame(self, width=295, corner_radius=0)
+    def _build_left_panel(self, parent=None):
+        parent = parent or self
+        lp = ctk.CTkFrame(parent, width=295, corner_radius=0)
         lp.grid(row=0, column=0, sticky="nsew")
         lp.grid_propagate(False)
         lp.grid_rowconfigure(3, weight=1)   # row 3 = tree (was 2)
@@ -543,9 +544,7 @@ class LeftPanelMixin:
         # ── SAVE first — synchronous, instant, before ANY state change ───────
         # This must happen before _restore_params overwrites the UI vars.
         if self.v_per_gif_config.get() and self._selected_iid:
-            old_path = self._file_data.get(self._selected_iid)
-            if old_path:
-                self._per_gif_configs[old_path] = self._snapshot_params()
+            self._per_gif_configs[self._selected_iid] = self._snapshot_params()
 
         # ── Cancel any pending debounce refresh (stale render for old GIF) ───
         if self._adv_refresh_job:
@@ -558,23 +557,18 @@ class LeftPanelMixin:
         path = self._file_data.get(iid)
         if path:
             # Per-GIF config: load saved config (if any) when mode is enabled.
-            # _restore_params fires ~40 var traces → each would re-schedule the
-            # debounce.  We suppress them with a flag so the restore is atomic
-            # and silent; we cancel once more afterwards for safety.
             if self.v_per_gif_config.get():
-                if path in self._per_gif_configs:
+                if iid in self._per_gif_configs:
                     self._restoring_params = True
                     try:
-                        self._restore_params(self._per_gif_configs[path])
+                        self._restore_params(self._per_gif_configs[iid])
                     finally:
                         self._restoring_params = False
                     self._update_per_gif_status(path, saved=True)
                 else:
                     self._update_per_gif_status(path, saved=False)
 
-            # Cancel debounce once more: _restore_params may have fired traces
-            # before the flag was set (or the flag was cleared), so make sure
-            # no stale job is queued before we start fresh renders.
+            # Cancel debounce once more
             if self._adv_refresh_job:
                 self.after_cancel(self._adv_refresh_job)
                 self._adv_refresh_job = None
@@ -588,7 +582,6 @@ class LeftPanelMixin:
         sel = self._tree.selection()
         if not sel:
             return
-        # If the currently previewed file is among the items to remove, stop preview first.
         if self._selected_iid in sel:
             self._stop_src_preview()
             self._stop_auto_preview()
@@ -602,7 +595,7 @@ class LeftPanelMixin:
             path = self._file_data.pop(iid, None)
             if path:
                 self._file_paths.discard(path)
-                self._per_gif_configs.pop(path, None)  # remove per-gif config
+            self._per_gif_configs.pop(iid, None)  # remove per-gif config
             self._tree.delete(iid)
         self._update_count()
 
@@ -619,7 +612,7 @@ class LeftPanelMixin:
         path = self._file_data.pop(iid, None)
         if path:
             self._file_paths.discard(path)
-            self._per_gif_configs.pop(path, None)
+        self._per_gif_configs.pop(iid, None)
         if self._tree.exists(iid):
             self._tree.delete(iid)
         self._update_count()

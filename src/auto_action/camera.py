@@ -5,7 +5,11 @@ from .analysis import _clamp
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        floor_y_est: Optional[float] = None,
                        frame_top: float = 0.0,
-                       face_priority_mode: bool = False):
+                       face_priority_mode: bool = False,
+                       effective_frame_left: int = 0,
+                       effective_frame_w: Optional[int] = None):
+    if effective_frame_w is None:
+        effective_frame_w = frame_w
     target_ratio = float(cfg.target_width) / cfg.target_height
     _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
     _auto = getattr(cfg, "auto_vertical_bias", False)
@@ -38,9 +42,9 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
 
     if roi is None:
-        cx = frame_w / 2.0
+        cx = effective_frame_left + effective_frame_w / 2.0
         cy = (frame_top + frame_h) / 2.0
-        crop_w = float(frame_w)
+        crop_w = float(effective_frame_w)
         crop_h = float(frame_w) / target_ratio
         cy = _apply_bias(cy, crop_h)
         return cx, cy, crop_w, crop_h
@@ -78,25 +82,25 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         ideal_crop_h = ideal_crop_w / target_ratio
 
     tight_w = ideal_crop_w
-    loose_w = frame_w
+    loose_w = float(effective_frame_w)
     
     strength = _clamp(cfg.strength, 0.0, 1.0)
     # strength=1.0 -> tight framing. strength=0.0 -> loose framing (show context)
     crop_w = loose_w - strength * (loose_w - tight_w)
 
     # Enforce zoom_max (maximum zoom-in from full frame)
-    min_allowed_w = frame_w / max(1.0, cfg.zoom_max)
+    min_allowed_w = loose_w / max(1.0, cfg.zoom_max)
     crop_w = max(crop_w, min_allowed_w)
     
     # Ensure we never crop tighter than the person's required bounding box
     crop_w = max(crop_w, tight_w)
 
     if _platformer:
-        crop_w = min(float(frame_w), crop_w * 1.5)
+        crop_w = min(float(effective_frame_w), crop_w * 1.5)
 
     # Prevent zooming out beyond the frame dimensions (avoid black bars)
-    if crop_w > frame_w:
-        crop_w = float(frame_w)
+    if crop_w > effective_frame_w:
+        crop_w = float(effective_frame_w)
 
     crop_h = crop_w / target_ratio
 
@@ -128,10 +132,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # as a large motion bounding box (e.g. screen scrolling) would snap the camera to the HUD/ceiling.
         cy = _apply_bias(cy, crop_h)
 
-    if crop_w >= frame_w:
-        cx = frame_w / 2.0
+    if crop_w >= effective_frame_w:
+        cx = effective_frame_left + effective_frame_w / 2.0
     else:
-        cx = _clamp(cx, crop_w / 2.0, float(frame_w) - crop_w / 2.0)
+        cx = _clamp(cx, effective_frame_left + crop_w / 2.0, effective_frame_left + float(effective_frame_w) - crop_w / 2.0)
 
     cy = _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
     
@@ -194,7 +198,12 @@ def _apply_look_ahead(
     frame_h: int,
     look_ahead_factor: float,
     roi_persistence: float = 1.0,
+    effective_frame_left: int = 0,
+    effective_frame_w: Optional[int] = None,
 ) -> Tuple[float, float, float, float]:
+    if effective_frame_w is None:
+        effective_frame_w = frame_w
+        
     if look_ahead_factor <= 0.0 or (abs(scroll_vx) < 1e-3 and abs(scroll_vy) < 1e-3):
         return cam_rect
 
@@ -214,10 +223,10 @@ def _apply_look_ahead(
     offset_x = _clamp(scroll_vx * adaptive_factor * 5.0, -max_offset_x, max_offset_x)
     offset_y = _clamp(scroll_vy * adaptive_factor * 5.0, -max_offset_y, max_offset_y)
 
-    if cw >= frame_w:
-        cx = frame_w / 2.0
+    if cw >= effective_frame_w:
+        cx = effective_frame_left + effective_frame_w / 2.0
     else:
-        cx = _clamp(cx + offset_x, cw / 2.0, float(frame_w) - cw / 2.0)
+        cx = _clamp(cx + offset_x, effective_frame_left + cw / 2.0, effective_frame_left + float(effective_frame_w) - cw / 2.0)
         
     if ch >= frame_h:
         cy = frame_h / 2.0

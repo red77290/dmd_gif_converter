@@ -172,6 +172,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             vertical_bias=float(p.get("action_vertical_bias", 0.0)),
             auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
             smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
+            auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None,
             target_width=target_width, # Pass target dimensions to auto_action
@@ -641,6 +642,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         vertical_bias=float(p.get("action_vertical_bias", 0.0)),
         auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
         smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
+        auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
         target_width=p["target_width"],
         target_height=p["target_height"],
     )
@@ -662,6 +664,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
             vertical_bias=action_cfg.vertical_bias,
             auto_vertical_bias=action_cfg.auto_vertical_bias,
             smart_auto_crop=action_cfg.smart_auto_crop,
+            auto_pillarbox_crop=action_cfg.auto_pillarbox_crop,
             target_width=action_cfg.target_width,
             target_height=action_cfg.target_height,
         )

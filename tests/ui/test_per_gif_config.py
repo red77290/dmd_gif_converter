@@ -250,6 +250,7 @@ def _make_app():
     app.v_action_vertical_bias      = tk.DoubleVar(value=0.0)
     app.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
     app.v_action_smart_auto_crop    = tk.BooleanVar(value=False)
+    app.v_action_auto_pillarbox     = tk.BooleanVar(value=False)
     app.v_bg_sub_enable             = tk.BooleanVar(value=False)
     app.v_target_width              = tk.IntVar(value=128)
     app.v_target_height             = tk.IntVar(value=32)
@@ -263,6 +264,7 @@ def _make_app():
     app.v_text_style                = tk.StringVar(value="outline")
     app.v_text_bg                   = tk.BooleanVar(value=False)
     app.v_text_bg_opacity           = tk.IntVar(value=60)
+    app.v_text_animation            = tk.StringVar(value="none")
     app.v_max_dur_enabled           = tk.BooleanVar(value=True)
     app.v_max_duration              = tk.DoubleVar(value=120.0)
     app.v_auto_color_enabled        = tk.BooleanVar(value=False)
@@ -309,10 +311,12 @@ class TestSnapshotParams(unittest.TestCase):
             "action_bottom_crop", "action_auto_bottom_crop",
             "action_top_crop", "action_auto_top_crop",
             "action_vertical_bias", "action_auto_vertical_bias",
+            "action_smart_auto_crop", "action_auto_pillarbox",
             "bg_sub_enable", "target_width", "target_height", "target_preset",
             "text_overlay_enabled", "text_content",
             "text_font_size", "text_color", "text_position",
             "text_font_file", "text_style", "text_bg", "text_bg_opacity",
+            "text_animation",
             "max_dur_enabled", "max_duration", "auto_color_enabled",
             "dmd_visibility_score_enabled", "dmd_readability_score_enabled",
         ]
@@ -366,6 +370,7 @@ class TestRestoreParams(unittest.TestCase):
             "action_zoom_max": 2.5, "action_padding": 0.3,
             "action_intro": 2.0, "action_bottom_crop": 0.1,
             "action_vertical_bias": 0.5, "action_auto_vertical_bias": True,
+            "action_smart_auto_crop": True, "action_auto_pillarbox": True,
             "bg_sub_enable": True,
             "target_width": 256, "target_height": 64,
             "target_preset": "256x32 (2x1)",
@@ -374,6 +379,7 @@ class TestRestoreParams(unittest.TestCase):
             "text_position": "top_left",
             "text_font_file": "PixelMordred.ttf",
             "text_style": "bold", "text_bg": True, "text_bg_opacity": 80,
+            "text_animation": "blink",
             "max_dur_enabled": False, "max_duration": 60.0,
             "auto_color_enabled": True, "dmd_visibility_score_enabled": True,
             "dmd_readability_score_enabled": True,
