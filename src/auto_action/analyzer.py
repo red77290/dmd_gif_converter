@@ -23,6 +23,8 @@ class VideoAnalyzer:
         # State populated by analyze()
         self.effective_frame_top: int = 0
         self.effective_frame_h: int = 0
+        self.effective_frame_left: int = 0
+        self.effective_frame_w: int = frame_w
         self.face_priority_mode: bool = False
         self.smart_reasons: List[str] = []
         
@@ -37,8 +39,9 @@ class VideoAnalyzer:
         _auto_str = getattr(self.cfg, "auto_strength", False)
         _auto_sm = getattr(self.cfg, "auto_smoothness", False)
         _smart = getattr(self.cfg, "smart_auto_crop", False)
+        _auto_pillarbox = getattr(self.cfg, "auto_pillarbox_crop", False)
         
-        if _smart or _auto_str or _auto_sm:
+        if _smart or _auto_str or _auto_sm or _auto_pillarbox:
             try:
                 _decision = _smart_auto_crop_decision(cap, self.cfg, self.frame_w, self.frame_h)
                 
@@ -49,6 +52,10 @@ class VideoAnalyzer:
                     self.smart_reasons        = _decision["reasons"]
                     _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
                     _smart_face_priority = _decision.get("face_priority", False)
+                    
+                if _auto_pillarbox and "left_pct" in _decision and "right_pct" in _decision:
+                    self.effective_frame_left = int(self.frame_w * _decision["left_pct"])
+                    self.effective_frame_w = int(self.frame_w * (1.0 - _decision["right_pct"])) - self.effective_frame_left
                 
                 # Apply dynamic strength and smoothness based on content type analysis
                 if (_smart or _auto_str) and "suggested_strength" in _decision:
@@ -80,4 +87,4 @@ class VideoAnalyzer:
                 pass
 
         self.effective_frame_top = int(self.frame_h * self.tcp)
-        self.effective_frame_h   = max(self.cfg.target_height, int(self.frame_h * (1.0 - self.bcp)))
+        self.effective_frame_h   = max(self.cfg.target_height, int(self.frame_h * (1.0 - self.bcp))) - self.effective_frame_top

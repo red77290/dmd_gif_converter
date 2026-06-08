@@ -57,6 +57,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
     tracker = TrackingEngine(
         reader.fps, reader.frame_w, reader.frame_h,
         analyzer.effective_frame_top, analyzer.effective_frame_h,
+        analyzer.effective_frame_left, analyzer.effective_frame_w,
         analyzer.face_priority_mode, cfg
     )
 

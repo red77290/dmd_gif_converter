@@ -90,4 +90,39 @@ class _InfoBadge:
                 pass
             self._tip_win = None
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  CTkChip — Clickable toggle pill for detection criteria
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CTkChip(ctk.CTkButton):
+    def __init__(self, parent, text, variable=None, **kwargs):
+        self.variable = variable
+        self.active_color = kwargs.pop("active_color", "#1f538d")
+        self.inactive_color = kwargs.pop("inactive_color", "#333333")
+        self.active_hover = kwargs.pop("active_hover", "#14375d")
+        self.inactive_hover = kwargs.pop("inactive_hover", "#444444")
+        
+        super().__init__(
+            parent, text=text, corner_radius=15,
+            width=kwargs.pop("width", 60),
+            height=kwargs.pop("height", 28),
+            font=kwargs.pop("font", ctk.CTkFont(size=12)),
+            fg_color=self.active_color if self.variable and self.variable.get() else self.inactive_color,
+            hover_color=self.active_hover if self.variable and self.variable.get() else self.inactive_hover,
+            command=self._toggle, **kwargs
+        )
+        
+        if self.variable:
+            self.variable.trace_add("write", self._update_state)
+
+    def _toggle(self):
+        if self.variable:
+            self.variable.set(not self.variable.get())
+            
+    def _update_state(self, *args):
+        is_active = self.variable.get()
+        self.configure(
+            fg_color=self.active_color if is_active else self.inactive_color,
+            hover_color=self.active_hover if is_active else self.inactive_hover
+        )
 

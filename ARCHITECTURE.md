@@ -626,7 +626,36 @@ sequenceDiagram
     VA->>VA: Set face_priority_mode
 ```
 
-### 6.4 UI Preview Refresh Lifecycle
+### 6.5 AI Iconic Moments Analysis
+
+Runs a multi-metric analysis across the entire video (subsampled at 2 FPS) to discover the best moments based on Action, Epic (scene cuts), Character presence, Loopability, and DMD visibility.
+
+```mermaid
+sequenceDiagram
+    participant UI as AiMomentsPanel
+    participant ENG as AiMomentsEngine
+    participant CAP as VideoCapture
+    participant DET as YoloDetector
+
+    UI->>ENG: run() [in background thread]
+    loop Every Nth frame (2 FPS)
+        ENG->>CAP: read()
+        CAP-->>ENG: frame
+        ENG->>ENG: Action Score (Optical Flow)
+        ENG->>ENG: Epic Score (Histogram/Bhattacharyya)
+        ENG->>DET: detect_person()
+        DET-->>ENG: Character Score (Area size)
+    end
+    ENG->>ENG: Aggregate metrics into sliding windows
+    ENG->>ENG: Loopable Score (MSE start/end frames)
+    ENG->>ENG: DMD Score (Contrast std dev)
+    ENG->>ENG: Normalize & apply Strategy Weights
+    ENG->>ENG: Non-Maximum Suppression (prevent overlaps)
+    ENG-->>UI: List[AiMoment]
+    UI->>UI: Populate Results Grid
+```
+
+### 6.6 UI Preview Refresh Lifecycle
 
 ```mermaid
 sequenceDiagram
