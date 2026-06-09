@@ -115,7 +115,8 @@ from .panels.middle import MiddlePanelMixin
 from .panels.preview import PreviewPanelMixin
 from .panels.settings import SettingsPanelMixin
 from .panels.actions import ActionsPanelMixin
-class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMixin, SettingsPanelMixin, ActionsPanelMixin):
+from .panels.ai_moments import AiMomentsPanelMixin
+class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMixin, SettingsPanelMixin, ActionsPanelMixin, AiMomentsPanelMixin):
 
     def __init__(self):
         super().__init__()
@@ -221,6 +222,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         self.v_action_vertical_bias = tk.DoubleVar(value=0.0)
         self.v_action_auto_vertical_bias = tk.BooleanVar(value=False)
         self.v_action_smart_auto_crop    = tk.BooleanVar(value=False)
+        self.v_action_auto_pillarbox     = tk.BooleanVar(value=False)
         self.v_bg_sub_enable       = tk.BooleanVar(value=False) # New background subtraction checkbox
         self.v_dmd_visibility_score_enabled = tk.BooleanVar(value=False) # NEW: Enable DMD Visibility Score
         self.v_dmd_readability_score_enabled = tk.BooleanVar(value=True) # NEW: Enable DMD Readability Score
@@ -240,6 +242,7 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         self.v_text_style           = tk.StringVar(value="outline")
         self.v_text_bg              = tk.BooleanVar(value=False)
         self.v_text_bg_opacity      = tk.IntVar(value=60)
+        self.v_text_animation       = tk.StringVar(value="none")
 
         # ── Tkinter vars — max duration cap ───────────────────────────────────
         self.v_max_dur_enabled = tk.BooleanVar(value=True)    # ON by default (2 min cap)
@@ -286,14 +289,12 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
         # ── Global Cancellation Event ─────────────────────────────────────────
         self._cancel_event = threading.Event()
 
-        # ── Attach auto-refresh debounce to every param that affects DMD ──────
+        # ── Params that affect the full pipeline (auto-action + DMD) ─────────
         _watch = [
             self.v_mode, self.v_scroll, self.v_bottom_crop, self.v_top_crop, self.v_scroll_cycles,
-            self.v_fps_min, self.v_fps_max, self.v_contrast, self.v_saturation,
-            self.v_brightness, self.v_gamma, self.v_sharpen_lum, self.v_sharpen_chr,
+            self.v_fps_min, self.v_fps_max,
             self.v_dither, self.v_scroll_enabled, self.v_zoom,
-            self.v_manual_x, self.v_manual_y, self.v_hue_shift,
-            self.v_noise_reduction, self.v_film_grain, self.v_vignette,
+            self.v_manual_x, self.v_manual_y,
             self.v_auto_action_enabled, self.v_action_detector,
             self.v_action_strength, self.v_action_auto_strength,
             self.v_action_smoothness, self.v_action_auto_smoothness,
@@ -302,18 +303,29 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
             self.v_action_top_crop, self.v_action_auto_top_crop,
             self.v_action_vertical_bias,
             self.v_action_auto_vertical_bias, self.v_action_smart_auto_crop,
-            self.v_bg_sub_enable, self.v_dmd_visibility_score_enabled, self.v_dmd_readability_score_enabled, # NEW: DMD Visibility Score & Readability
+            self.v_bg_sub_enable, self.v_dmd_visibility_score_enabled, self.v_dmd_readability_score_enabled,
             self.v_target_width, self.v_target_height, self.v_target_preset,
-            self.v_text_overlay_enabled, self.v_text_content, # Added text overlay vars
-            self.v_text_font_size, self.v_text_color, self.v_text_position, # Added text overlay vars
-            self.v_text_font_file,  # font selector
-            self.v_text_style, self.v_text_bg, self.v_text_bg_opacity,  # style / bg
             self.v_trim_start, self.v_trim_end,
             self.v_max_dur_enabled, self.v_max_duration,
-            self.v_auto_color_enabled,
         ]
         for var in _watch:
             var.trace_add("write", self._schedule_pipeline_refresh)
+
+        # ── Params that ONLY affect DMD output (no auto-action re-run needed) ─
+        # Text overlay, colorimetry, and animation are applied post-framing,
+        # so changing them must not trigger the expensive OpenCV preprocessing.
+        _watch_dmd_only = [
+            self.v_contrast, self.v_saturation, self.v_brightness, self.v_gamma,
+            self.v_sharpen_lum, self.v_sharpen_chr,
+            self.v_hue_shift, self.v_noise_reduction, self.v_film_grain, self.v_vignette,
+            self.v_auto_color_enabled,
+            self.v_text_overlay_enabled, self.v_text_content,
+            self.v_text_font_size, self.v_text_color, self.v_text_position,
+            self.v_text_font_file, self.v_text_style, self.v_text_bg, self.v_text_bg_opacity,
+            self.v_text_animation,
+        ]
+        for var in _watch_dmd_only:
+            var.trace_add("write", self._schedule_dmd_only_refresh)
 
         self._build_ui()
 
@@ -322,12 +334,28 @@ class DMDConverterApp(ctk.CTk, LeftPanelMixin, MiddlePanelMixin, PreviewPanelMix
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        self.grid_columnconfigure(2, weight=1) # Settings/preview expands
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=0) # Log panel
-        self._build_left_panel()    # Column 0
-        self._build_middle_panel()  # Column 1
-        self._build_right_panel()   # Column 2
+
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.grid(row=0, column=0, sticky="nsew", padx=10, pady=(0, 5))
+
+        self.tab_conversion = self.tabview.add("Conversion")
+        self.tab_ai_moments = self.tabview.add("Moments")
+
+        # ── Setup Conversion Tab ──────────────────────────────────────────────
+        self.tab_conversion.grid_columnconfigure(2, weight=1)
+        self.tab_conversion.grid_rowconfigure(0, weight=1)
+
+        self._build_left_panel(self.tab_conversion)    # Column 0
+        self._build_middle_panel(self.tab_conversion)  # Column 1
+        self._build_right_panel(self.tab_conversion)   # Column 2
+        
+        # ── Setup AI Moments Tab ──────────────────────────────────────────────
+        if hasattr(self, '_build_ai_moments_panel'):
+            self._build_ai_moments_panel(self.tab_ai_moments)
+
         self._build_global_log_panel()
         
         self._load_api_keys()

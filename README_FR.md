@@ -1,10 +1,15 @@
-# 🎞️ DMD GIF Converter — v5.1.0
+# 🎞️ DMD GIF Converter — v6.0.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
 ---
+
+## Nouveautés de la v6.0.0
+- **🤖 AI Iconic Moments** : Un tout nouvel onglet dédié pour analyser automatiquement des vidéos entières et extraire les meilleurs "moments" en utilisant des critères avancés (Action, Cuts épiques, Présence de personnages, Bouclage parfait, et Visibilité DMD). Il offre même un bouton magique pour envoyer instantanément le moment découvert vers le Convertisseur ! [Lisez le guide complet ici.](docs/AI_MOMENTS_FR.md)
+- **🎬 Studio AI Moments & Extraction CLI** : Mise à jour majeure du moteur AI Moments. Intégration d'une Timeline Studio interactive avec points IN/OUT et lecture en boucle. Parité totale avec la CLI grâce au flag `--ai-moments`.
+- **🪄 Magie du Texte (Text Overlay)** : Ajout du support complet des superpositions de texte (Polices, Styles, Arrière-plan) avec des animations intégrées (`blink`, `scroll_left`, `scroll_up`) directement dans l'interface graphique.
 
 ## Nouveautés de la v5.1.0
 - **🧩 Modularité Générique Étendue** : L'architecture modulaire de l'application (interfaces pour le Convertisseur, Tracker, Détecteur) s'étend désormais au moteur de recherche de GIFs. Une interface générique `ISearchEngine` orchestre DuckDuckGo, Tenor, et Giphy de façon transparente sans duplication de code, garantissant une réutilisabilité et extensibilité maximales pour l'UI et les scripts utilitaires.
@@ -45,8 +50,9 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 | **Liste Triable** | Cliquez sur les en-têtes de colonnes `File`, `Score` ou `Category` de la liste des Fichiers Convertis pour trier les éléments par ordre croissant ou décroissant. |
 | **Dossier Temporaire Intelligent** | Si aucun dossier de destination n'est défini, les fichiers sont créés dans un sous-dossier `dmd_tmp/` au sein du dossier source, évitant de mélanger les sources avec les conversions. |
 | **Batch Auto-Cleanup** | Quand vous traitez un dossier complet, vous pouvez demander au programme de mettre à la corbeille automatiquement les conversions qui n'atteignent pas un certain score. |
-| **🔍 Recherche GIF** | Recherche & téléchargement de GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), alimente la liste automatiquement |
-| **Triple aperçu en direct** | SOURCE (gauche) + intermédiaire AUTO ACTION (milieu) + SORTIE DMD (droite) |
+| **🔍 Recherche de GIFs** | Cherchez et téléchargez des GIFs depuis DuckDuckGo — mot-clé + quantité (jusqu'à 300), remplit automatiquement la liste |
+| **🤖 AI Iconic Moments** | Extrait automatiquement les meilleurs moments des longues vidéos en se basant sur 5 métriques IA et les envoie directement vers le Convertisseur |
+| **Triple aperçu en direct** | SOURCE (gauche) + AUTO ACTION intermédiaire (centre) + RENDU DMD (droite) |
 | **Diagnostic DMD** | Cliquez sur un fichier converti pour voir son score, son classement, et les raisons expliquant son score. |
 | **💡 LED Sim** | Superpose une grille pixel sur la preview DMD — simule l'aspect physique d'une dalle HUB75 · **activé par défaut** |
 | **Auto-refresh DMD** | L'aperçu DMD se regénère automatiquement ~2 s après le dernier déplacement de curseur |
@@ -109,6 +115,10 @@ Vous préférez utiliser le script sans interface ? Voici les commandes les plus
 ## 🌟 Fonctionnalités Principales & Documentation
 
 Pour garder ce README clair, nos fonctionnalités les plus puissantes disposent de guides dédiés. Découvrez tout le potentiel du moteur :
+
+### [🤖 AI Moments & Studio Timeline](docs/AI_MOMENTS_FR.md)
+Fatigué de chercher manuellement le meilleur passage dans un film de 2 heures ? Le moteur **AI Moments** analyse votre vidéo pour trouver les scènes les plus épiques, pleines d'action, et parfaitement lisibles sur votre DMD. Découpez-les à la perfection grâce à la lecture en boucle de la **Studio Timeline**, ou laissez la CLI extraire les 5 meilleurs moments de façon 100% automatique !
+👉 **[Lire le Guide AI Moments](docs/AI_MOMENTS_FR.md)**
 
 ### [🎥 Caméra Cinématique par IA (Auto-Action)](docs/ADVANCED_FEATURES_FR.md#auto-action-framing)
 Lorsqu'on réduit une vidéo 1080p vers une matrice 128x32, les sujets deviennent microscopiques. Le **Auto-Action Framing** utilise l'IA YOLOv8 ONNX pour suivre dynamiquement les sujets, faire des travellings, et rogner intelligemment le sol/plafond pour garder l'action centrée et visible !

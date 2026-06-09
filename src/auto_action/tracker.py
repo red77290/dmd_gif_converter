@@ -22,12 +22,15 @@ class TrackingEngine(ITracker):
     
     def __init__(self, fps: float, frame_w: int, frame_h: int, 
                  effective_frame_top: int, effective_frame_h: int, 
+                 effective_frame_left: int, effective_frame_w: int,
                  face_priority_mode: bool, cfg: AutoActionConfig):
         self.fps = fps
         self.frame_w = frame_w
         self.frame_h = frame_h
         self.effective_frame_top = effective_frame_top
         self.effective_frame_h = effective_frame_h
+        self.effective_frame_left = effective_frame_left
+        self.effective_frame_w = effective_frame_w
         self.face_priority_mode = face_priority_mode
         self.cfg = cfg
         
@@ -43,7 +46,9 @@ class TrackingEngine(ITracker):
 
         self._cam_full_view: CamRect = _build_camera_rect(
             self.frame_w, self.cam_frame_h, None, self.cfg,
-            frame_top=self.cam_frame_top
+            frame_top=self.cam_frame_top,
+            effective_frame_left=self.effective_frame_left,
+            effective_frame_w=self.effective_frame_w
         )
         self._last_roi: Optional[BoundingBox] = None
         
@@ -178,7 +183,9 @@ class TrackingEngine(ITracker):
         cam_now_proposed = _build_camera_rect(
             self.frame_w, self.cam_frame_h, roi, self.cfg,
             floor_y_est=floor_y_est, frame_top=self.cam_frame_top,
-            face_priority_mode=self.face_priority_mode
+            face_priority_mode=self.face_priority_mode,
+            effective_frame_left=self.effective_frame_left,
+            effective_frame_w=self.effective_frame_w
         )
 
         # 9. Score Validation Loop
@@ -257,6 +264,8 @@ class TrackingEngine(ITracker):
                 self.frame_w, self.frame_h,
                 self.cfg.look_ahead_factor,
                 roi_persistence=self.roi_persistence_score,
+                effective_frame_left=self.effective_frame_left,
+                effective_frame_w=self.effective_frame_w,
             )
             
         self.prev_roi_cx = curr_roi_cx

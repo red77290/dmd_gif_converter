@@ -152,18 +152,41 @@ def _build_parser() -> argparse.ArgumentParser:
              "auto-bottom-crop, auto-top-crop and auto-floor-tracking (default: disabled).",
     )
     
-    # ── Automation (Magic Mode) ──────────────────────────────────────────
-    am = p.add_argument_group("Automation (Magic Mode)")
+    # ── AI Moments Extraction ───────────────────────────────────────────────
+    am = p.add_argument_group("AI Moments Extraction")
     am.add_argument(
+        "--ai-moments", action="store_true", default=False,
+        help="Extract the best moments from videos before converting to GIFs."
+    )
+    am.add_argument(
+        "--ai-moments-count", type=int, default=10, metavar="N",
+        help="Max number of moments to extract per video (default: 10)."
+    )
+    am.add_argument(
+        "--ai-moments-strategy", type=str, default="Balanced", choices=["Action", "Balanced", "Character"],
+        help="Strategy to prioritize for AI moments (default: Balanced)."
+    )
+    am.add_argument(
+        "--ai-moments-dur-min", type=float, default=2.0, metavar="F",
+        help="Minimum duration of an extracted moment in seconds (default: 2.0)."
+    )
+    am.add_argument(
+        "--ai-moments-dur-max", type=float, default=5.0, metavar="F",
+        help="Maximum duration of an extracted moment in seconds (default: 5.0)."
+    )
+    
+    # ── Automation (Magic Mode) ──────────────────────────────────────────
+    mm = p.add_argument_group("Automation (Magic Mode)")
+    mm.add_argument(
         "--let-me-handle-it", action="store_true", default=False,
         help="Magic mode: overrides several settings to automatically enable Auto-Action, "
              "Smart Auto Crop, Auto-Colorimetry, and DMD Scoring.",
     )
-    am.add_argument(
+    mm.add_argument(
         "--auto-color", action="store_true", default=False,
         help="Enable heuristic auto-colorimetry (brightness/contrast injection).",
     )
-    am.add_argument(
+    mm.add_argument(
         "--reject-threshold", type=int, default=0, metavar="N",
         help="Automatically move generated GIFs to the trash if their DMD Visibility Score is strictly below N%% (0-100). Default: 0 (disabled).",
     )
@@ -377,6 +400,87 @@ if __name__ == "__main__":
             f"  Or use search to auto-download: ./dmd_gif_converter.py --search-keyword \"pixel art\""
         )
         sys.exit(0)
+
+    # ── Integrated AI Moments Extraction ──────────────────────────────────────
+    if args.ai_moments:
+        logger.info(f"=== Extracting AI Moments (Count: {args.ai_moments_count}, Strategy: {args.ai_moments_strategy}) ===")
+        import subprocess
+        try:
+            from src.auto_action.ai_moments import AiMomentsEngine
+            
+            extracted_folders = []
+            for folder_in in source_folders:
+                tmp_dir = Path(folder_in) / "ai_moments_tmp"
+                extracted_files_exist = False
+                
+                for file in sorted(os.listdir(folder_in)):
+                    file_path = Path(folder_in) / file
+                    if not file_path.is_file() or file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                        continue
+                    if file_path.suffix.lower() == ".gif":
+                        continue  # Skip GIFs for extraction
+                        
+                    logger.info(f"Analyzing {file} for AI moments...")
+                    options = {
+                        "count": args.ai_moments_count,
+                        "strategy": args.ai_moments_strategy,
+                        "w_action": 70.0,
+                        "w_epic": 100.0,
+                        "w_character": 40.0,
+                        "w_loopable": 70.0,
+                        "w_dmd": 100.0,
+                        "dur_min": args.ai_moments_dur_min,
+                        "dur_max": args.ai_moments_dur_max,
+                        "auto_framing": args.auto_action,
+                        "opt_dmd": True
+                    }
+                    
+                    def _prog(msg, pct):
+                        pass # Silent progress for CLI, or we could print it
+                        
+                    engine = AiMomentsEngine(str(file_path), options, _prog)
+                    moments = engine.run()
+                    
+                    if not moments:
+                        logger.warning(f"No moments found in {file}.")
+                        continue
+                        
+                    tmp_dir.mkdir(parents=True, exist_ok=True)
+                    base_name = file_path.stem
+                    ext = file_path.suffix
+                    
+                    for i, m in enumerate(moments):
+                        out_name = f"{base_name}_M{i+1}{ext}"
+                        out_path = tmp_dir / out_name
+                        
+                        cmd = [
+                            "ffmpeg", "-y", "-v", "warning",
+                            "-ss", str(m.start_time),
+                            "-i", str(file_path),
+                            "-to", str(m.end_time - m.start_time),
+                            "-c", "copy",
+                            str(out_path)
+                        ]
+                        try:
+                            subprocess.run(cmd, check=True)
+                            logger.info(f"  Extracted: {out_name} (Score: {m.overall_score:.1f})")
+                            extracted_files_exist = True
+                        except subprocess.CalledProcessError as e:
+                            logger.error(f"  Failed to extract moment {i+1} from {file}: {e}")
+                
+                if extracted_files_exist:
+                    extracted_folders.append(str(tmp_dir))
+                    
+            if extracted_folders:
+                logger.info("Re-routing conversion to use extracted AI moments folders.")
+                source_folders = extracted_folders
+            else:
+                logger.warning("No AI moments were extracted from any source folder. Aborting conversion.")
+                sys.exit(0)
+                
+        except ImportError as e:
+            logger.error(f"Failed to load AiMomentsEngine. Auto-action dependencies might be missing: {e}")
+            sys.exit(1)
 
     for folder_in in source_folders:
         base = os.path.basename(folder_in.rstrip("/\\"))

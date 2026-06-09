@@ -6,8 +6,9 @@ from pathlib import Path
 from tkinter import messagebox
 
 class MiddlePanelMixin:
-    def _build_middle_panel(self):
-        mp = ctk.CTkFrame(self, width=320, corner_radius=0)
+    def _build_middle_panel(self, parent=None):
+        parent = parent or self
+        mp = ctk.CTkFrame(parent, width=320, corner_radius=0)
         mp.grid(row=0, column=1, sticky="nsew")
         mp.grid_propagate(False)
         mp.grid_rowconfigure(3, weight=1) # The treeview
