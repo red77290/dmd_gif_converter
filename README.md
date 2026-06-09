@@ -44,7 +44,6 @@ Now ships with a **full cross-platform graphical interface** — no command line
 
 ### Screenshots
 
-![DMD GIF Converter UI](media/UI_PREVIEW.png)
 ![DMD GIF Converter UI Demo](media/UI_PREVIEW.gif)
 
 ### Features at a glance
