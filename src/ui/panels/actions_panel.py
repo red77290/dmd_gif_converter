@@ -147,7 +147,7 @@ class ActionsPanel(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _out_path(self, src, iid=None):
-        base = Path(src).stem + "_dmd" + Path(src).suffix
+        base = Path(src).stem + "_dmd" + ".gif"
         if iid and hasattr(self, 'v_per_gif_config') and self.app_state.v_per_gif_config.get():
             cfg = self._per_gif_configs.get(iid)
             if cfg and "custom_out_name" in cfg:
