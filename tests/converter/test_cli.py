@@ -1,6 +1,6 @@
 import unittest
 import argparse
-from src.converter.cli import _build_parser
+from src.engine.conversion.cli import _build_parser
 
 class TestCliArgs(unittest.TestCase):
     def setUp(self):

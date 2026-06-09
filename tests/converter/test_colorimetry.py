@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.converter.colorimetry import (
+from src.engine.conversion.colorimetry import (
     _BASE_BRIGHTNESS,
     _BASE_CONTRAST,
     _BASE_GAMMA,
@@ -243,7 +243,7 @@ class TestAverageMetrics(unittest.TestCase):
             self.skipTest("numpy or opencv not available")
 
     def test_uniform_black_frame(self):
-        from src.converter.colorimetry import _average_metrics
+        from src.engine.conversion.colorimetry import _average_metrics
         frame = self.np.zeros((64, 128, 3), dtype=self.np.uint8)  # black BGR frame
         mean_lum, std_lum, mean_sat = _average_metrics([frame], self.cv2, self.np)
         self.assertAlmostEqual(mean_lum, 0.0, delta=1.0)
@@ -251,13 +251,13 @@ class TestAverageMetrics(unittest.TestCase):
         self.assertAlmostEqual(mean_sat, 0.0, delta=1.0)
 
     def test_uniform_white_frame(self):
-        from src.converter.colorimetry import _average_metrics
+        from src.engine.conversion.colorimetry import _average_metrics
         frame = self.np.full((64, 128, 3), 255, dtype=self.np.uint8)
         mean_lum, std_lum, mean_sat = _average_metrics([frame], self.cv2, self.np)
         self.assertGreater(mean_lum, 200.0)
 
     def test_multiple_frames_averages(self):
-        from src.converter.colorimetry import _average_metrics
+        from src.engine.conversion.colorimetry import _average_metrics
         dark  = self.np.zeros((64, 128, 3), dtype=self.np.uint8)
         light = self.np.full((64, 128, 3), 200, dtype=self.np.uint8)
         mean_lum, _, _ = _average_metrics([dark, light], self.cv2, self.np)

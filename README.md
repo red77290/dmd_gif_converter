@@ -1,10 +1,19 @@
-# 🎞️ DMD GIF Converter — v6.0.0
+# 🎞️ DMD GIF Converter — v6.1.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
 ---
+
+## What is New in v6.1.0?
+- **🎯 Close-up Hair Detection Fix**: The auto-action tracker now correctly identifies close-up faces (`roi_h > 40 % of frame height`) and skips the top 25 % of the bounding-box (hair) to lock onto the eye region instead of forehead/hair — eliminating the camera drift bug on anime-style content.
+- **📸 Face-Priority Camera Fix**: Corrected a `face_priority_mode` miscalculation in `camera.py` where `cy` was placed ~300 px below the face due to using crop height instead of ROI height. The camera now stays locked on the eye region.
+- **🔇 C-Level Stderr Suppression**: OpenCV's `[mp3float @ ...] Header missing` messages (which bypass Python's logging system and write directly to file-descriptor 2) are now silenced via a `_quiet_c_stderr()` context manager using `os.dup2`.
+- **📐 UI Layout Fixes**: DMD preview no longer crushes the Source/Auto previews (removed `weight=1` from wrong row). Log panel no longer hides Convert and Generate AI Moment buttons.
+- **🚌 EventBus Decoupling**: `FILES_ADDED_TO_QUEUE`, `PREVIEW_SOURCE_CHANGED`, and `PREVIEW_REFRESH_REQUESTED` events now fully decouple AI Moments → Left Panel and Middle Panel → Preview Panel.
+- **🔤 Code Cleanup**: All source-code comments translated from French to English throughout the codebase.
+- **🧪 Test Coverage Expanded**: New dedicated test files — `test_tracker_closeup.py` (8 tests), `test_camera.py` (18 tests, full rewrite), `test_event_bus_integration.py` (13 tests) — covering every bug fixed in this release.
 
 ## What is New in v6.0.0?
 - **🤖 AI Iconic Moments**: A brand new dedicated tab to automatically analyze entire videos and extract the absolute best "moments" using advanced criteria (Action, Epic cuts, Character presence, Loopability, and DMD Visibility). It even provides a seamless one-click bridge to open the discovered moment in the Converter! [Read the full guide here.](docs/AI_MOMENTS.md)
@@ -113,7 +122,7 @@ Want to use the tool without the GUI? Here are the most powerful commands.
 
 ---
 
-## 🌟 Core Features & Documentation
+## 📚 Full Documentation
 
 To keep this README clean, our most powerful features have dedicated guides. Discover what the engine can really do:
 
@@ -199,7 +208,7 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 
 ---
 
-## 📄 License
+## 📄 License & Credits
 
 MIT — free to use, modify and distribute.
 

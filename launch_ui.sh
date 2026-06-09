@@ -136,5 +136,9 @@ else
 fi
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
+# Suppress [mp3float @ ...] / Header missing messages from OpenCV's internal
+# FFmpeg backend (VideoCapture). Must be set before Python starts.
+export OPENCV_FFMPEG_CAPTURE_OPTIONS="loglevel;quiet"
+export OPENCV_LOG_LEVEL="SILENT"
 exec "$VENV/bin/python3"  $UI
 
