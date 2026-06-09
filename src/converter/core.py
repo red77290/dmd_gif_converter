@@ -172,6 +172,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             vertical_bias=float(p.get("action_vertical_bias", 0.0)),
             auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
             smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
+            auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None,
             target_width=target_width, # Pass target dimensions to auto_action
@@ -249,21 +250,25 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     text_content_raw     = str(p.get("text_content", ""))           # original (for Pillow)
     text_content         = text_content_raw.replace(":", "\\:")     # escaped (for ffmpeg)
     text_font_size       = int(p.get("text_font_size", 8))
-    text_color           = str(p.get("text_color", "white"))
-    text_position        = str(p.get("text_position", "bottom_center"))
-    text_font_file       = str(p.get("text_font_file", "HelvetiPixel.ttf"))
-    text_style           = str(p.get("text_style", "outline"))         # none | bold | outline | shadow
-    text_bg              = bool(p.get("text_bg", False))
-    text_bg_opacity      = int(p.get("text_bg_opacity", 60))
+    text_color         = str(p.get("text_color", "white"))
+    text_position      = str(p.get("text_position", "bottom_center"))
+    text_font_file     = str(p.get("text_font_file", "HelvetiPixel.ttf"))
+    text_style         = str(p.get("text_style", "outline"))
+    text_animation     = str(p.get("text_animation", "none"))
+    text_bg            = bool(p.get("text_bg", False))
+    text_bg_opacity    = int(p.get("text_bg_opacity", 60))
+
+    if text_overlay_enabled:
+        log(f"[DEBUG ] {filename} — text_animation passed to core: '{text_animation}'", "debug")
 
     # Resolve font path
     script_dir = Path(__file__).parent
-    project_root = script_dir.parent.parent
-    font_path = project_root / "media" / "fonts" / text_font_file
+    root_dir = script_dir.parent.parent
+    font_path = root_dir / "media" / "fonts" / text_font_file
     if not font_path.exists():
-        font_path = project_root / "media" / text_font_file
+        font_path = root_dir / "media" / text_font_file
         if not font_path.exists():
-            font_path = Path(text_font_file) # Check if absolute or relative to CWD
+            font_path = Path(text_font_file)
             if not font_path.exists():
                 log(f"[TEXT  ] Font file '{text_font_file}' not found. Text overlay disabled.", "error")
                 text_overlay_enabled = False
@@ -452,12 +457,23 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             bg_extra = f":box=1:boxcolor=black@{bg_alpha:.2f}:boxborderw=2"
         else:
             bg_extra = ""
-
+            
+        anim_extra = ""
+        if text_animation == "blink":
+            # Blink every 0.5 seconds
+            anim_extra = ":enable='lt(mod(t,1),0.5)'"
+        elif text_animation == "scroll_left":
+            # Scroll text from right to left
+            x_pos = f"w-mod(t*50\\,w+tw)"
+        elif text_animation == "scroll_up":
+            # Scroll text from bottom to top
+            y_pos = f"h-mod(t*30\\,h+th)"
+            
         drawtext_filter = (
             f"drawtext=fontfile='{font_path_str}':text='{text_content}':"
             f"fontsize={text_font_size}:fontcolor={text_color}:"
             f"x={x_pos}:y={y_pos}:fix_bounds=1"
-            f"{style_extra}{bg_extra}"
+            f"{style_extra}{bg_extra}{anim_extra}"
         )
         filter_graph = f"{filter_graph_base},{drawtext_filter}[v_final];"
     else:
@@ -523,6 +539,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             out_path, text_content_raw, font_path_str,
             text_font_size, text_color, text_position,
             style=text_style, bg=text_bg, bg_opacity=text_bg_opacity,
+            animation=text_animation,
         )
         if ok_txt:
             log(f"[TEXT  ] {filename} — {txt_msg}")
@@ -625,6 +642,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         vertical_bias=float(p.get("action_vertical_bias", 0.0)),
         auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
         smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
+        auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
         target_width=p["target_width"],
         target_height=p["target_height"],
     )
@@ -646,6 +664,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
             vertical_bias=action_cfg.vertical_bias,
             auto_vertical_bias=action_cfg.auto_vertical_bias,
             smart_auto_crop=action_cfg.smart_auto_crop,
+            auto_pillarbox_crop=action_cfg.auto_pillarbox_crop,
             target_width=action_cfg.target_width,
             target_height=action_cfg.target_height,
         )

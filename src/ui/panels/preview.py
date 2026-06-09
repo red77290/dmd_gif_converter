@@ -506,6 +506,7 @@ class PreviewPanelMixin:
             vertical_bias=float(self.v_action_vertical_bias.get()),
             auto_vertical_bias=bool(self.v_action_auto_vertical_bias.get()),
             smart_auto_crop=bool(self.v_action_smart_auto_crop.get()),
+            auto_pillarbox_crop=bool(self.v_action_auto_pillarbox.get()),
             dmd_visibility_score_enabled=bool(self.v_dmd_visibility_score_enabled.get()), # NEW
             dmd_readability_score_enabled=bool(self.v_dmd_readability_score_enabled.get()), # NEW
             start_s=start_s,
@@ -720,24 +721,44 @@ class PreviewPanelMixin:
             # Decode frames as plain PIL Images — PhotoImage must be created on the main thread
             pil_frames, delays = [], []
             try:
-                from PIL import ImageSequence
-                img = Image.open(out_gif)
-                # FFmpeg often optimizes GIFs by only saving transparent delta pixels.
-                # Accumulating them onto a black background prevents glitches and transparent black artifacts.
-                bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
-                for frame in ImageSequence.Iterator(img):
-                    bg.paste(frame, (0, 0), frame.convert("RGBA"))
-                    comp = bg.copy().convert("RGB").resize(
-                        (dmd_display_w, dmd_display_h), Image.NEAREST
-                    )
-                    if led_sim and sim_scale >= 2:
-                        comp = self._apply_led_grid(comp, sim_scale)
-                        
-                    if comp.size != (final_canvas_w, final_canvas_h):
-                        comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
-                        
-                    pil_frames.append(comp)
-                    delays.append(max(img.info.get("duration", 80), 20))
+                if out_gif.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.webm')):
+                    import cv2
+                    cap = cv2.VideoCapture(out_gif)
+                    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                    delay_ms = int(1000 / fps) if fps > 0 else 40
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        comp = Image.fromarray(frame_rgb)
+                        comp = comp.resize((dmd_display_w, dmd_display_h), Image.NEAREST)
+                        if led_sim and sim_scale >= 2:
+                            comp = self._apply_led_grid(comp, sim_scale)
+                        if comp.size != (final_canvas_w, final_canvas_h):
+                            comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
+                        pil_frames.append(comp)
+                        delays.append(delay_ms)
+                    cap.release()
+                else:
+                    from PIL import ImageSequence
+                    img = Image.open(out_gif)
+                    # FFmpeg often optimizes GIFs by only saving transparent delta pixels.
+                    # Accumulating them onto a black background prevents glitches and transparent black artifacts.
+                    bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
+                    for frame in ImageSequence.Iterator(img):
+                        bg.paste(frame, (0, 0), frame.convert("RGBA"))
+                        comp = bg.copy().convert("RGB").resize(
+                            (dmd_display_w, dmd_display_h), Image.NEAREST
+                        )
+                        if led_sim and sim_scale >= 2:
+                            comp = self._apply_led_grid(comp, sim_scale)
+                            
+                        if comp.size != (final_canvas_w, final_canvas_h):
+                            comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
+                            
+                        pil_frames.append(comp)
+                        delays.append(max(img.info.get("duration", 80), 20))
             except Exception as exc:
                 _msg = str(exc)
                 self.after(0, lambda _m=_msg, _td=tmpdir: self._on_dmd_fail(_m, _td))
@@ -875,12 +896,33 @@ class PreviewPanelMixin:
             self.after_cancel(self._adv_refresh_job)
         self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_pipeline)
 
+    def _schedule_dmd_only_refresh(self, *_):
+        """Like _schedule_pipeline_refresh but only re-runs DMD conversion.
+        
+        Used for parameters that do NOT affect auto-action framing (text overlay,
+        colorimetry-only changes, etc.) to avoid re-running the expensive
+        OpenCV auto-action preprocessing unnecessarily.
+        """
+        if self._restoring_params:
+            return
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
+        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_dmd_only)
+
     def _auto_refresh_pipeline(self):
         self._adv_refresh_job = None
         if self._selected_iid and not self._busy and not self._auto_rendering and not self._dmd_rendering:
             src = self._file_data.get(self._selected_iid)
             if src:
                 self._start_auto_generation(src)
+                self._start_dmd_generation(src)
+
+    def _auto_refresh_dmd_only(self):
+        """Only refresh the DMD preview — skip auto-action preprocessing."""
+        self._adv_refresh_job = None
+        if self._selected_iid and not self._busy and not self._dmd_rendering:
+            src = self._file_data.get(self._selected_iid)
+            if src:
                 self._start_dmd_generation(src)
 
     # ══════════════════════════════════════════════════════════════════════════

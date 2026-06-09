@@ -16,6 +16,10 @@ To launch the graphical interface:
 4. Set the **`Cleanup Assistant`** slider to `50%` (or your preferred rejection threshold). The system will automatically discard low-quality results!
 5. Click **`Batch Convert Folder`** on the left panel, pick a folder, and grab a coffee.
 
+### Extracting the Best Moments:
+Have a long video? Switch to the **`AI Moments`** tab! 
+Click **`Generate Best Moments`** to let the AI automatically find, score, and rank the best scenes from your video. You can then preview and convert these highlights directly. Read more in the [AI Moments Guide](docs/AI_MOMENTS.md).
+
 ---
 
 ## 💻 2. Using the CLI (No GUI)
@@ -54,3 +58,15 @@ There you will find a dropdown menu to adjust the verbosity level on the fly:
 - **DEBUG**: Displays absolutely all internal processing, including complex FFMPEG outputs (very useful for analyzing a specific issue).
 
 If you are using the CLI, you can get the exact same level of detail with the `--log-level DEBUG` argument (or simply `--verbose`).
+
+---
+
+## 🤖 5. Discovering AI Iconic Moments
+
+Have a 10-minute long gameplay video or movie and want to extract the absolute best 3-second segments for your LED panel without watching the whole thing? 
+
+1. Go to the new **`AI Moments`** tab at the top of the UI.
+2. Select your video and choose how many moments you want to extract (e.g., Top 5).
+3. Toggle your preferred detection criteria (Action, Epic, Character, Loopable, DMD).
+4. Click **`Generate AI Moments`**. The AI Engine will process the video at blazing speed and present you with a grid of the best moments, ranked by score.
+5. Click **`Details`** on a moment, and hit **`Open In Converter`**. This will instantly bridge you back to the Conversion tab with the exact timestamps and Auto Action framing perfectly configured for you!
