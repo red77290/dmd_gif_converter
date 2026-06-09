@@ -57,7 +57,7 @@ class ConversionController(IController):
 
     def _run_conversion(self, files: Optional[list]) -> None:
         """Background worker that calls the converter for each file."""
-        from src.converter.core import process_file
+        from src.engine.conversion.core import process_file
 
         if self._model is None:
             return
@@ -69,7 +69,7 @@ class ConversionController(IController):
 
         files = files or []
         
-        from src.converter.services.job_expander import expand_conversion_jobs
+        from src.engine.conversion.services.job_expander import expand_conversion_jobs
         jobs = expand_conversion_jobs(files, params)
         total_jobs = len(jobs)
 
@@ -113,7 +113,7 @@ class ConversionController(IController):
             auto_action_was_enabled = job_params.get("auto_action_enabled", False)
 
             if auto_action_was_enabled:
-                from src.auto_action.main import preprocess_video_for_dmd
+                from src.engine.auto_action.main import preprocess_video_for_dmd
                 ok, p_src, msg = preprocess_video_for_dmd(src_path, callback=_callback, trim_start=start_s, trim_end=end_s)
                 if ok and p_src:
                     pre_src = p_src

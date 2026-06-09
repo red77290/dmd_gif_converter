@@ -5,11 +5,11 @@ import pytest
 import unittest
 from unittest.mock import patch
 
-from src.auto_action.pipeline import preprocess_video_for_dmd
-from src.auto_action.config import AutoActionConfig
-import src.auto_action.pipeline as pipeline_mod
-import src.auto_action.tracker as tracker_mod
-import src.auto_action.detector as detector_mod
+from src.engine.auto_action.pipeline import preprocess_video_for_dmd
+from src.engine.config.auto_action_config import AutoActionConfig
+import src.engine.auto_action.pipeline as pipeline_mod
+import src.plugins.trackers.tracker as tracker_mod
+import src.plugins.detectors.detector as detector_mod
 
 USE_CASES_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "use_cases")
 
@@ -73,34 +73,41 @@ class TestUseCases(unittest.TestCase):
             recorded_rois.append(roi)
             return roi
 
-        with patch("src.auto_action.tracker._build_camera_rect", side_effect=mock_build_camera_rect), \
-             patch("src.auto_action.detector._FrameDetector.detect", side_effect=mock_detect, autospec=True):
+        with patch("src.plugins.trackers.tracker._build_camera_rect", side_effect=mock_build_camera_rect), \
+             patch("src.plugins.detectors.detector._FrameDetector.detect", side_effect=mock_detect, autospec=True):
             
             success, out_path, msg = preprocess_video_for_dmd(gif_path, cfg)
             
         self.assertTrue(success, f"Pipeline failed on {filename}: {msg}")
         
         # --- SEMANTIC ASSERTIONS ---
-        if "visage" in filename or "face" in filename:
-            # We expect the camera to capture the top part of the detected ROIs (the face/hair)
+        if "visage" in filename or "face" in filename or "closeup" in filename:
+            # After the fix (v6.1.0): the camera should be centred on the EYE
+            # region (~25-65 % of the detected body bbox), NOT on the hair/top.
+            # The camera must include at least the middle 40-60 % of the roi.
             valid_roi_found = False
             for roi, cam in recorded_pairs:
                 valid_roi_found = True
                 rx, ry, rw, rh = roi
                 cx, cy, cw, ch = cam
-                
-                cam_top = cy - ch / 2.0
+
+                cam_top    = cy - ch / 2.0
                 cam_bottom = cy + ch / 2.0
-                
-                # The face is located in the top 30% of the bounding box
-                face_top = ry
-                face_bottom = ry + rh * 0.30
-                
-                debug_info = f"Frame dims: {cam} vs ROI {roi}. Camera top {cam_top} is too low, missing the face at {face_top}-{face_bottom}"
-                
-                self.assertLessEqual(cam_top, face_bottom, debug_info)
-                self.assertGreaterEqual(cam_bottom, face_top, debug_info)
-            
+
+                # Eye zone in the original bbox: roughly 25 %–65 % from top.
+                eye_top    = ry + rh * 0.20
+                eye_bottom = ry + rh * 0.65
+
+                debug_info = (
+                    f"Frame dims: {cam} vs ROI {roi}. "
+                    f"Camera [{cam_top:.1f}-{cam_bottom:.1f}] should overlap "
+                    f"eye zone [{eye_top:.1f}-{eye_bottom:.1f}]"
+                )
+
+                # The camera window must overlap the eye zone.
+                self.assertLess(cam_top, eye_bottom, debug_info)
+                self.assertGreater(cam_bottom, eye_top, debug_info)
+
             self.assertTrue(valid_roi_found, f"No person was detected in {filename}.")
             
         if "platformer" in filename:

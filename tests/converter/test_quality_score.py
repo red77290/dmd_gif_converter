@@ -1,5 +1,5 @@
 import numpy as np
-from src.converter.quality import _evaluate_dmd_frame, _get_rating
+from src.engine.conversion.quality import _evaluate_dmd_frame, _get_rating
 
 def test_evaluate_dmd_frame_empty():
     frame = np.zeros((32, 128, 3), dtype=np.uint8)
@@ -23,7 +23,7 @@ def test_get_rating():
     assert color == "🌟"
 
 def test_load_score_sidecar(tmp_path):
-    from src.converter.quality import load_score_sidecar, _save_score_sidecar
+    from src.engine.conversion.quality import load_score_sidecar, _save_score_sidecar
     import os
     
     gif_path = str(tmp_path / "test.gif")

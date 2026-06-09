@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 import tkinter as tk
 
 from ..interfaces import IModel
-from src.converter.core import DEFAULT_PARAMS
+from src.engine.conversion.core import DEFAULT_PARAMS
 
 logger = logging.getLogger(__name__)
 

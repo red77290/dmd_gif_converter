@@ -12,12 +12,12 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
 
-from src.converter.core import (
+from src.engine.conversion.core import (
     get_metadata, process_file, process_folder,
     DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
 )
-from src.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
-from src.converter.colorimetry import analyze_and_compensate as _ui_analyze_color
+from src.engine.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
+from src.engine.conversion.colorimetry import analyze_and_compensate as _ui_analyze_color
 from src.ui.widgets import _InfoBadge
 from src.ui.constants import *
 import os
