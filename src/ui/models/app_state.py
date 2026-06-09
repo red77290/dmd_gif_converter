@@ -59,7 +59,9 @@ class AppState(IModel):
         self.v_vignette        = tk.BooleanVar(value=False)
 
         # ── Auto Action parameters ─────────────────────────────────────────────
-        self.v_auto_action_enabled       = tk.BooleanVar(value=False)
+        self.v_auto_action_enabled  = tk.BooleanVar(value=False)
+        self.v_auto_cutter_enabled  = tk.BooleanVar(value=False)
+        self.v_auto_cutter_top_n    = tk.IntVar(value=5)
         self.v_action_detector           = tk.StringVar(value="person")
         self.v_action_strength           = tk.DoubleVar(value=0.65)
         self.v_action_auto_strength      = tk.BooleanVar(value=False)
@@ -92,6 +94,7 @@ class AppState(IModel):
         self.v_text_position        = tk.StringVar(value="bottom_center")
         self.v_text_font_file       = tk.StringVar(value="HelvetiPixel.ttf")
         self.v_text_style           = tk.StringVar(value="outline")
+        self.v_text_animation       = tk.StringVar(value="scroll_left")
         self.v_text_bg              = tk.BooleanVar(value=False)
         self.v_text_bg_opacity      = tk.IntVar(value=60)
 
@@ -152,10 +155,13 @@ class AppState(IModel):
         if var is not None:
             try:
                 var.set(value)
-                return
             except Exception:
                 pass
-        setattr(self, key, value)
+        else:
+            setattr(self, key, value)
+
+    def get_all(self) -> Dict[str, Any]:
+        return {k: self.get(k) for k in self._var_map}
 
     def snapshot(self) -> Dict[str, Any]:
         """Return a shallow dict copy of all var values."""
@@ -197,11 +203,11 @@ class AppState(IModel):
             "zoom":                s.v_zoom.get(),
             "manual_x":            s.v_manual_x.get(),
             "manual_y":            s.v_manual_y.get(),
-            "hue_shift":           s.v_hue_shift.get(),
-            "noise_reduction":     s.v_noise_reduction.get(),
-            "film_grain":          s.v_film_grain.get(),
             "vignette":            s.v_vignette.get(),
+            "auto_color_enabled":  s.v_auto_color_enabled.get(),
             "auto_action_enabled": s.v_auto_action_enabled.get(),
+            "auto_cutter_enabled": s.v_auto_cutter_enabled.get(),
+            "auto_cutter_top_n":   s.v_auto_cutter_top_n.get(),
             "action_detector":     s.v_action_detector.get(),
             "action_strength":     s.v_action_strength.get(),
             "action_auto_strength": s.v_action_auto_strength.get(),
@@ -229,6 +235,7 @@ class AppState(IModel):
             "text_position":       s.v_text_position.get(),
             "text_font_file":      s.v_text_font_file.get(),
             "text_style":          s.v_text_style.get(),
+            "text_animation":      s.v_text_animation.get(),
             "text_bg":             s.v_text_bg.get(),
             "text_bg_opacity":     s.v_text_bg_opacity.get(),
             "max_duration":        s.v_max_duration.get() if s.v_max_dur_enabled.get() else 0.0,

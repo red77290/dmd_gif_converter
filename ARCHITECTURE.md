@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v5.1.0)
+# DMD GIF Converter — Technical Architecture (v6.0.0)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -483,6 +483,11 @@ classDiagram
         +_generate_dmd_preview() void
         +_animate_dmd() void
     }
+    class AiMomentsPanelMixin {
+        +_build_studio_timeline() void
+        +_on_generate_ai_moments() void
+        +_show_ai_report_popup() void
+    }
 
     IModel <|.. AppState : implements
     IController <|.. ConversionController : implements
@@ -490,6 +495,7 @@ classDiagram
     DMDConverterApp --|> LeftPanelMixin : inherits mixin
     DMDConverterApp --|> SettingsPanelMixin : inherits mixin
     DMDConverterApp --|> PreviewPanelMixin : inherits mixin
+    DMDConverterApp --|> AiMomentsPanelMixin : inherits mixin
     DMDConverterApp --> AppState : owns
     DMDConverterApp --> ConversionController : creates
     DMDConverterApp --> PreviewController : creates
@@ -626,7 +632,44 @@ sequenceDiagram
     VA->>VA: Set face_priority_mode
 ```
 
-### 6.4 UI Preview Refresh Lifecycle
+### 6.5 AI Iconic Moments Analysis
+
+Runs a multi-metric analysis across the entire video (subsampled at 2 FPS) to discover the best moments based on Action, Epic (scene cuts), Character presence, Loopability, and DMD visibility.
+When invoked from the UI or via CLI (`--ai-moments`), the engine extracts these moments to a temporary folder using FFmpeg, which is then fed into the standard Conversion pipeline.
+
+```mermaid
+sequenceDiagram
+    participant CLI/UI as CLI Wrapper / AiMomentsPanel
+    participant ENG as AiMomentsEngine
+    participant CAP as VideoCapture
+    participant DET as YoloDetector
+    participant FF as FFmpeg
+
+    CLI/UI->>ENG: run() [in background thread]
+    loop Every Nth frame (2 FPS)
+        ENG->>CAP: read()
+        CAP-->>ENG: frame
+        ENG->>ENG: Action Score (Optical Flow)
+        ENG->>ENG: Epic Score (Histogram/Bhattacharyya)
+        ENG->>DET: detect_person()
+        DET-->>ENG: Character Score (Area size)
+    end
+    ENG->>ENG: Aggregate metrics into sliding windows
+    ENG->>ENG: Loopable Score (MSE start/end frames)
+    ENG->>ENG: DMD Score (Contrast std dev)
+    ENG->>ENG: Normalize & apply Strategy Weights
+    ENG->>ENG: Non-Maximum Suppression (prevent overlaps)
+    ENG-->>CLI/UI: List[AiMoment]
+    
+    loop For each AiMoment
+        CLI/UI->>FF: subprocess.run(ffmpeg -ss ... -to ... -c copy)
+        FF-->>CLI/UI: Saved mp4 in ai_moments_tmp/
+    end
+    
+    CLI/UI->>CLI/UI: Push tmp files to Conversion batch
+```
+
+### 6.6 UI Preview Refresh Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -915,4 +958,4 @@ class MyPanelMixin(IPanel):
 
 ---
 
-*Last updated: v5.1.0 — June 2026*
+*Last updated: v6.0.0 — June 2026*
