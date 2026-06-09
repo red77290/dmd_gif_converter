@@ -12,12 +12,12 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
 
-from src.converter.core import (
+from src.engine.conversion.core import (
     get_metadata, process_file, process_folder,
     DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
 )
-from src.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
-from src.converter.colorimetry import analyze_and_compensate as _ui_analyze_color
+from src.engine.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
+from src.engine.conversion.colorimetry import analyze_and_compensate as _ui_analyze_color
 from src.ui.widgets import _InfoBadge
 from src.ui.constants import *
 import os
@@ -261,7 +261,7 @@ class ActionsPanelMixin:
             )
             
             if success:
-                from src.converter.quality import load_score_sidecar
+                from src.engine.conversion.quality import load_score_sidecar
                 score_result = load_score_sidecar(out) or {"score": 0, "rating": "Unknown", "color": "⚪", "reasons": ["No score"]}
                 self.after(0, lambda _out=out, _res=score_result: self._add_converted_file(_out, _res))
                 self.after(0, lambda _iid=iid: self._remove_specific_file(_iid))
@@ -311,7 +311,7 @@ class ActionsPanelMixin:
                 threshold = int(self.v_batch_trash_score.get())
                 self.after(0, lambda: self._log(f"🧹 Running Auto-Cleanup (Trash <= {threshold}%)..."))
                 
-                from src.converter.quality import load_score_sidecar
+                from src.engine.conversion.quality import load_score_sidecar
                 try:
                     import send2trash
                     safe_delete = send2trash.send2trash

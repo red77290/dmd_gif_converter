@@ -14,13 +14,13 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
-from src.converter.core import (
+from src.engine.conversion.core import (
     get_metadata, process_file, process_folder,
     DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
 )
-from src.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
-from src.converter.colorimetry import analyze_and_compensate as _ui_analyze_color
-from src.converter.services.gif_search_service import (
+from src.engine.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
+from src.engine.conversion.colorimetry import analyze_and_compensate as _ui_analyze_color
+from src.engine.conversion.services.gif_search_service import (
     GifSearchService, GifSearchFilter, GIF_SEARCH_AVAILABLE,
 )
 from src.ui.widgets import _InfoBadge

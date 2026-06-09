@@ -1,13 +1,13 @@
 from unittest import mock
 import pytest
 
-from src.converter.services.search_models import GifSearchFilter, GifSearchResult
-from src.converter.services.search_engines import (
+from src.engine.conversion.services.search_models import GifSearchFilter, GifSearchResult
+from src.engine.conversion.services.search_engines import (
     DuckDuckGoSearchEngine,
     TenorSearchEngine,
     GiphySearchEngine,
 )
-from src.converter.services.gif_search_service import GifSearchService
+from src.engine.conversion.services.gif_search_service import GifSearchService
 
 @pytest.fixture
 def base_filters():
@@ -19,7 +19,7 @@ def dummy_cancel():
 def test_duckduckgo_search_engine(base_filters):
     engine = DuckDuckGoSearchEngine()
     
-    with mock.patch("src.converter.services.search_engines._DDGS") as mock_ddgs:
+    with mock.patch("src.engine.conversion.services.search_engines._DDGS") as mock_ddgs:
         mock_instance = mock_ddgs.return_value
         # Mock what DDGS.images yields
         mock_instance.images.return_value = [
@@ -40,7 +40,7 @@ def test_duckduckgo_search_engine(base_filters):
 def test_tenor_search_engine(base_filters):
     engine = TenorSearchEngine()
     
-    with mock.patch("src.converter.services.search_engines._requests") as mock_requests:
+    with mock.patch("src.engine.conversion.services.search_engines._requests") as mock_requests:
         mock_resp = mock.MagicMock()
         mock_resp.json.return_value = {
             "results": [
@@ -60,7 +60,7 @@ def test_tenor_search_engine(base_filters):
 def test_giphy_search_engine(base_filters):
     engine = GiphySearchEngine()
     
-    with mock.patch("src.converter.services.search_engines._requests") as mock_requests:
+    with mock.patch("src.engine.conversion.services.search_engines._requests") as mock_requests:
         mock_resp = mock.MagicMock()
         mock_resp.json.return_value = {
             "data": [
@@ -98,7 +98,7 @@ def test_gif_search_service_download(tmp_path):
     service = GifSearchService()
     result = GifSearchResult(url="http://mock.url/test_image.gif")
     
-    with mock.patch("src.converter.services.gif_search_service._requests") as mock_requests:
+    with mock.patch("src.engine.conversion.services.gif_search_service._requests") as mock_requests:
         mock_resp = mock.MagicMock()
         mock_resp.headers = {"Content-Type": "image/gif"}
         mock_resp.iter_content.return_value = [b"gif_data"]
