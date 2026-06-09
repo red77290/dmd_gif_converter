@@ -44,7 +44,6 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ### Captures d'écran
 
-![DMD GIF Converter UI](media/UI_PREVIEW.png)
 ![DMD GIF Converter UI Demo](media/UI_PREVIEW.gif)
 
 ### Fonctionnalités (Aperçu)
