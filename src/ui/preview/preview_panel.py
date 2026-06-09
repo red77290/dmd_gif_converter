@@ -1054,7 +1054,7 @@ class PreviewPanel(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _out_path(self, src, iid=None):
-        base = Path(src).stem + "_dmd" + Path(src).suffix
+        base = Path(src).stem + "_dmd" + ".gif"
         out_dir = self.app_state.v_output_dir.get().strip()
         if out_dir and os.path.isdir(out_dir):
             return str(Path(out_dir) / base)

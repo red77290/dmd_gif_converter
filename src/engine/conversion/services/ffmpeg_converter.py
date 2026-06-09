@@ -216,6 +216,7 @@ class FFmpegConverter(IConverter):
             "-i", src_path,
             "-i", temp_pal,
             "-filter_complex", palette_use,
+            "-f", "gif",
             intermediate_out
         ])
 

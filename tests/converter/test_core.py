@@ -317,6 +317,45 @@ class TestProcessFile(unittest.TestCase):
                     conv.process_file("input.mp4", out, start_s=5.0)
         self.assertIn("-ss", captured_cmd)
 
+    def test_ffmpeg_command_forces_gif_format(self):
+        """La commande ffmpeg doit contenir '-f gif' pour forcer le format GIF."""
+        captured_cmd = []
+        def fake_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            m = MagicMock()
+            m.returncode = 0
+            m.poll.return_value = 0
+            m.stderr.read.return_value = b""
+            return m
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = os.path.join(tmpdir, "out.gif")
+            with self._mock_metadata():
+                with patch("src.engine.conversion.core.subprocess.Popen", side_effect=fake_run):
+                    conv.process_file("input.mp4", out)
+        self.assertIn("-f", captured_cmd)
+        gif_idx = captured_cmd.index("-f")
+        self.assertEqual(captured_cmd[gif_idx + 1], "gif")
+
+    def test_output_path_is_gif_even_for_mp4_input(self):
+        """L'extension du fichier de sortie doit être .gif quelle que soit l'entrée."""
+        captured_cmd = []
+        def fake_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            m = MagicMock()
+            m.returncode = 0
+            m.poll.return_value = 0
+            m.stderr.read.return_value = b""
+            return m
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = os.path.join(tmpdir, "out.gif")
+            with self._mock_metadata():
+                with patch("src.engine.conversion.core.subprocess.Popen", side_effect=fake_run):
+                    ok, _ = conv.process_file("input.mp4", out)
+        self.assertTrue(ok)
+        self.assertTrue(out.endswith(".gif"))
+
     def test_max_duration_cap(self):
         """max_duration > 0 doit couper trim_end."""
         captured_cmds = []
