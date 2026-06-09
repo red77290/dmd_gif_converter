@@ -1,10 +1,19 @@
-# 🎞️ DMD GIF Converter — v6.0.0
+# 🎞️ DMD GIF Converter — v6.1.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
 ---
+
+## Nouveautés de la v6.1.0
+- **🎯 Correction détection visage en gros plan** : Le tracker auto-action identifie désormais correctement les gros plans (`roi_h > 40 % de la hauteur de frame`) et ignore les 25 % supérieurs de la bounding-box (cheveux) pour verrouiller la région des yeux — élimine la dérive de caméra sur contenu anime.
+- **📸 Correction caméra face-priority** : Corrige un bug de calcul dans `face_priority_mode` (camera.py) où `cy` était placé ~300 px sous le visage (utilisation de la hauteur de crop au lieu de la hauteur de la ROI). La caméra reste maintenant verrouillée sur la région des yeux.
+- **🔇 Suppression des messages C-level stderr** : Les messages OpenCV `[mp3float @ ...] Header missing` (qui contournent le logging Python et écrivent directement sur le file-descriptor 2) sont désormais réduits au silence via un gestionnaire de contexte `_quiet_c_stderr()` utilisant `os.dup2`.
+- **📐 Corrections de mise en page UI** : La preview DMD n'écrase plus les previews Source/Auto (suppression du `weight=1` sur la mauvaise ligne). Le panneau de log ne cache plus les boutons Convert et Generate AI Moment.
+- **🚌 Découplage EventBus** : Les événements `FILES_ADDED_TO_QUEUE`, `PREVIEW_SOURCE_CHANGED` et `PREVIEW_REFRESH_REQUESTED` découplent maintenant complètement AI Moments → Panneau gauche et Panneau central → Panneau preview.
+- **🔤 Nettoyage du code** : Tous les commentaires du code source traduits du français vers l'anglais.
+- **🧪 Couverture de tests étendue** : Nouveaux fichiers de tests — `test_tracker_closeup.py` (8 tests), `test_camera.py` (18 tests, réécriture complète), `test_event_bus_integration.py` (13 tests) — couvrant chaque bug corrigé dans cette version.
 
 ## Nouveautés de la v6.0.0
 - **🤖 AI Iconic Moments** : Un tout nouvel onglet dédié pour analyser automatiquement des vidéos entières et extraire les meilleurs "moments" en utilisant des critères avancés (Action, Cuts épiques, Présence de personnages, Bouclage parfait, et Visibilité DMD). Il offre même un bouton magique pour envoyer instantanément le moment découvert vers le Convertisseur ! [Lisez le guide complet ici.](docs/AI_MOMENTS_FR.md)
@@ -35,10 +44,9 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 
 ### Captures d'écran
 
-![DMD GIF Converter UI](media/UI_PREVIEW.png)
 ![DMD GIF Converter UI Demo](media/UI_PREVIEW.gif)
 
-### Fonctionnalités
+### Fonctionnalités (Aperçu)
 
 | Fonctionnalité | Détails |
 |---|---|
@@ -112,7 +120,7 @@ Vous préférez utiliser le script sans interface ? Voici les commandes les plus
 
 ---
 
-## 🌟 Fonctionnalités Principales & Documentation
+## 📚 Documentation Complète
 
 Pour garder ce README clair, nos fonctionnalités les plus puissantes disposent de guides dédiés. Découvrez tout le potentiel du moteur :
 
@@ -207,7 +215,7 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 
 ---
 
-## 📄 Licence
+## 📄 Licence & Remerciements
 
 MIT — libre d'utilisation, modification et distribution.
 
