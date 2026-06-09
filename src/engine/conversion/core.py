@@ -503,6 +503,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     cmd += [
         "-filter_complex", filter_graph,
         "-gifflags", "-offsetting-transdiff",
+        "-f", "gif",
         out_path
     ]
 
