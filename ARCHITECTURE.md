@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v6.0.0)
+# DMD GIF Converter — Technical Architecture (v6.1.0)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -98,7 +98,7 @@ dmd_gif_converter/
 │       ├── dmd_led_sim.py            ← LED grid pixel simulation
 │       └── constants.py              ← APP_VERSION, colors, fonts
 │
-├── tests/                            # 272 unit tests
+├── tests/                            # 191 unit tests
 │   ├── auto_action/
 │   ├── converter/
 │   └── ui/
@@ -854,10 +854,11 @@ graph TD
 tests/
 ├── auto_action/
 │   ├── test_analysis.py        # _FloorEstimator, DMD scoring functions, smart crop
-│   ├── test_camera.py          # _build_camera_rect geometry, _smooth, _apply_look_ahead
+│   ├── test_camera.py          # _build_camera_rect geometry, _smooth, _apply_look_ahead (18 tests — full rewrite v6.1.0)
 │   ├── test_detector.py        # _FrameDetector (mocked ONNX), _fuse_rois, ROI history
 │   ├── test_pipeline.py        # preprocess_video_for_dmd (edge cases, file errors)
 │   ├── test_pipeline_mocks.py  # End-to-end mock: fake VideoCapture + fake FFmpeg
+│   ├── test_tracker_closeup.py # Close-up hair detection regression (8 tests — new v6.1.0)
 │   └── test_use_cases.py       # Semantic tests on real GIFs (platformer, anime, face)
 ├── converter/
 │   ├── test_colorimetry.py
@@ -865,15 +866,20 @@ tests/
 │   ├── test_ffmpeg_utils.py
 │   └── test_quality_score.py
 └── ui/
-    ├── test_dmd_led_sim.py     # LED grid pixel simulation
-    ├── test_per_gif_config.py  # Per-GIF config snapshot/restore
-    └── test_ui_mixins.py       # UI logic (mocked Tkinter)
+    ├── test_application_state.py  # ApplicationState snapshot/restore, MockVar
+    ├── test_dmd_led_sim.py        # LED grid pixel simulation
+    ├── test_event_bus.py          # EventBus pub/sub unit tests
+    ├── test_event_bus_integration.py  # EventBus regression: FILES_ADDED_TO_QUEUE, PREVIEW_* (13 tests — new v6.1.0)
+    ├── test_middle_panel.py       # Middle panel selection and clear logic
+    ├── test_per_gif_config.py     # Per-GIF config snapshot/restore
+    ├── test_ui_mixins.py          # UI logic (mocked Tkinter)
+    └── test_widgets.py            # Custom widget unit tests
 ```
 
 **Running the full suite:**
 ```bash
 PYTHONPATH=. pytest tests/ -v
-# Expected: 272 passed, 0 failed
+# Expected: 191 passed, 0 failed
 ```
 
 **Mocking strategy:**
@@ -958,4 +964,4 @@ class MyPanelMixin(IPanel):
 
 ---
 
-*Last updated: v6.0.0 — June 2026*
+*Last updated: v6.1.0 — June 2026*

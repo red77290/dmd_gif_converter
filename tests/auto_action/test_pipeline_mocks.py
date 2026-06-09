@@ -1,16 +1,16 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from src.auto_action.pipeline import preprocess_video_for_dmd
-from src.auto_action.config import AutoActionConfig
+from src.engine.auto_action.pipeline import preprocess_video_for_dmd
+from src.engine.config.auto_action_config import AutoActionConfig
 import numpy as np
 import cv2
 
 class TestPipelineMocks(unittest.TestCase):
 
     @patch("cv2.VideoCapture")
-    @patch("src.auto_action.detector._FrameDetector.detect")
-    @patch("src.auto_action.writer.subprocess.Popen")
-    @patch("src.auto_action.reader.subprocess.run")
+    @patch("src.plugins.detectors.detector._FrameDetector.detect")
+    @patch("src.engine.auto_action.writer.subprocess.Popen")
+    @patch("src.engine.auto_action.reader.subprocess.run")
     @patch("os.path.isfile")
     def test_preprocess_video_success(self, mock_isfile, mock_run, mock_popen, mock_detect, mock_vc):
         mock_isfile.return_value = True

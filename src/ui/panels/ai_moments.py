@@ -311,7 +311,7 @@ class AiMomentsPanelMixin:
             msg.showwarning("Invalid Range", "End time must be greater than start time.")
             return
             
-        from src.auto_action.ai_moments import AiMoment
+        from src.engine.auto_action.ai_moments import AiMoment
         m = AiMoment(
             start_time=start,
             end_time=end,
@@ -443,7 +443,7 @@ class AiMomentsPanelMixin:
             self._ai_preview_cap.release()
         self._ai_preview_cap = cv2.VideoCapture(path)
         
-        from src.converter.ffmpeg_utils import get_metadata
+        from src.engine.conversion.ffmpeg_utils import get_metadata
         _, _, _, dur = get_metadata(path)
         if dur > 0:
             self._ai_video_meta.configure(text=f"Ready to analyze | Duration: {dur:.1f}s")
@@ -504,7 +504,7 @@ class AiMomentsPanelMixin:
         threading.Thread(target=self._run_ai_analysis, args=(options,), daemon=True).start()
 
     def _run_ai_analysis(self, options):
-        from src.auto_action.ai_moments import AiMomentsEngine
+        from src.engine.auto_action.ai_moments import AiMomentsEngine
         
         # Helper to safely update UI from thread
         def progress_cb(task_name: str, progress: float):
