@@ -4,9 +4,15 @@
 DMD GIF Converter — Graphical Interface Launcher
 """
 
+import os
 import sys
 import logging
 from pathlib import Path
+
+# ── Suppress [mp3float @ ...] / Header missing messages (OpenCV/FFmpeg) ──────
+# Must be set BEFORE any cv2 import.
+os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "loglevel;quiet")
+os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))

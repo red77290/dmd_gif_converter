@@ -1,0 +1,1275 @@
+"""
+PreviewPanel  —  standalone preview widget for the new modular UI.
+
+Subscribes to EventBus:
+  • PREVIEW_SOURCE_CHANGED  {"path": str, ...}   → load a new file preview
+  • PREVIEW_REFRESH_REQUESTED {"action": str}     → stop / idle individual canvases
+"""
+import os
+import glob
+import logging
+import shutil
+import threading
+import tempfile
+import subprocess
+import concurrent.futures
+from pathlib import Path
+from tkinter import filedialog, messagebox
+
+import tkinter as tk
+import customtkinter as ctk
+from PIL import Image, ImageTk
+
+from src.engine.conversion.core import (
+    get_metadata, process_file, process_folder,
+    DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
+)
+from src.engine.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
+from src.ui.widgets import _InfoBadge
+from src.ui.constants import (
+    BG_CANVAS,
+    SRC_CANVAS_W, SRC_CANVAS_H,
+    AUTO_CANVAS_W, AUTO_CANVAS_H,
+    DMD_DISPLAY_SCALE_FACTOR,
+    DMD_REFRESH_DELAY_MS,
+)
+from src.ui.dmd_led_sim import (
+    LED_SIM_SCALE, LED_SIM_GAP, LED_SIM_MAX_W,
+    apply_led_grid as _apply_led_grid,
+)
+from src.ui.events.event_bus import EventBus, EventType
+
+logger = logging.getLogger(__name__)
+
+
+class PreviewPanel(ctk.CTkFrame):
+    """Animated preview + conversion actions."""
+
+    def __init__(self, parent, app_state, **kwargs):
+        super().__init__(parent, fg_color="transparent", **kwargs)
+        self.app_state = app_state
+
+        # ── current file ──────────────────────────────────────────────────────
+        self._current_path = None
+        self._source_duration = 10.0
+
+        # ── source preview state ──────────────────────────────────────────────
+        self._src_pil_frames = []
+        self._src_frames = []
+        self._src_delays = []
+        self._src_idx = 0
+        self._src_job = None
+        self._src_tmpdir = None
+
+        # ── auto-action preview state ─────────────────────────────────────────
+        self._auto_pil_frames = []
+        self._auto_frames = []
+        self._auto_delays = []
+        self._auto_idx = 0
+        self._auto_job = None
+        self._auto_tmpdir = None
+        self._auto_rendering = False
+        self._auto_pending_src = None
+
+        # ── DMD preview state ─────────────────────────────────────────────────
+        self._dmd_pil_frames = []
+        self._dmd_frames = []
+        self._dmd_delays = []
+        self._dmd_idx = 0
+        self._dmd_job = None
+        self._dmd_tmpdir = None
+        self._dmd_rendering = False
+        self._dmd_pending_src = None
+
+        # ── conversion state ──────────────────────────────────────────────────
+        self._busy = False
+        self._cancel_event = threading.Event()
+
+        # ── sibling panel refs (set from app.py) ─────────────────────────────
+        self._left_panel = None
+        self._middle_panel = None
+
+        # ── misc ──────────────────────────────────────────────────────────────
+        self._restoring_params = False
+        self._adv_refresh_job = None
+
+        # ── build widgets ─────────────────────────────────────────────────────
+        self._build_preview_area(self)
+
+        # ── EventBus subscriptions ────────────────────────────────────────────
+        EventBus.subscribe(EventType.PREVIEW_SOURCE_CHANGED, self._on_source_changed)
+        EventBus.subscribe(EventType.PREVIEW_REFRESH_REQUESTED, self._on_refresh_requested)
+
+    def set_sibling_panels(self, left_panel, middle_panel):
+        """Inject sibling references so conversion can access the file list and result list."""
+        self._left_panel = left_panel
+        self._middle_panel = middle_panel
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  EventBus handlers
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _on_source_changed(self, payload):
+        if not payload or "path" not in payload:
+            return
+        path = payload["path"]
+        is_converted = payload.get("is_converted", False)
+        converted_data = payload.get("converted_data")
+        self._current_path = path
+        self.after(0, lambda: self._load_preview(path,
+                                                  is_converted=is_converted,
+                                                  converted_data=converted_data))
+
+    def _on_refresh_requested(self, payload):
+        action = (payload or {}).get("action", "")
+        dispatch = {
+            "stop_src":  self._stop_src_preview,
+            "stop_auto": self._stop_auto_preview,
+            "stop_dmd":  self._stop_dmd_preview,
+            "idle_src":  self._draw_canvas_idle,
+            "idle_auto": self._draw_auto_canvas_idle,
+            "idle_dmd":  self._draw_dmd_canvas_idle,
+        }
+        fn = dispatch.get(action)
+        if fn:
+            self.after(0, fn)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  BUILD UI
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_preview_area(self, parent):
+        # ── Actions section (Convert / Batch / Stop) — pinned at bottom, always visible
+        self._build_actions_section(parent)
+
+        pf = ctk.CTkFrame(parent, fg_color="transparent")
+        pf.pack(fill="both", expand=True)
+        pf.grid_columnconfigure(0, weight=1)
+        # No row has weight: blocks (src/auto, dmd, trim, actions) stack
+        # compactly from the top with no gaps between them.
+
+        tr = ctk.CTkFrame(pf, fg_color="transparent")
+        tr.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
+        tr.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            tr, text="🖥️  Preview  —  SOURCE → AUTO → DMD",
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).grid(row=0, column=0, sticky="w")
+
+        pb = ctk.CTkFrame(tr, fg_color="transparent")
+        pb.grid(row=0, column=1, sticky="e")
+        self._btn_all_prev = ctk.CTkButton(
+            pb, text="🔄 Refresh All", width=110, height=26,
+            command=self.refresh_all_previews)
+        self._btn_all_prev.pack(side="left", padx=2)
+        self._btn_src = ctk.CTkButton(
+            pb, text="▶ Source", width=80, height=26,
+            command=self.show_source_preview)
+        self._btn_src.pack(side="left", padx=2)
+        self._btn_auto = ctk.CTkButton(
+            pb, text="🎯 Auto", width=80, height=26,
+            fg_color="#2b4b8a", hover_color="#234073",
+            command=self.show_auto_preview)
+        self._btn_auto.pack(side="left", padx=2)
+        self._btn_dmd = ctk.CTkButton(
+            pb, text="🔬 DMD", width=80, height=26,
+            fg_color="#1e6a3c", hover_color="#155230",
+            command=self.show_dmd_preview)
+        self._btn_dmd.pack(side="left", padx=2)
+        self._btn_led_sim = ctk.CTkButton(
+            pb, text="💡 LED Sim ✓", width=90, height=26,
+            fg_color="#5a4a00", hover_color="#7a6400",
+            command=self._toggle_led_sim)
+        self._btn_led_sim.pack(side="left", padx=2)
+
+        dc = ctk.CTkFrame(pf, fg_color="transparent")
+        dc.grid(row=1, column=0, padx=6, pady=4, sticky="ew")
+        dc.grid_columnconfigure((0, 1), weight=1)
+
+        src_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        src_wrap.grid(row=0, column=0, padx=(0, 4), pady=4, sticky="ne")
+        ctk.CTkLabel(src_wrap, text="SOURCE",
+                     font=ctk.CTkFont(size=10, weight="bold"), text_color="#556677"
+                     ).pack(pady=(4, 0))
+        self._src_canvas = tk.Canvas(src_wrap, width=SRC_CANVAS_W, height=SRC_CANVAS_H,
+                                     bg=BG_CANVAS, highlightthickness=0)
+        self._src_canvas.pack(padx=2, pady=(2, 2))
+        self._src_info = _InfoBadge(src_wrap, width=SRC_CANVAS_W)
+        self._src_info.pack(pady=(0, 4))
+
+        auto_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        auto_wrap.grid(row=0, column=1, padx=(4, 0), pady=4, sticky="nw")
+        ctk.CTkLabel(auto_wrap, text="AUTO ACTION",
+                     font=ctk.CTkFont(size=10, weight="bold"), text_color="#4f7bd9"
+                     ).pack(pady=(4, 0))
+        self._auto_canvas = tk.Canvas(auto_wrap, width=AUTO_CANVAS_W, height=AUTO_CANVAS_H,
+                                      bg=BG_CANVAS, highlightthickness=0)
+        self._auto_canvas.pack(padx=2, pady=(2, 2))
+        self._auto_info = _InfoBadge(auto_wrap, width=AUTO_CANVAS_W)
+        self._auto_info.pack(pady=(0, 4))
+
+        # dmd_wrap is a direct child of pf (row=2) to prevent it from being
+        # squeezed when trim (row=3) appears and compresses the dc frame (row=1).
+        dmd_wrap = ctk.CTkFrame(pf, fg_color=BG_CANVAS, corner_radius=6)
+        dmd_wrap.grid(row=2, column=0, padx=4, pady=(4, 4), sticky="n")
+        self._dmd_title_label = ctk.CTkLabel(
+            dmd_wrap,
+            text=f"DMD OUTPUT {DEFAULT_PARAMS['target_width']}×{DEFAULT_PARAMS['target_height']}",
+            font=ctk.CTkFont(size=10, weight="bold"), text_color="#2e7a4a")
+        self._dmd_title_label.pack(pady=(4, 0))
+        self._dmd_canvas = tk.Canvas(
+            dmd_wrap,
+            width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR),
+            height=int(DEFAULT_PARAMS["target_height"] * DMD_DISPLAY_SCALE_FACTOR),
+            bg=BG_CANVAS, highlightthickness=0)
+        self._dmd_canvas.pack(padx=2, pady=(2, 2))
+        self._dmd_info = _InfoBadge(
+            dmd_wrap, width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR))
+        self._dmd_info.pack(pady=(0, 4))
+
+        self._canvas = self._src_canvas
+        self._preview_info = self._src_info
+
+        self.app_state.v_target_width.trace_add("write", self._update_dmd_canvas_size)
+        self.app_state.v_target_height.trace_add("write", self._update_dmd_canvas_size)
+
+        self._draw_canvas_idle()
+        self._draw_auto_canvas_idle()
+        self._draw_dmd_canvas_idle()
+
+        # Sync canvas to actual initial size (LED sim may already be ON by default)
+        self.after(0, self._update_dmd_canvas_size)
+
+        # Trim frame
+        self._trim_frame = ctk.CTkFrame(pf, fg_color="#16213e")
+        self._trim_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 8))
+        self._trim_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(self._trim_frame, text="✂️  Trim  (single-file only)",
+                     font=ctk.CTkFont(size=11, weight="bold"), text_color="#7ec8e3"
+                     ).grid(row=0, column=0, columnspan=4, padx=10, pady=(8, 4), sticky="w")
+        ctk.CTkLabel(self._trim_frame, text="Start", width=44,
+                     font=ctk.CTkFont(size=11)).grid(row=1, column=0, padx=(10, 4), pady=2)
+        self._sl_start = ctk.CTkSlider(self._trim_frame, from_=0, to=1,
+                                       variable=self.app_state.v_trim_start,
+                                       command=self._on_start_drag)
+        self._sl_start.grid(row=1, column=1, sticky="ew", padx=4)
+        self._lbl_start = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
+                                       font=ctk.CTkFont(size=11))
+        self._lbl_start.grid(row=1, column=2, padx=4)
+        ctk.CTkLabel(self._trim_frame, text="End", width=44,
+                     font=ctk.CTkFont(size=11)).grid(row=2, column=0, padx=(10, 4), pady=2)
+        self._sl_end = ctk.CTkSlider(self._trim_frame, from_=0, to=1,
+                                     variable=self.app_state.v_trim_end,
+                                     command=self._on_end_drag)
+        self._sl_end.grid(row=2, column=1, sticky="ew", padx=4, pady=(2, 8))
+        self._lbl_end = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
+                                     font=ctk.CTkFont(size=11))
+        self._lbl_end.grid(row=2, column=2, padx=4)
+        ctk.CTkButton(self._trim_frame, text="↺ Reset", command=self._reset_trim,
+                      width=70, height=24, fg_color="transparent", border_width=1
+                      ).grid(row=1, column=3, rowspan=2, padx=(4, 10))
+        self._trim_frame.grid_remove()
+
+        # Diagnosis frame
+        self._diagnosis_frame = ctk.CTkFrame(pf, fg_color="#1a1a2e", corner_radius=6)
+        self._diagnosis_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(4, 8))
+        self._diagnosis_frame.grid_columnconfigure(1, weight=1)
+        self._lbl_score = ctk.CTkLabel(self._diagnosis_frame, text="",
+                                       font=ctk.CTkFont(size=18, weight="bold"))
+        self._lbl_score.grid(row=0, column=0, padx=12, pady=10)
+        self._lbl_reasons = ctk.CTkLabel(self._diagnosis_frame, text="",
+                                         justify="left", anchor="w")
+        self._lbl_reasons.grid(row=0, column=1, sticky="w", padx=10)
+        self._diagnosis_frame.grid_remove()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  ACTIONS SECTION  (convert / batch / stop)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_actions_section(self, parent):
+        af = ctk.CTkFrame(parent, fg_color="#0d1420", corner_radius=8,
+                          border_width=1, border_color="#1a3a2a")
+        af.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
+        af.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            af, text="🚀  Convert",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#7ec8e3"
+        ).grid(row=0, column=0, padx=12, pady=(6, 2), sticky="w")
+
+        bf = ctk.CTkFrame(af, fg_color="transparent")
+        bf.grid(row=1, column=0, padx=8, pady=2, sticky="ew")
+        bf.grid_columnconfigure(0, weight=1)
+
+        self._btn_convert = ctk.CTkButton(
+            bf, text="▶  Convert selected file",
+            command=self.convert_selected,
+            height=44, fg_color="#1a4f7a", hover_color="#1a618d",
+            font=ctk.CTkFont(size=13, weight="bold"), state="disabled"
+        )
+        self._btn_convert.grid(row=0, column=0, padx=4, pady=(2, 4), sticky="ew")
+
+        r2 = ctk.CTkFrame(bf, fg_color="transparent")
+        r2.grid(row=1, column=0, sticky="ew")
+        r2.grid_columnconfigure((0, 1), weight=1)
+
+        self._btn_all = ctk.CTkButton(
+            r2, text="⚡  Convert all",
+            command=self.convert_all,
+            height=32, fg_color="#5b2fa0", hover_color="#4a2585",
+            font=ctk.CTkFont(size=12)
+        )
+        self._btn_all.grid(row=0, column=0, padx=(4, 2), pady=4, sticky="ew")
+
+        self._btn_batch = ctk.CTkButton(
+            r2, text="📂  Batch folder",
+            command=self.batch_folder,
+            height=32, fg_color="#1e6a3c", hover_color="#155230",
+            font=ctk.CTkFont(size=12)
+        )
+        self._btn_batch.grid(row=0, column=1, padx=(2, 4), pady=4, sticky="ew")
+
+        # Auto-Trash option for batch
+        tr = ctk.CTkFrame(bf, fg_color="transparent")
+        tr.grid(row=2, column=0, padx=4, pady=(0, 2), sticky="w")
+        self.v_batch_auto_trash = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            tr, text="Auto-Trash ≤",
+            variable=self.v_batch_auto_trash,
+            checkbox_height=16, checkbox_width=16, font=ctk.CTkFont(size=11)
+        ).pack(side="left", padx=(0, 2))
+        self.v_batch_trash_score = tk.StringVar(value="50")
+        ctk.CTkEntry(
+            tr, textvariable=self.v_batch_trash_score,
+            width=36, height=20, font=ctk.CTkFont(size=11), justify="center"
+        ).pack(side="left")
+        ctk.CTkLabel(tr, text="%  (batch)", font=ctk.CTkFont(size=11)).pack(side="left", padx=(2, 0))
+
+        self._conv_progress = ctk.CTkProgressBar(bf, height=8)
+        self._conv_progress.set(0)
+        self._conv_progress.grid(row=3, column=0, padx=4, pady=(6, 2), sticky="ew")
+
+        self._conv_status_lbl = ctk.CTkLabel(
+            bf, text="Ready", text_color="#888899", font=ctk.CTkFont(size=11)
+        )
+        self._conv_status_lbl.grid(row=4, column=0, padx=4, pady=2)
+
+        self._btn_stop = ctk.CTkButton(
+            bf, text="⏹ Force Stop",
+            command=self.cancel_conversion,
+            height=28, fg_color="#c0392b", hover_color="#922b21",
+            font=ctk.CTkFont(size=11, weight="bold"), state="disabled"
+        )
+        self._btn_stop.grid(row=5, column=0, padx=4, pady=(2, 6), sticky="ew")
+
+    def _compute_led_sim_display_size(self):
+        try:
+            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
+        except Exception:
+            w, h = 128, 32
+        scale = LED_SIM_SCALE
+        while w * scale > LED_SIM_MAX_W and scale > 2:
+            scale -= 1
+        return w * scale, h * scale, scale
+
+    def _get_final_canvas_size(self):
+        try:
+            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
+        except Exception:
+            w, h = 128, 32
+        led = getattr(self.app_state, "v_led_sim", None)
+        if led and led.get():
+            dw, dh, _ = self._compute_led_sim_display_size()
+        else:
+            dw, dh = int(w * DMD_DISPLAY_SCALE_FACTOR), int(h * DMD_DISPLAY_SCALE_FACTOR)
+        MAX_W, MAX_H = 640, 360
+        if dw > MAX_W or dh > MAX_H:
+            s = min(MAX_W / dw, MAX_H / dh)
+            dw, dh = int(dw * s), int(dh * s)
+        return dw, dh
+
+    def _update_dmd_canvas_size(self, *_):
+        try:
+            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
+        except Exception:
+            return
+        nw, nh = self._get_final_canvas_size()
+        self._dmd_canvas.configure(width=nw, height=nh)
+        if hasattr(self, "_dmd_title_label"):
+            sim = "  💡" if (getattr(self.app_state, "v_led_sim", None) and
+                             self.app_state.v_led_sim.get()) else ""
+            self._dmd_title_label.configure(text=f"DMD OUTPUT {w}×{h}{sim}")
+        if not self._dmd_frames and not self._dmd_rendering:
+            self._draw_dmd_canvas_idle()
+
+    def _toggle_led_sim(self):
+        is_on = not self.app_state.v_led_sim.get()
+        self.app_state.v_led_sim.set(is_on)
+        self._btn_led_sim.configure(
+            fg_color="#5a4a00" if is_on else "#1a1a2e",
+            hover_color="#7a6400" if is_on else "#2a2a4a",
+            text="💡 LED Sim ✓" if is_on else "💡 LED Sim")
+        self._update_dmd_canvas_size()
+        self._dmd_frames = [None] * len(self._dmd_pil_frames)
+        if self._current_path and not self._dmd_rendering:
+            self._start_dmd_generation(self._current_path)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  IDLE DRAW
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _draw_canvas_idle(self):
+        self._src_canvas.delete("all")
+        self._src_canvas.create_text(SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+                                     text="← Select a file to preview",
+                                     fill="#445566", font=("Helvetica", 12))
+        if hasattr(self, "_src_info"):
+            self._src_info.configure(text="")
+
+    def _draw_auto_canvas_idle(self):
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+                                      text="Auto action preview\n(disabled by default)",
+                                      fill="#334466", font=("Helvetica", 11), justify="center")
+        if hasattr(self, "_auto_info"):
+            self._auto_info.configure(text="")
+
+    def _draw_dmd_canvas_idle(self):
+        self._dmd_canvas.delete("all")
+        try:
+            cw, ch = self._get_final_canvas_size()
+        except Exception:
+            cw, ch = int(128 * DMD_DISPLAY_SCALE_FACTOR), int(32 * DMD_DISPLAY_SCALE_FACTOR)
+        self._dmd_canvas.create_text(cw // 2, ch // 2,
+                                     text="← Select a file then\n  click 🔬 Refresh DMD",
+                                     fill="#334455", font=("Helvetica", 11), justify="center")
+        if hasattr(self, "_dmd_info"):
+            self._dmd_info.configure(text="")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  LOAD PREVIEW
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _load_preview(self, file_path, is_converted=False, converted_data=None):
+        self._stop_src_preview()
+        self._stop_auto_preview()
+        self._stop_dmd_preview()
+        for c in (self._src_canvas, self._auto_canvas, self._dmd_canvas):
+            c.delete("all")
+        self._src_canvas.create_text(SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+                                     text="⏳  Loading preview…",
+                                     fill="#7ec8e3", font=("Helvetica", 12))
+        _, __, ___, dur = get_metadata(file_path)
+        self._source_duration = dur if dur and dur > 0 else 10.0
+        self._update_trim_sliders()
+
+        if is_converted:
+            self._trim_frame.grid_remove()
+            self._diagnosis_frame.grid()
+            if converted_data:
+                score = converted_data.get("score", 0)
+                color = converted_data.get("color", "")
+                rating = converted_data.get("rating", "")
+                reasons = converted_data.get("reasons", [])
+                self._lbl_score.configure(
+                    text=f"{score}%\n{rating}",
+                    text_color=color if color and "#" in color else "#ffffff")
+                self._lbl_reasons.configure(
+                    text=" • " + "\n • ".join(reasons) if reasons else "No specific reasons.")
+            self._start_dmd_generation(file_path, is_already_converted=True)
+            self._draw_canvas_idle()
+            self._draw_auto_canvas_idle()
+        else:
+            self._trim_frame.grid()
+            self._diagnosis_frame.grid_remove()
+            threading.Thread(target=self._extract_source_frames,
+                             args=(file_path,), daemon=True).start()
+            self._start_auto_generation(file_path)
+            self._start_dmd_generation(file_path)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  SOURCE
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _stop_src_preview(self):
+        if self._src_job:
+            self.after_cancel(self._src_job)
+            self._src_job = None
+        self._src_pil_frames.clear()
+        self._src_frames.clear()
+        self._src_delays.clear()
+        self._src_idx = 0
+        if self._src_tmpdir and os.path.isdir(self._src_tmpdir):
+            shutil.rmtree(self._src_tmpdir, ignore_errors=True)
+            self._src_tmpdir = None
+
+    def _extract_source_frames(self, file_path):
+        tmpdir = tempfile.mkdtemp(prefix="dmd_src_")
+        fps_prev = 12.5
+        dur = min(self._source_duration, 10.0)
+        cmd = ["ffmpeg", "-y", "-i", file_path, "-t", str(dur),
+               "-vf", (f"fps={fps_prev},"
+                       f"scale={SRC_CANVAS_W}:{SRC_CANVAS_H}:"
+                       f"force_original_aspect_ratio=decrease,"
+                       f"pad={SRC_CANVAS_W}:{SRC_CANVAS_H}:(ow-iw)/2:(oh-ih)/2"
+                       f":color={BG_CANVAS[1:]}"),
+               "-f", "image2", os.path.join(tmpdir, "f%04d.png")]
+        subprocess.run(cmd, capture_output=True)
+        paths = sorted(glob.glob(os.path.join(tmpdir, "f*.png")))
+        pil_frames, delays = [], []
+        delay_ms = int(1000 / fps_prev)
+        for fp in paths:
+            try:
+                pil_frames.append(Image.open(fp).convert("RGB").copy())
+                delays.append(delay_ms)
+            except Exception:
+                pass
+        self.after(0, lambda: self._on_source_frames_ready(pil_frames, delays, tmpdir, file_path))
+
+    def _on_source_frames_ready(self, pil_frames, delays, tmpdir, file_path):
+        if not pil_frames:
+            self._src_canvas.delete("all")
+            self._src_canvas.create_text(SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+                                         text="⚠️  Preview unavailable\n(ffmpeg missing?)",
+                                         fill="#e74c3c", font=("Helvetica", 11), justify="center")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return
+        self._src_tmpdir = tmpdir
+        self._src_pil_frames = pil_frames
+        self._src_frames = [None] * len(pil_frames)
+        self._src_delays = delays
+        self._src_idx = 0
+        self._src_info.configure(
+            text=f"{Path(file_path).name}   ·   {len(pil_frames)} frames   ·   {self._source_duration:.1f} s")
+        self._animate_src()
+
+    def _animate_src(self):
+        if not self._src_pil_frames:
+            return
+        num = len(self._src_pil_frames)
+        idx = self._src_idx % (num + 1)
+        if idx == num:
+            self._src_canvas.delete("all")
+            self._src_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+            self._src_idx += 1
+            self._src_job = self.after(1000, self._animate_src)
+            return
+        if self._src_frames[idx] is None:
+            self._src_frames[idx] = ImageTk.PhotoImage(self._src_pil_frames[idx])
+        self._src_canvas.delete("all")
+        self._src_canvas.create_image(0, 0, anchor="nw", image=self._src_frames[idx])
+        self._src_idx += 1
+        self._src_job = self.after(self._src_delays[idx] if self._src_delays else 80, self._animate_src)
+
+    def show_source_preview(self):
+        if not self._current_path:
+            from tkinter import messagebox; messagebox.showinfo("Info", "Select a file first.")
+            return
+        self._load_preview(self._current_path)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  AUTO-ACTION
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _stop_auto_preview(self):
+        if self._auto_job:
+            self.after_cancel(self._auto_job)
+            self._auto_job = None
+        self._auto_pil_frames.clear()
+        self._auto_frames.clear()
+        self._auto_delays.clear()
+        self._auto_idx = 0
+        if self._auto_tmpdir and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
+
+    def show_auto_preview(self):
+        if not self._current_path:
+            from tkinter import messagebox; messagebox.showinfo("Info", "Select a file first.")
+            return
+        self._start_auto_generation(self._current_path)
+
+    def _start_auto_generation(self, src):
+        if self._auto_rendering:
+            self._auto_pending_src = src
+            return
+        if not self.app_state.v_action_enabled.get():
+            self._stop_auto_preview()
+            self._draw_auto_canvas_idle()
+            self._auto_info.configure(text="Auto action disabled")
+            return
+        self._auto_pending_src = None
+        self._auto_rendering = True
+        self._stop_auto_preview()
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+                                      text="⏳  Generating auto-action preview…",
+                                      fill="#7aa2ff", font=("Helvetica", 11), justify="center")
+        self._btn_auto.configure(state="disabled", text="⏳ Auto…")
+        start_s, end_s = self._get_trim()
+        s = self.app_state
+        cfg = AutoActionConfig(
+            detector=s.v_action_detector.get(),
+            strength=float(s.v_action_strength.get()),
+            smoothness=float(s.v_action_smoothness.get()),
+            zoom_max=float(s.v_action_zoom_max.get()),
+            padding=float(s.v_action_padding.get()),
+            intro_duration=float(s.v_action_intro_duration.get()),
+            bg_sub_enable=bool(s.v_action_bg_sub_enable.get()),
+            bottom_crop_pct=float(s.v_action_bottom_crop_pct.get()),
+            auto_bottom_crop=bool(s.v_action_auto_bottom_crop.get()),
+            top_crop_pct=float(s.v_action_top_crop_pct.get()),
+            auto_top_crop=bool(s.v_action_auto_top_crop.get()),
+            vertical_bias=float(s.v_action_vertical_bias.get()),
+            auto_vertical_bias=bool(s.v_action_auto_vertical_bias.get()),
+            smart_auto_crop=bool(s.v_action_smart_auto_crop.get()),
+            auto_pillarbox_crop=bool(s.v_action_auto_pillarbox_crop.get()),
+            dmd_visibility_score_enabled=bool(s.v_action_dmd_visibility_score_enabled.get()),
+            dmd_readability_score_enabled=bool(s.v_action_dmd_readability_score_enabled.get()),
+            start_s=start_s, end_s=end_s,
+            target_width=s.v_target_width.get(), target_height=s.v_target_height.get(),
+        )
+        threading.Thread(target=self._generate_auto_preview,
+                         args=(src, cfg), daemon=True).start()
+
+    def _generate_auto_preview(self, src, cfg):
+        try:
+            ok, out_mp4, msg = preprocess_video_for_dmd(src, cfg)
+            if not ok or not out_mp4:
+                self.after(0, lambda: self._on_auto_fail(msg))
+                return
+            tmpdir = os.path.dirname(out_mp4)
+            fps_prev = 12.5
+            cmd = ["ffmpeg", "-y", "-i", out_mp4,
+                   "-vf", (f"fps={fps_prev},"
+                            f"scale={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:"
+                            f"force_original_aspect_ratio=decrease,"
+                            f"pad={AUTO_CANVAS_W}:{AUTO_CANVAS_H}:(ow-iw)/2:(oh-ih)/2"
+                            f":color={BG_CANVAS[1:]}"),
+                   "-f", "image2", os.path.join(tmpdir, "a%04d.png")]
+            subprocess.run(cmd, capture_output=True)
+            paths = sorted(glob.glob(os.path.join(tmpdir, "a*.png")))
+            pil_frames, delays = [], []
+            for fp in paths:
+                try:
+                    pil_frames.append(Image.open(fp).convert("RGB").copy())
+                    delays.append(int(1000 / fps_prev))
+                except Exception:
+                    pass
+            self.after(0, lambda: self._on_auto_ready(pil_frames, delays, tmpdir, msg))
+        except Exception as exc:
+            _m = str(exc)
+            self.after(0, lambda _msg=_m: self._on_auto_fail(_msg))
+
+    def _on_auto_ready(self, pil_frames, delays, tmpdir, msg):
+        self._auto_rendering = False
+        self._btn_auto.configure(state="normal", text="🎯 Auto")
+        if not pil_frames:
+            self._on_auto_fail("No frames produced")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return
+        self._stop_auto_preview()
+        self._auto_tmpdir = tmpdir
+        self._auto_pil_frames = pil_frames
+        self._auto_frames = [None] * len(pil_frames)
+        self._auto_delays = delays
+        self._auto_idx = 0
+        self._auto_info.configure(text=f"{msg}  ·  {len(pil_frames)} frames")
+        self._animate_auto()
+        self._flush_auto_pending()
+
+    def _on_auto_fail(self, msg):
+        self._auto_rendering = False
+        self._btn_auto.configure(state="normal", text="🎯 Auto")
+        if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+                                      text="❌  Auto-action failed",
+                                      fill="#e74c3c", font=("Helvetica", 11))
+        self._auto_info.configure(text=msg)
+        self._flush_auto_pending()
+
+    def _flush_auto_pending(self):
+        pending, self._auto_pending_src = self._auto_pending_src, None
+        if pending and self._current_path:
+            self.after(50, lambda: self._start_auto_generation(pending))
+
+    def _animate_auto(self):
+        if not self._auto_pil_frames:
+            return
+        num = len(self._auto_pil_frames)
+        idx = self._auto_idx % (num + 1)
+        if idx == num:
+            self._auto_canvas.delete("all")
+            self._auto_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+            self._auto_idx += 1
+            self._auto_job = self.after(1000, self._animate_auto)
+            return
+        if self._auto_frames[idx] is None:
+            self._auto_frames[idx] = ImageTk.PhotoImage(self._auto_pil_frames[idx])
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_image(0, 0, anchor="nw", image=self._auto_frames[idx])
+        self._auto_idx += 1
+        self._auto_job = self.after(self._auto_delays[idx] if self._auto_delays else 80, self._animate_auto)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  DMD
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _stop_dmd_preview(self):
+        if self._dmd_job:
+            self.after_cancel(self._dmd_job)
+            self._dmd_job = None
+        self._dmd_pil_frames.clear()
+        self._dmd_frames.clear()
+        self._dmd_delays.clear()
+        self._dmd_idx = 0
+        if self._dmd_tmpdir and os.path.isdir(self._dmd_tmpdir):
+            shutil.rmtree(self._dmd_tmpdir, ignore_errors=True)
+            self._dmd_tmpdir = None
+
+    def show_dmd_preview(self):
+        if not self._current_path:
+            from tkinter import messagebox; messagebox.showinfo("Info", "Select a file first.")
+            return
+        self._start_dmd_generation(self._current_path)
+
+    def refresh_all_previews(self):
+        if not self._current_path:
+            from tkinter import messagebox; messagebox.showinfo("Info", "Select a file first.")
+            return
+        self._load_preview(self._current_path)
+
+    def _start_dmd_generation(self, src, is_already_converted=False):
+        if self._dmd_rendering:
+            self._dmd_pending_src = src
+            return
+        self._dmd_pending_src = None
+        self._dmd_rendering = True
+        self._btn_dmd.configure(state="disabled", text="⏳ DMD…")
+        # Always sync canvas size before computing frame dimensions
+        self._update_dmd_canvas_size()
+        try:
+            cw, ch = self._get_final_canvas_size()
+        except Exception:
+            cw, ch = 128, 32
+        self._dmd_canvas.delete("refresh_tag")
+        self._dmd_canvas.create_text(cw - 4, 4, text="↻", fill="#f39c12",
+                                     font=("Helvetica", 10, "bold"),
+                                     anchor="ne", tags="refresh_tag")
+        params = self._collect_params()
+        start_s, end_s = self._get_trim()
+        led = getattr(self.app_state, "v_led_sim", None)
+        led_on = led.get() if led else False
+        if led_on:
+            dw, dh, sim_scale = self._compute_led_sim_display_size()
+        else:
+            dw, dh, sim_scale = cw, ch, 0
+        threading.Thread(
+            target=self._generate_dmd_preview,
+            args=(src, params, start_s, end_s, dw, dh, led_on, sim_scale, cw, ch,
+                  is_already_converted),
+            daemon=True).start()
+
+    def _generate_dmd_preview(self, src, params, start_s, end_s,
+                               dmd_display_w, dmd_display_h, led_sim=False, sim_scale=0,
+                               final_canvas_w=128, final_canvas_h=32,
+                               is_already_converted=False):
+        tmpdir = tempfile.mkdtemp(prefix="dmd_dmd_")
+        try:
+            if is_already_converted:
+                out_gif = src
+            else:
+                out_gif = os.path.join(tmpdir, "preview.gif")
+                success, msg = process_file(src, out_gif, params, start_s, end_s,
+                                            callback=lambda m, lv="info": None)
+                if not success or not os.path.isfile(out_gif):
+                    self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
+                    return
+            pil_frames, delays = [], []
+            try:
+                if out_gif.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.webm')):
+                    import cv2
+                    from src.engine.auto_action.reader import _quiet_c_stderr
+                    with _quiet_c_stderr():
+                        cap = cv2.VideoCapture(out_gif)
+                    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                    dm = int(1000 / fps) if fps > 0 else 40
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        comp = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        comp = comp.resize((dmd_display_w, dmd_display_h), Image.NEAREST)
+                        if led_sim and sim_scale >= 2:
+                            comp = _apply_led_grid(comp, sim_scale)
+                        if comp.size != (final_canvas_w, final_canvas_h):
+                            comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
+                        pil_frames.append(comp)
+                        delays.append(dm)
+                    cap.release()
+                else:
+                    from PIL import ImageSequence
+                    img = Image.open(out_gif)
+                    bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
+                    for frame in ImageSequence.Iterator(img):
+                        bg.paste(frame, (0, 0), frame.convert("RGBA"))
+                        comp = bg.copy().convert("RGB").resize(
+                            (dmd_display_w, dmd_display_h), Image.NEAREST)
+                        if led_sim and sim_scale >= 2:
+                            comp = _apply_led_grid(comp, sim_scale)
+                        if comp.size != (final_canvas_w, final_canvas_h):
+                            comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
+                        pil_frames.append(comp)
+                        delays.append(max(img.info.get("duration", 80), 20))
+            except Exception as exc:
+                _m = str(exc)
+                self.after(0, lambda _msg=_m, _td=tmpdir: self._on_dmd_fail(_msg, _td))
+                return
+            if not pil_frames:
+                self.after(0, lambda: self._on_dmd_fail("No frames decoded", tmpdir))
+                return
+            self.after(0, lambda: self._on_dmd_ready(pil_frames, delays, tmpdir, out_gif))
+        except Exception as exc:
+            _m = str(exc)
+            self.after(0, lambda _msg=_m, _td=tmpdir: self._on_dmd_fail(_msg, _td))
+
+    def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif):
+        try:
+            self._dmd_rendering = False
+            self._btn_dmd.configure(state="normal", text="🔬 DMD")
+            self._stop_dmd_preview()
+            self._dmd_tmpdir = tmpdir
+            self._dmd_pil_frames = pil_frames
+            self._dmd_frames = [None] * len(pil_frames)
+            self._dmd_delays = delays
+            self._dmd_idx = 0
+            size_kb = os.path.getsize(out_gif) // 1024 if os.path.isfile(out_gif) else 0
+            self._dmd_info.configure(
+                text=(f"✅  {self.app_state.v_target_width.get()}"
+                      f"×{self.app_state.v_target_height.get()}"
+                      f"  ·  {len(pil_frames)} frames  ·  {size_kb} KB"))
+            self._animate_dmd()
+            self._flush_dmd_pending()
+        except Exception as e:
+            logger.exception("_on_dmd_ready: %s", e)
+
+    def _on_dmd_fail(self, msg, tmpdir):
+        self._dmd_rendering = False
+        self._btn_dmd.configure(state="normal", text="🔬 DMD")
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        self._stop_dmd_preview()
+        self._dmd_canvas.delete("all")
+        try:
+            cw, ch = self._get_final_canvas_size()
+        except Exception:
+            cw, ch = int(128 * DMD_DISPLAY_SCALE_FACTOR), int(32 * DMD_DISPLAY_SCALE_FACTOR)
+        self._dmd_canvas.create_text(cw // 2, ch // 2,
+                                     text="❌  DMD render failed",
+                                     fill="#e74c3c", font=("Helvetica", 11))
+        logger.error("DMD preview: %s", msg)
+        self._flush_dmd_pending()
+
+    def _flush_dmd_pending(self):
+        pending, self._dmd_pending_src = self._dmd_pending_src, None
+        if pending and self._current_path:
+            self.after(50, lambda: self._start_dmd_generation(pending))
+
+    def _animate_dmd(self):
+        if not self._dmd_pil_frames:
+            return
+        try:
+            num = len(self._dmd_pil_frames)
+            idx = self._dmd_idx % (num + 1)
+            if idx == num:
+                self._dmd_canvas.delete("all")
+                self._dmd_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+                self._dmd_idx += 1
+                self._dmd_job = self.after(1000, self._animate_dmd)
+                return
+            if self._dmd_frames[idx] is None:
+                self._dmd_frames[idx] = ImageTk.PhotoImage(self._dmd_pil_frames[idx])
+            self._dmd_canvas.delete("all")
+            self._dmd_canvas.create_image(0, 0, anchor="nw", image=self._dmd_frames[idx])
+            self._dmd_idx += 1
+            self._dmd_job = self.after(
+                self._dmd_delays[idx] if self._dmd_delays else 80, self._animate_dmd)
+        except Exception as e:
+            logger.exception("_animate_dmd: %s", e)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  PARAMS COLLECTION
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _collect_params(self):
+        s = self.app_state
+        params = {
+            "mode":            s.v_mode.get(),
+            "max_workers":     s.v_workers.get(),
+            "scroll_speed":    s.v_scroll_speed.get(),
+            "bottom_crop_pct": s.v_bottom_crop.get(),
+            "top_crop_pct":    s.v_top_crop.get(),
+            "scroll_cycles":   s.v_scroll_cycles.get(),
+            "fps_min":         s.v_fps_min.get(),
+            "fps_max":         s.v_fps_max.get(),
+            "contrast":        s.v_contrast.get(),
+            "saturation":      s.v_saturation.get(),
+            "brightness":      s.v_brightness.get(),
+            "gamma":           s.v_gamma.get(),
+            "sharpen_lum":     s.v_sharpen_lum.get(),
+            "sharpen_chr":     s.v_sharpen_chr.get(),
+            "dither":          s.v_dither.get(),
+            "scroll_enabled":  s.v_scroll_enabled.get(),
+            "zoom":            s.v_zoom.get(),
+            "manual_x":        s.v_manual_x.get(),
+            "manual_y":        s.v_manual_y.get(),
+            "hue_shift":       s.v_hue_shift.get(),
+            "noise_reduction": s.v_noise_reduction.get(),
+            "film_grain":      int(s.v_film_grain.get()),
+            "vignette":        s.v_vignette.get(),
+            "auto_action_enabled":           s.v_action_enabled.get(),
+            "action_detector":               s.v_action_detector.get(),
+            "action_strength":               s.v_action_strength.get(),
+            "action_smoothness":             s.v_action_smoothness.get(),
+            "action_zoom_max":               s.v_action_zoom_max.get(),
+            "action_padding":                s.v_action_padding.get(),
+            "action_intro":                  s.v_action_intro_duration.get(),
+            "action_bottom_crop":            s.v_action_bottom_crop_pct.get(),
+            "action_auto_bottom_crop":       s.v_action_auto_bottom_crop.get(),
+            "action_top_crop":               s.v_action_top_crop_pct.get(),
+            "action_auto_top_crop":          s.v_action_auto_top_crop.get(),
+            "action_vertical_bias":          s.v_action_vertical_bias.get(),
+            "action_auto_vertical_bias":     s.v_action_auto_vertical_bias.get(),
+            "action_smart_auto_crop":        s.v_action_smart_auto_crop.get(),
+            "action_auto_pillarbox":         s.v_action_auto_pillarbox_crop.get(),
+            "bg_sub_enable":                 s.v_action_bg_sub_enable.get(),
+            "dmd_visibility_score_enabled":  s.v_action_dmd_visibility_score_enabled.get(),
+            "dmd_readability_score_enabled": s.v_action_dmd_readability_score_enabled.get(),
+            "target_width":    s.v_target_width.get(),
+            "target_height":   s.v_target_height.get(),
+            "text_overlay_enabled": s.v_text_overlay_enabled.get(),
+            "text_content":    s.v_text_content.get(),
+            "text_font_size":  s.v_text_font_size.get(),
+            "text_color":      s.v_text_color.get(),
+            "text_position":   s.v_text_position.get(),
+            "text_font_file":  s.v_text_font_file.get(),
+            "text_style":      s.v_text_style.get(),
+            "text_bg":         s.v_text_bg.get(),
+            "text_bg_opacity": s.v_text_bg_opacity.get(),
+            "text_animation":  s.v_text_animation.get(),
+            "max_duration": (s.v_max_duration.get() if s.v_max_dur_enabled.get() else 0.0),
+            "auto_color_enabled": s.v_auto_color_enabled.get(),
+            "log_level": "DEBUG",
+        }
+        if s.v_let_me_handle_it.get():
+            params.update({
+                "auto_color_enabled": True, "auto_action_enabled": True,
+                "action_smart_auto_crop": True, "action_auto_pillarbox": True,
+                "dmd_visibility_score_enabled": True, "dmd_readability_score_enabled": True,
+            })
+        return params
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  TRIM
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _update_trim_sliders(self):
+        dur = max(self._source_duration, 0.1)
+        self._sl_start.configure(to=dur)
+        self._sl_end.configure(to=dur)
+        self.app_state.v_trim_start.set(0.0)
+        init_end = min(self.app_state.v_max_duration.get(), dur) \
+            if self.app_state.v_max_dur_enabled.get() else dur
+        self.app_state.v_trim_end.set(init_end)
+        self._lbl_start.configure(text="0.0 s")
+        self._lbl_end.configure(text=f"{init_end:.1f} s")
+        self._sl_end.configure(
+            state="disabled" if self.app_state.v_max_dur_enabled.get() else "normal")
+
+    def _on_start_drag(self, val):
+        v = float(val)
+        end = self.app_state.v_trim_end.get()
+        if self.app_state.v_max_dur_enabled.get():
+            max_dur = self.app_state.v_max_duration.get()
+            v = min(v, max(0.0, self._source_duration - max_dur))
+            self.app_state.v_trim_start.set(v)
+            new_end = min(v + max_dur, self._source_duration)
+            self.app_state.v_trim_end.set(new_end)
+            self._lbl_end.configure(text=f"{new_end:.1f} s")
+        elif v >= end:
+            self.app_state.v_trim_start.set(max(0.0, end - 0.05))
+        self._lbl_start.configure(text=f"{self.app_state.v_trim_start.get():.1f} s")
+
+    def _on_end_drag(self, val):
+        v = float(val)
+        start = self.app_state.v_trim_start.get()
+        if v <= start:
+            self.app_state.v_trim_end.set(min(self._source_duration, start + 0.05))
+        self._lbl_end.configure(text=f"{self.app_state.v_trim_end.get():.1f} s")
+
+    def _reset_trim(self):
+        self.app_state.v_trim_start.set(0.0)
+        self.app_state.v_trim_end.set(self._source_duration)
+        self._lbl_start.configure(text="0.0 s")
+        self._lbl_end.configure(text=f"{self._source_duration:.1f} s")
+
+    def _get_trim(self):
+        s = self.app_state.v_trim_start.get()
+        e = self.app_state.v_trim_end.get()
+        return (None, None) if s <= 0.0 and e >= self._source_duration - 0.05 else (s, e)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  DEBOUNCED REFRESH
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _schedule_pipeline_refresh(self, *_):
+        if self._restoring_params:
+            return
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
+        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_pipeline)
+
+    def _schedule_dmd_only_refresh(self, *_):
+        if self._restoring_params:
+            return
+        if self._adv_refresh_job:
+            self.after_cancel(self._adv_refresh_job)
+        self._adv_refresh_job = self.after(DMD_REFRESH_DELAY_MS, self._auto_refresh_dmd_only)
+
+    def _auto_refresh_pipeline(self):
+        self._adv_refresh_job = None
+        if self._current_path and not self._busy and not self._auto_rendering and not self._dmd_rendering:
+            self._start_auto_generation(self._current_path)
+            self._start_dmd_generation(self._current_path)
+
+    def _auto_refresh_dmd_only(self):
+        self._adv_refresh_job = None
+        if self._current_path and not self._busy and not self._dmd_rendering:
+            self._start_dmd_generation(self._current_path)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  CONVERSION LOGIC
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _out_path(self, src, iid=None):
+        base = Path(src).stem + "_dmd" + Path(src).suffix
+        out_dir = self.app_state.v_output_dir.get().strip()
+        if out_dir and os.path.isdir(out_dir):
+            return str(Path(out_dir) / base)
+        tmp_dir = Path(src).parent / "dmd_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        return str(tmp_dir / base)
+
+    def convert_selected(self):
+        self._cancel_event.clear()
+        if self._busy:
+            messagebox.showwarning("Busy", "A conversion is already running.")
+            return
+        lp = self._left_panel
+        if lp is None or not lp._selected_iid:
+            messagebox.showinfo("Info", "Select a file from the list first.")
+            return
+        src = lp._file_data.get(lp._selected_iid)
+        if not src:
+            return
+        out = self._out_path(src, iid=lp._selected_iid)
+        start_s, end_s = self._get_trim()
+        trim_info = f"  trim [{start_s:.1f}s → {end_s:.1f}s]" if start_s is not None else ""
+        self._log(f"▶  Convert: {Path(src).name}{trim_info}")
+        tasks = [(src, out, start_s, end_s, lp._selected_iid)]
+        threading.Thread(
+            target=self._run_tasks, args=(tasks, self._collect_params()), daemon=True
+        ).start()
+
+    def convert_all(self):
+        self._cancel_event.clear()
+        lp = self._left_panel
+        if lp is None or not lp._file_data:
+            messagebox.showinfo("Info", "The file list is empty.")
+            return
+        if self._busy:
+            messagebox.showwarning("Busy", "A conversion is already running.")
+            return
+        tasks = [
+            (path, self._out_path(path, iid=iid), None, None, iid)
+            for iid, path in lp._file_data.items()
+        ]
+        self._log(f"⚡  Converting {len(tasks)} file(s)…")
+        for _, _, _, _, iid in tasks:
+            lp._set_file_status(iid, "converting")
+        threading.Thread(
+            target=self._run_tasks, args=(tasks, self._collect_params()), daemon=True
+        ).start()
+
+    def batch_folder(self):
+        self._cancel_event.clear()
+        folder_in = filedialog.askdirectory(title="Source folder — Batch")
+        if not folder_in:
+            return
+        out_dir = self.app_state.v_output_dir.get().strip()
+        if not out_dir:
+            out_dir = str(Path(folder_in) / "dmd_tmp")
+            Path(out_dir).mkdir(parents=True, exist_ok=True)
+        files = [f for f in os.listdir(folder_in)
+                 if Path(f).suffix.lower() in SUPPORTED_EXTENSIONS]
+        if not files:
+            messagebox.showinfo("Info", "No supported files found in this folder.")
+            return
+        if self._busy:
+            messagebox.showwarning("Busy", "A conversion is already running.")
+            return
+        params = self._collect_params()
+        self._log(f"📂  Batch: {len(files)} file(s)  →  {out_dir}")
+        threading.Thread(
+            target=self._run_batch_folder, args=(folder_in, out_dir, params), daemon=True
+        ).start()
+
+    def cancel_conversion(self):
+        self._cancel_event.set()
+        self._log("⚠️  Cancellation requested…", "warning")
+        self._btn_stop.configure(state="disabled", text="Stopping…")
+
+    def _run_tasks(self, tasks, params):
+        self.after(0, lambda: self._set_conv_busy(True))
+        total = len(tasks)
+        max_workers = int(params.get("max_workers", 2))
+        self.after(0, lambda w=max_workers: self._log(
+            f"🚀  Convert {total} file(s) using {w} worker(s)…"))
+
+        done_count = [0]
+        done_lock = threading.Lock()
+        lp = self._left_panel
+        mp = self._middle_panel
+        per_gif_enabled = (
+            lp is not None and
+            hasattr(lp, "_per_gif_configs") and
+            self.app_state.v_per_gif_config.get()
+        )
+
+        def _process_one(task_tuple):
+            src, out, start_s, end_s, iid = task_tuple
+            if self._cancel_event.is_set():
+                return
+            task_params = dict(params)
+            if per_gif_enabled and iid in lp._per_gif_configs:
+                task_params.update(lp._per_gif_configs[iid])
+            if lp:
+                self.after(0, lambda _i=iid: lp._set_file_status(_i, "converting"))
+            success, msg = process_file(
+                src, out, task_params, start_s, end_s,
+                callback=lambda m, lv="info": self.after(
+                    0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
+                cancel_event=self._cancel_event,
+            )
+            if success:
+                from src.engine.conversion.quality import load_score_sidecar
+                score_result = load_score_sidecar(out) or {
+                    "score": 0, "rating": "Unknown", "color": "⚪", "reasons": []
+                }
+                if mp:
+                    self.after(0, lambda _o=out, _r=score_result:
+                               mp._add_converted_file(_o, _r))
+                if lp:
+                    self.after(0, lambda _i=iid: lp._remove_specific_file(_i))
+            else:
+                if lp:
+                    self.after(0, lambda _i=iid: lp._set_file_status(_i, "error"))
+            with done_lock:
+                done_count[0] += 1
+                prog = done_count[0] / total
+                self.after(0, lambda p=prog: self._conv_progress.set(p))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            concurrent.futures.wait([ex.submit(_process_one, t) for t in tasks])
+
+        if self._cancel_event.is_set():
+            self.after(0, lambda: self._log("🛑  Conversion cancelled."))
+        else:
+            self.after(0, lambda: self._log(f"✅  {total} conversion(s) done."))
+        self.after(0, lambda: self._set_conv_busy(False))
+
+    def _run_batch_folder(self, folder_in, folder_out, params):
+        folder_out = os.path.abspath(folder_out)
+        self.after(0, lambda: self._set_conv_busy(True))
+        self.after(0, lambda: self._conv_progress.set(0))
+        mp = self._middle_panel
+
+        def on_progress(done, total):
+            self.after(0, lambda f=done / max(1, total): self._conv_progress.set(f))
+
+        process_folder(
+            folder_in, folder_out, params,
+            callback=lambda m, lv="info": self.after(
+                0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
+            progress_callback=on_progress,
+            cancel_event=self._cancel_event,
+        )
+
+        if self._cancel_event.is_set():
+            self.after(0, lambda: self._log("🛑  Batch cancelled."))
+            self.after(0, lambda: self._set_conv_busy(False))
+            return
+
+        if self.v_batch_auto_trash.get():
+            try:
+                threshold = int(self.v_batch_trash_score.get())
+                self.after(0, lambda: self._log(f"🧹 Auto-Trash ≤ {threshold}%…"))
+                from src.engine.conversion.quality import load_score_sidecar
+                try:
+                    import send2trash; safe_delete = send2trash.send2trash
+                except ImportError:
+                    self.after(0, lambda: self._log(
+                        "send2trash missing — deleting permanently", "warning"))
+                    safe_delete = os.remove
+                trashed = 0
+                for f in os.listdir(folder_out):
+                    if f.lower().endswith(".gif"):
+                        gp = os.path.join(folder_out, f)
+                        res = load_score_sidecar(gp)
+                        if res and res.get("score", 0) <= threshold:
+                            try:
+                                safe_delete(gp)
+                                trashed += 1
+                                sc = gp + ".scores.json"
+                                if os.path.exists(sc):
+                                    safe_delete(sc)
+                            except Exception as e:
+                                self.after(0, lambda err=e: self._log(
+                                    f"Trash failed: {err}", "warning"))
+                self.after(0, lambda c=trashed: self._log(
+                    f"✅  Auto-Trash removed {c} file(s)."))
+            except ValueError:
+                self.after(0, lambda: self._log(
+                    "⚠️  Invalid threshold — skipping Auto-Trash.", "warning"))
+
+        self.after(0, lambda: self._log("✅  Batch done."))
+        self.after(0, lambda: self._set_conv_busy(False))
+
+    def _set_conv_busy(self, busy: bool):
+        self._busy = busy
+        state = "disabled" if busy else "normal"
+        lp = self._left_panel
+        for btn in (self._btn_all, self._btn_batch):
+            btn.configure(state=state)
+        if not busy and lp and lp._selected_iid:
+            self._btn_convert.configure(state="normal")
+        else:
+            self._btn_convert.configure(state="disabled")
+        self._btn_stop.configure(
+            state="normal" if busy else "disabled",
+            text="⏹ Force Stop")
+        self._conv_status_lbl.configure(
+            text="⏳  Converting…" if busy else "Ready")
+        if not busy:
+            self.after(2500, lambda: self._conv_progress.set(0))
+        EventBus.publish(
+            EventType.CONVERSION_STARTED if busy else EventType.CONVERSION_FINISHED,
+            {"busy": busy})
+
+    def _log(self, message: str, level: str = "info"):
+        logger.info(message) if level == "info" else logger.warning(message)
+        EventBus.publish(EventType.CONVERSION_PROGRESS,
+                         {"log": message, "level": level})
+
