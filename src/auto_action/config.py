@@ -18,6 +18,7 @@ class AutoActionConfig:
     auto_vertical_bias: bool = False  # auto floor detection: places ROI bottom (floor) at ~85 % of crop height
     smart_auto_crop: bool = False      # let the engine choose the optimal crop/tracking combination
     auto_strength: bool = False        # auto-detect optimal strength based on content type
+    auto_pillarbox_crop: bool = False  # auto-detect left/right black bars and constrain horizontal framing
     auto_smoothness: bool = False      # auto-detect optimal smoothness based on content type
     dmd_visibility_score_enabled: bool = False # Enable DMD Visibility Score
     # ── PRIORITY 2 — Temporal Scene Memory ───────────────────────────────────

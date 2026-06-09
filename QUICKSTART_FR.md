@@ -16,6 +16,10 @@ Pour lancer l'interface graphique :
 4. Réglez le curseur **`Assistant de Nettoyage (Cleanup)`** sur `50%` (ou votre seuil de tolérance). Le système supprimera automatiquement les mauvais résultats !
 5. Cliquez sur **`Batch Convert Folder`** sur le panneau de gauche, choisissez un dossier de vidéos, et allez prendre un café.
 
+### Extraire les Meilleurs Moments :
+Vous avez une longue vidéo ? Passez à l'onglet **`AI Moments`** !
+Cliquez sur **`Generate Best Moments`** pour laisser l'IA trouver, évaluer et classer automatiquement les meilleures scènes de votre vidéo. Vous pouvez ensuite prévisualiser et convertir ces extraits directement. [Lisez le guide complet AI Moments ici](docs/AI_MOMENTS_FR.md).
+
 ---
 
 ## 💻 2. Utilisation en Ligne de Commande (CLI)
@@ -54,3 +58,15 @@ Vous y trouverez un menu déroulant pour régler le niveau de verbosité à la v
 - **DEBUG** : Affiche absolument tout le traitement interne, y compris les retours complexes de FFMPEG (très utile pour analyser un problème spécifique).
 
 Si vous utilisez le CLI, vous pouvez obtenir le même niveau de détail complet avec l'argument `--log-level DEBUG` (ou simplement `--verbose`).
+
+---
+
+## 🤖 5. Découvrir les AI Iconic Moments
+
+Vous avez une vidéo de gameplay ou un film de 10 minutes et vous souhaitez extraire les meilleurs segments de 3 secondes pour votre panneau LED sans avoir à tout regarder ?
+
+1. Allez dans le nouvel onglet **`AI Moments`** en haut de l'interface.
+2. Sélectionnez votre vidéo et choisissez le nombre de moments à extraire (ex: le Top 5).
+3. Activez vos critères de détection préférés (Action, Epic, Character, Loopable, DMD).
+4. Cliquez sur **`Generate AI Moments`**. Le moteur IA va traiter la vidéo à une vitesse fulgurante et vous présenter une grille des meilleurs moments, classés par score.
+5. Cliquez sur **`Details`** d'un moment, puis sur **`Open In Converter`**. Cela vous ramènera instantanément à l'onglet de conversion avec les timestamps exacts et le cadrage Auto Action parfaitement pré-configurés pour vous !

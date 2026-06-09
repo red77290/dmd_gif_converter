@@ -161,8 +161,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         "face_priority":      False,
         "reasons":            [],
     }
-    if not cfg.smart_auto_crop:
-        return {**_EMPTY, "reasons": ["smart_auto_crop disabled in config"]}
+    if not (cfg.smart_auto_crop or getattr(cfg, "auto_strength", False) or getattr(cfg, "auto_smoothness", False) or getattr(cfg, "auto_pillarbox_crop", False)):
+        return {**_EMPTY, "reasons": ["smart features disabled in config"]}
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     if total_frames <= 0:
@@ -191,6 +191,10 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     roi_heights: list[float]      = []
     roi_widths: list[float]       = []
 
+    frame_lefts: list[float]      = []
+    frame_rights: list[float]     = []
+    check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False)
+
     saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
     for i in range(0, min(total_frames - 1, sample_count * step), step):
         cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
@@ -207,6 +211,18 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
                 roi_bottoms_fp.append(float(ry + rh * FACE_FRAC))
             else:
                 roi_bottoms_fp.append(float(ry + rh))
+                
+        if check_pillarbox:
+            # Downsample for speed
+            small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
+            coords = np.argwhere(thresh > 0)
+            if coords.size > 0:
+                y_min, x_min = coords.min(axis=0)
+                y_max, x_max = coords.max(axis=0)
+                frame_lefts.append(x_min / 128.0)
+                frame_rights.append(x_max / 128.0)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
@@ -293,12 +309,31 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     pre_top_pct    = _clamp(top_y    / frame_h,              0.0, 0.9)
     pre_bottom_pct = _clamp((frame_h - bottom_y) / frame_h,  0.0, 0.9)
 
+    left_pct = 0.0
+    right_pct = 0.0
+    if check_pillarbox and frame_lefts:
+        # We use the median (50th percentile) to find the typical edge of the black bar,
+        # ignoring extreme dark scenes (which would be 95th) and extreme shakes (which would be 5th/10th).
+        # To completely hide any jitter, we add an aggressive 2.5% padding (about 20 pixels).
+        raw_left = float(np.median(frame_lefts))
+        raw_right = float(np.median(frame_rights))
+        
+        # Only apply if it's a significant black bar (e.g., > 5% of screen width)
+        # We ADD a small margin (e.g. 2.5%) to the crop to "bite" slightly into the active image
+        # and ensure absolutely no black edge (or its compression artifacts) remains visible.
+        if raw_left > 0.05:
+            left_pct = _clamp(raw_left + 0.025, 0.0, 0.4)
+        if raw_right < 0.95:
+            right_pct = _clamp((1.0 - raw_right) + 0.025, 0.0, 0.4)
+
     return {
         "auto_bottom_crop":   auto_bottom,
         "auto_top_crop":      auto_top,
         "auto_vertical_bias": auto_floor,
         "top_pct":            pre_top_pct,
         "bottom_pct":         pre_bottom_pct,
+        "left_pct":           left_pct,
+        "right_pct":          right_pct,
         "face_priority":      face_priority,
         "reasons":            reasons,
         "suggested_strength": suggested_strength,

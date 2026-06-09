@@ -1,10 +1,15 @@
-# 🎞️ DMD GIF Converter — v5.1.0
+# 🎞️ DMD GIF Converter — v6.0.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
 ---
+
+## What is New in v6.0.0?
+- **🤖 AI Iconic Moments**: A brand new dedicated tab to automatically analyze entire videos and extract the absolute best "moments" using advanced criteria (Action, Epic cuts, Character presence, Loopability, and DMD Visibility). It even provides a seamless one-click bridge to open the discovered moment in the Converter! [Read the full guide here.](docs/AI_MOMENTS.md)
+- **🎬 Studio Timeline & CLI Extraction**: A massive upgrade to the AI Moments engine. Features a brand new interactive Studio Timeline with IN/OUT points and looping playback. Full CLI parity added via the `--ai-moments` flag.
+- **🪄 Text Magic (Text Overlay)**: Added full support for text overlays (Fonts, Styles, Background) with built-in animations (`blink`, `scroll_left`, `scroll_up`) directly in the UI.
 
 ## What is New in v5.1.0?
 - **🧩 Generic Modularity Extended**: The application's core modular design (interfaces for Converter, Tracker, Detector) is now extended to the GIF Search Engine. A generic `ISearchEngine` interface orchestrates DuckDuckGo, Tenor, and Giphy seamlessly without code duplication, ensuring maximum reusability and scalability across the UI and utility scripts.
@@ -46,6 +51,7 @@ Now ships with a **full cross-platform graphical interface** — no command line
 | **Sortable List** | Click on the `File`, `Score`, or `Category` column headers in the Converted List to sort items in ascending/descending order. |
 | **Smart Temp Folder** | If no output directory is defined, all files are stored in a `dmd_tmp/` subfolder inside your source folder to prevent mixing converted GIFs with your source videos. |
 | **🔍 GIF Search** | Search & download GIFs from DuckDuckGo — keyword + quantity (up to 300), auto-populates the list |
+| **🤖 AI Iconic Moments** | Auto-extracts the best moments from long videos based on 5 AI metrics and exports directly to the Converter |
 | **Triple live preview** | SOURCE (left) + AUTO ACTION intermediate (middle) + DMD OUTPUT (right) |
 | **Diagnostic Preview** | Clicking a converted file shows its score, rating, and bullet-point reasons explaining the score. |
 | **💡 LED Sim** | Toggle pixel-grid overlay on the DMD preview — simulates the physical HUB75 LED matrix appearance · **ON by default** |
@@ -110,6 +116,10 @@ Want to use the tool without the GUI? Here are the most powerful commands.
 ## 🌟 Core Features & Documentation
 
 To keep this README clean, our most powerful features have dedicated guides. Discover what the engine can really do:
+
+### [🤖 AI Moments & Studio Timeline](docs/AI_MOMENTS.md)
+Tired of manually searching for the best part of a 2-hour movie? The **AI Moments Engine** analyzes your video to find the most action-packed, epic, and DMD-friendly scenes. Trim them perfectly using the interactive **Studio Timeline** loop playback, or let the CLI extract the top 5 moments automatically! 
+👉 **[Read the AI Moments Guide](docs/AI_MOMENTS.md)**
 
 ### [🎥 Cinematic Auto-Action Framing](docs/ADVANCED_FEATURES.md#auto-action-framing)
 When scaling a 1080p video down to a 128x32 matrix, subjects become microscopic. The **Auto-Action Framing** feature uses YOLOv8 ONNX AI to dynamically track subjects, pan the camera, and smartly crop the floor/ceiling to keep the action centered and visible on your DMD!

@@ -146,8 +146,13 @@ class ActionsPanelMixin:
     #  SOURCE PREVIEW
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _out_path(self, src):
+    def _out_path(self, src, iid=None):
         base = Path(src).stem + "_dmd" + Path(src).suffix
+        if iid and hasattr(self, 'v_per_gif_config') and self.v_per_gif_config.get():
+            cfg = self._per_gif_configs.get(iid)
+            if cfg and "custom_out_name" in cfg:
+                base = cfg["custom_out_name"]
+                
         out_dir = self.v_output_dir.get().strip()
         if out_dir and os.path.isdir(out_dir):
             return str(Path(out_dir) / base)
@@ -168,7 +173,7 @@ class ActionsPanelMixin:
         src = self._file_data.get(self._selected_iid)
         if not src:
             return
-        out = self._out_path(src)
+        out = self._out_path(src, iid=self._selected_iid)
         start_s, end_s = self._get_trim()
         trim_info = f"  trim [{start_s:.1f}s → {end_s:.1f}s]" if start_s is not None else ""
         self._log(f"▶  Convert: {Path(src).name}{trim_info}")
@@ -186,7 +191,7 @@ class ActionsPanelMixin:
             messagebox.showwarning("Busy", "A conversion is already running.")
             return
         tasks = [
-            (path, self._out_path(path), None, None, iid)
+            (path, self._out_path(path, iid=iid), None, None, iid)
             for iid, path in self._file_data.items()
         ]
         self._log(f"⚡  Converting {len(tasks)} file(s)…")
@@ -231,14 +236,26 @@ class ActionsPanelMixin:
         done_count = [0]
         done_lock = threading.Lock()
 
+        per_gif_enabled = hasattr(self, 'v_per_gif_config') and self.v_per_gif_config.get()
+
         def _process_one_task(task_tuple):
             src, out, start_s, end_s, iid = task_tuple
             if hasattr(self, "_cancel_event") and self._cancel_event.is_set():
                 return
             
+            task_params = dict(params)
+            if per_gif_enabled and iid in self._per_gif_configs:
+                cfg = self._per_gif_configs[iid]
+                task_params.update(cfg)
+                
+                if start_s is None:
+                    start_s = cfg.get("v_trim_start")
+                if end_s is None:
+                    end_s = cfg.get("v_trim_end")
+            
             self.after(0, lambda _iid=iid: self._set_file_status(_iid, "converting"))
             success, msg = process_file(
-                src, out, params, start_s, end_s,
+                src, out, task_params, start_s, end_s,
                 callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
                 cancel_event=getattr(self, "_cancel_event", None)
             )

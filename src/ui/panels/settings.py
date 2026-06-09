@@ -35,8 +35,9 @@ from PIL import Image, ImageTk
 from src.ui.dmd_led_sim import LED_SIM_SCALE, LED_SIM_GAP, LED_SIM_MAX_W, apply_led_grid as _apply_led_grid
 
 class SettingsPanelMixin:
-    def _build_right_panel(self):
-        rp = ctk.CTkFrame(self, fg_color="transparent")
+    def _build_right_panel(self, parent=None):
+        parent = parent or self
+        rp = ctk.CTkFrame(parent, fg_color="transparent")
         rp.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
         rp.grid_rowconfigure(1, weight=1)
         rp.grid_columnconfigure(0, weight=1)
@@ -583,6 +584,18 @@ class SettingsPanelMixin:
         self._cb_smart_auto_crop.pack(side="left")
         self._lmh_widgets.append(self._cb_smart_auto_crop)
 
+        # ── Auto Pillarbox Crop (Black bars) ──
+        pillarbox_row = ctk.CTkFrame(parent, fg_color="transparent")
+        pillarbox_row.pack(fill="x", padx=14, pady=(6, 0))
+        self._cb_auto_pillarbox = ctk.CTkCheckBox(
+            pillarbox_row,
+            text="🎞  Auto Pillarbox Crop (Black bars) — constrain framing to actual video width",
+            variable=self.v_action_auto_pillarbox,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        )
+        self._cb_auto_pillarbox.pack(side="left")
+        self._lmh_widgets.append(self._cb_auto_pillarbox)
+
         ctk.CTkLabel(
             parent,
             text="    When ON: engine scans 60 frames, detects floor / blank space / character height\n"
@@ -765,6 +778,7 @@ class SettingsPanelMixin:
 
         text_overlay_row = ctk.CTkFrame(parent, fg_color="transparent")
         text_overlay_row.pack(fill="x", padx=14, pady=(0, 4))
+        
         self._text_overlay_checkbox = ctk.CTkCheckBox(
             text_overlay_row,
             text="Enable Text Overlay",
@@ -773,130 +787,21 @@ class SettingsPanelMixin:
             command=self._on_text_overlay_toggle
         )
         self._text_overlay_checkbox.pack(side="left")
-
+        
+        self._text_overlay_btn = ctk.CTkButton(
+            text_overlay_row,
+            text="⚙️ Settings",
+            width=80,
+            height=24,
+            command=self._open_text_overlay_popup,
+            font=ctk.CTkFont(size=11),
+            fg_color="#3a4b6b", hover_color="#4a5b7b"
+        )
+        # Button is packed/unpacked dynamically in _on_text_overlay_toggle
+        # It's initially unpacked
+        
         self._text_overlay_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=6)
-        # This frame will be packed/unpacked based on v_text_overlay_enabled
-
-        text_content_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        text_content_row.pack(fill="x", padx=10, pady=2)
-        text_content_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(text_content_row, text="Text Content", width=145, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        self._text_content_entry = ctk.CTkEntry(
-            text_content_row, textvariable=self.v_text_content, width=200
-        )
-        self._text_content_entry.grid(row=0, column=1, sticky="ew", padx=4)
-
-        adv_slider(self._text_overlay_frame, "Font Size", self.v_text_font_size, 4, 32,
-                   "{:.0f}", " px", steps=28, is_int=True, lmh=False)
-
-        text_color_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        text_color_row.pack(fill="x", padx=10, pady=2)
-        text_color_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(text_color_row, text="Text Color", width=145, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        self._text_color_menu = ctk.CTkOptionMenu(
-            text_color_row,
-            variable=self.v_text_color,
-            values=["white", "yellow", "red", "green", "blue"],
-            width=200,
-        )
-        self._text_color_menu.grid(row=0, column=1, sticky="w", padx=4)
-
-        text_position_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        text_position_row.pack(fill="x", padx=10, pady=2)
-        text_position_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(text_position_row, text="Text Position", width=145, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        self._text_position_menu = ctk.CTkOptionMenu(
-            text_position_row,
-            variable=self.v_text_position,
-            values=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"],
-            width=200,
-        )
-        self._text_position_menu.grid(row=0, column=1, sticky="w", padx=4)
-
-        text_font_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        text_font_row.pack(fill="x", padx=10, pady=2)
-        text_font_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(text_font_row, text="Font", width=145, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        _available_fonts = [
-            "HelvetiPixel.ttf", "PixelMordred.ttf", "BitCasual.ttf",
-            "CursivePixel.ttf", "justabit.ttf", "KarenBook.ttf",
-            "OldWizard.ttf", "OrdinaryBasis.ttf", "Quintet.ttf", "TimesNewPixel.ttf",
-        ]
-        self._text_font_menu = ctk.CTkOptionMenu(
-            text_font_row,
-            variable=self.v_text_font_file,
-            values=_available_fonts,
-            width=200,
-        )
-        self._text_font_menu.grid(row=0, column=1, sticky="w", padx=4)
-        ctk.CTkLabel(
-            self._text_overlay_frame,
-            text="    Fonts stored in media/fonts/ — pixel fonts optimised for 128×32 DMD panels.",
-            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
-        ).pack(padx=14, pady=(0, 6), anchor="w")
-
-        # ── Text Style ────────────────────────────────────────────────────────
-        text_style_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        text_style_row.pack(fill="x", padx=10, pady=2)
-        text_style_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(text_style_row, text="Text Style", width=145, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        self._text_style_menu = ctk.CTkOptionMenu(
-            text_style_row,
-            variable=self.v_text_style,
-            values=["outline", "bold", "shadow", "none"],
-            width=200,
-        )
-        self._text_style_menu.grid(row=0, column=1, sticky="w", padx=4)
-        ctk.CTkLabel(
-            self._text_overlay_frame,
-            text="    outline = black border (best on 128×32)  ·  bold = thicker glyph  ·  shadow = drop shadow",
-            text_color="#667788", font=ctk.CTkFont(size=10), justify="left",
-        ).pack(padx=14, pady=(0, 4), anchor="w")
-
-        # ── Background box ────────────────────────────────────────────────────
-        bg_row = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        bg_row.pack(fill="x", padx=10, pady=(4, 2))
-        self._text_bg_cb = ctk.CTkCheckBox(
-            bg_row,
-            text="Background box  (dark box behind text)",
-            variable=self.v_text_bg,
-            command=self._on_text_bg_toggle,
-            font=ctk.CTkFont(size=12), text_color="#aaddaa",
-        )
-        self._text_bg_cb.pack(side="left")
-
-        # Opacity slider — shown only when bg is on
-        self._text_bg_opacity_frame = ctk.CTkFrame(self._text_overlay_frame, fg_color="transparent")
-        self._text_bg_opacity_frame.pack(fill="x", padx=10, pady=2)
-        self._text_bg_opacity_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(self._text_bg_opacity_frame, text="Box opacity", width=145, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
-        self._text_bg_opacity_slider = ctk.CTkSlider(
-            self._text_bg_opacity_frame,
-            from_=10, to=100, number_of_steps=90,
-            variable=self.v_text_bg_opacity,
-        )
-        self._text_bg_opacity_slider.grid(row=0, column=1, sticky="ew", padx=4)
-        self._text_bg_opacity_lbl = ctk.CTkLabel(
-            self._text_bg_opacity_frame,
-            text="%d %%" % self.v_text_bg_opacity.get(),
-            width=60, anchor="e", font=ctk.CTkFont(size=11),
-        )
-        self._text_bg_opacity_lbl.grid(row=0, column=2, padx=(4, 4))
-        self.v_text_bg_opacity.trace_add(
-            "write",
-            lambda *_: self._text_bg_opacity_lbl.configure(
-                text="%d %%" % self.v_text_bg_opacity.get()
-            ),
-        )
-        self._on_text_bg_toggle()  # set initial visibility
-
-        self._on_text_overlay_toggle() # Set initial state
+        # We don't pack this inline frame anymore, but keep the reference so _on_text_overlay_toggle doesn't crash
 
         # ── SECTION 3: POSITIONING ────────────────────────────────────────────
         ctk.CTkLabel(
@@ -995,17 +900,20 @@ class SettingsPanelMixin:
         # Update DMD canvas size immediately
         self._update_dmd_canvas_size()
 
+    def _open_text_overlay_popup(self):
+        from src.ui.popups import TextOverlayPopup
+        # Create the popup and pass self as master and app_state
+        popup = TextOverlayPopup(self, self)
+        
     def _on_text_overlay_toggle(self):
         if self.v_text_overlay_enabled.get():
-            self._text_overlay_frame.pack(fill="x", padx=10, pady=(4, 4))
+            self._text_overlay_btn.pack(side="left", padx=10)
         else:
-            self._text_overlay_frame.pack_forget()
+            self._text_overlay_btn.pack_forget()
 
     def _on_text_bg_toggle(self):
-        if self.v_text_bg.get():
-            self._text_bg_opacity_frame.pack(fill="x", padx=10, pady=2)
-        else:
-            self._text_bg_opacity_frame.pack_forget()
+        # We leave this in case it's called somewhere else, but the popup handles its own
+        pass
 
     # ── "Let Me Handle It" master toggle ─────────────────────────────────────
     def _on_let_me_handle_toggle(self):
@@ -1021,6 +929,7 @@ class SettingsPanelMixin:
                 "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(),
                 "action_auto_strength": self.v_action_auto_strength.get(),
                 "action_auto_smoothness": self.v_action_auto_smoothness.get(),
+                "action_auto_pillarbox": self.v_action_auto_pillarbox.get(),
             }
             # Force all flags ON (visual feedback)
             self.v_auto_color_enabled.set(True)
@@ -1030,6 +939,7 @@ class SettingsPanelMixin:
             self.v_dmd_readability_score_enabled.set(True)
             self.v_action_auto_strength.set(True)
             self.v_action_auto_smoothness.set(True)
+            self.v_action_auto_pillarbox.set(True)
             # Grey out every registered widget
             for w in self._lmh_widgets:
                 try:
@@ -1047,6 +957,7 @@ class SettingsPanelMixin:
             self.v_dmd_readability_score_enabled.set(saved.get("dmd_readability_score_enabled", True))
             self.v_action_auto_strength.set(saved.get("action_auto_strength", False))
             self.v_action_auto_smoothness.set(saved.get("action_auto_smoothness", False))
+            self.v_action_auto_pillarbox.set(saved.get("action_auto_pillarbox", False))
             # Re-enable all registered widgets
             for w in self._lmh_widgets:
                 try:
@@ -1087,6 +998,7 @@ class SettingsPanelMixin:
         self.v_text_style.set("outline")
         self.v_text_bg.set(False)
         self.v_text_bg_opacity.set(60)
+        self.v_text_animation.set("none")
         self._on_text_overlay_toggle() # Apply text overlay reset
         self.v_scroll_enabled.set(True)
         self.v_zoom.set(1.0)
@@ -1131,7 +1043,13 @@ class SettingsPanelMixin:
 
     def _snapshot_params(self) -> dict:
         """Capture all current UI var values into a plain dict for per-gif storage."""
+        # Optional handling of trim times if they exist
+        trim_start = getattr(self, "v_trim_start", None)
+        trim_end = getattr(self, "v_trim_end", None)
+        
         return {
+            "v_trim_start": trim_start.get() if trim_start is not None else None,
+            "v_trim_end": trim_end.get() if trim_end is not None else None,
             "mode":                       self.v_mode.get(),
             "workers":                    self.v_workers.get(),
             "scroll":                     self.v_scroll.get(),
@@ -1171,6 +1089,7 @@ class SettingsPanelMixin:
             "action_vertical_bias":       self.v_action_vertical_bias.get(),
             "action_auto_vertical_bias":  self.v_action_auto_vertical_bias.get(),
             "action_smart_auto_crop":     self.v_action_smart_auto_crop.get(),
+            "action_auto_pillarbox":      self.v_action_auto_pillarbox.get(),
             "bg_sub_enable":              self.v_bg_sub_enable.get(),
             "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(), # NEW
             "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(), # NEW
@@ -1186,6 +1105,7 @@ class SettingsPanelMixin:
             "text_style":                 self.v_text_style.get(),
             "text_bg":                    self.v_text_bg.get(),
             "text_bg_opacity":            self.v_text_bg_opacity.get(),
+            "text_animation":             self.v_text_animation.get(),
             "max_dur_enabled":            self.v_max_dur_enabled.get(),
             "max_duration":               self.v_max_duration.get(),
             "auto_color_enabled":         self.v_auto_color_enabled.get(),
@@ -1193,6 +1113,13 @@ class SettingsPanelMixin:
 
     def _restore_params(self, s: dict):
         """Restore all UI vars from a snapshot dict (per-gif or global)."""
+        if hasattr(self, "v_trim_start"):
+            ts = s.get("v_trim_start")
+            self.v_trim_start.set(ts if ts is not None else 0.0)
+        if hasattr(self, "v_trim_end"):
+            te = s.get("v_trim_end")
+            self.v_trim_end.set(te if te is not None else 0.0)
+            
         self.v_mode.set(s.get("mode", "pixel_art"))
         self.v_workers.set(s.get("workers", 2))
         self.v_scroll.set(s.get("scroll", 24.0))
@@ -1232,6 +1159,7 @@ class SettingsPanelMixin:
         self.v_action_vertical_bias.set(s.get("action_vertical_bias", 0.0))
         self.v_action_auto_vertical_bias.set(s.get("action_auto_vertical_bias", False))
         self.v_action_smart_auto_crop.set(s.get("action_smart_auto_crop", False))
+        self.v_action_auto_pillarbox.set(s.get("action_auto_pillarbox", False))
         self.v_bg_sub_enable.set(s.get("bg_sub_enable", False))
         self.v_dmd_visibility_score_enabled.set(s.get("dmd_visibility_score_enabled", False)) # NEW
         self.v_dmd_readability_score_enabled.set(s.get("dmd_readability_score_enabled", True)) # NEW
@@ -1247,6 +1175,7 @@ class SettingsPanelMixin:
         self.v_text_style.set(s.get("text_style", "outline"))
         self.v_text_bg.set(s.get("text_bg", False))
         self.v_text_bg_opacity.set(s.get("text_bg_opacity", 60))
+        self.v_text_animation.set(s.get("text_animation", "none"))
         self.v_max_dur_enabled.set(s.get("max_dur_enabled", True))
         self.v_max_duration.set(s.get("max_duration", 120.0))
         self.v_auto_color_enabled.set(s.get("auto_color_enabled", False))
@@ -1433,6 +1362,7 @@ class SettingsPanelMixin:
             "action_vertical_bias": self.v_action_vertical_bias.get(),
             "action_auto_vertical_bias": self.v_action_auto_vertical_bias.get(),
             "action_smart_auto_crop":    self.v_action_smart_auto_crop.get(),
+            "action_auto_pillarbox":     self.v_action_auto_pillarbox.get(),
             "bg_sub_enable": self.v_bg_sub_enable.get(),
             "dmd_visibility_score_enabled": self.v_dmd_visibility_score_enabled.get(), # NEW
             "dmd_readability_score_enabled": self.v_dmd_readability_score_enabled.get(), # NEW
@@ -1447,6 +1377,7 @@ class SettingsPanelMixin:
             "text_style": self.v_text_style.get(),
             "text_bg": self.v_text_bg.get(),
             "text_bg_opacity": self.v_text_bg_opacity.get(),
+            "text_animation": self.v_text_animation.get(),
             # max_duration: 0 = no limit when checkbox is off
             "max_duration": self.v_max_duration.get() if self.v_max_dur_enabled.get() else 0.0,
             # auto-colorimetry
@@ -1456,9 +1387,10 @@ class SettingsPanelMixin:
         } | (
             # "Let Me Handle It" overrides — force the 5 managed params ON
             {
-                "auto_color_enabled":     True,
-                "auto_action_enabled":    True,
-                "action_smart_auto_crop": True,
+                "auto_color_enabled":        True,
+                "auto_action_enabled":       True,
+                "action_smart_auto_crop":    True,
+                "action_auto_pillarbox":     True,
                 "dmd_visibility_score_enabled": True,
                 "dmd_readability_score_enabled": True,
             } if self.v_let_me_handle_it.get() else {}
