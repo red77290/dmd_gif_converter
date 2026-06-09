@@ -1,88 +1,120 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import customtkinter as ctk
+from src.ui.panels.ai_moments_panel import AiMomentsPanel
+
 
 class MockVar:
-    def __init__(self, value=0.0):
-        self._val = value
-        self.set = MagicMock(side_effect=self._internal_set)
-        self.get = MagicMock(side_effect=self._internal_get)
-    def _internal_set(self, val):
-        self._val = val
-    def _internal_get(self):
-        return self._val
+    def __init__(self, v=0.0): self._v = v
+    def set(self, v): self._v = v
+    def get(self): return self._v
 
-class TestAiMomentsPanelLogic(unittest.TestCase):
-    def setUp(self):
-        self.app = MagicMock()
-        
-        # Mock variables
-        self.app.v_playhead = MockVar(0.0)
-        self.app.v_manual_start = MockVar(0.0)
-        self.app.v_manual_end = MockVar(5.0)
-        
-        self.app._lbl_selection = MagicMock()
-        
-        # We need to extract the methods from the mixin to test them independently
-        from src.ui.panels.ai_moments import AiMomentsPanelMixin
-        self.set_in_point = AiMomentsPanelMixin._set_in_point.__get__(self.app)
-        self.set_out_point = AiMomentsPanelMixin._set_out_point.__get__(self.app)
-        self.toggle_play_selection = AiMomentsPanelMixin._toggle_play_selection.__get__(self.app)
 
-    def test_set_in_point_normal(self):
-        self.app.v_playhead.set(2.0)
-        
-        self.set_in_point()
-        
-        self.app.v_manual_start.set.assert_called_with(2.0)
-        self.app.v_manual_end.set.assert_not_called()
-        self.app._lbl_selection.configure.assert_called()
+def _make():
+    with patch.object(ctk.CTkFrame, "__init__", return_value=None), \
+         patch.object(AiMomentsPanel, "_build_ai_moments_panel", return_value=None):
+        app_state = MagicMock()
+        panel = AiMomentsPanel(MagicMock(), app_state)
+    panel.app_state = app_state
+    panel.app_state.v_playhead = MockVar(0.0)
+    panel.app_state.v_manual_start = MockVar(0.0)
+    panel.app_state.v_manual_end = MockVar(5.0)
+    panel._lbl_selection = MagicMock()
+    panel.after = MagicMock()
+    return panel
 
-    def test_set_in_point_pushes_end_point(self):
-        self.app.v_playhead.set(6.0)
-        
-        self.set_in_point()
-        
-        self.app.v_manual_end.set.assert_called_with(7.0)
-        self.app.v_manual_start.set.assert_called_with(6.0)
 
-    def test_set_out_point_normal(self):
-        self.app.v_playhead.set(4.0)
-        self.app.v_manual_start.set(2.0)
-        
-        self.set_out_point()
-        
-        self.app.v_manual_end.set.assert_called_with(4.0)
-        # 1 call from setUp, no new calls from method
-        self.assertEqual(self.app.v_manual_start.set.call_count, 1)
+class TestSetInPoint(unittest.TestCase):
+    def test_sets_start(self):
+        p = _make()
+        p.app_state.v_playhead.set(2.0)
+        p._set_in_point()
+        self.assertEqual(p.app_state.v_manual_start.get(), 2.0)
+        p._lbl_selection.configure.assert_called()
 
-    def test_set_out_point_pushes_start_point(self):
-        self.app.v_playhead.set(2.0)
-        self.app.v_manual_start.set(5.0)
-        
-        self.set_out_point()
-        
-        self.app.v_manual_start.set.assert_called_with(1.0)
-        self.app.v_manual_end.set.assert_called_with(2.0)
+    def test_pushes_end(self):
+        p = _make()
+        p.app_state.v_playhead.set(6.0)
+        p.app_state.v_manual_end.set(5.0)
+        p._set_in_point()
+        self.assertEqual(p.app_state.v_manual_end.get(), 7.0)
 
-    def test_toggle_play_selection_starts_play(self):
-        self.app._ai_preview_cap = MagicMock()
-        self.app._ai_preview_cap.get.return_value = 30.0
-        self.app._is_playing_selection = False
-        self.app._btn_play_selection = MagicMock()
-        
-        self.toggle_play_selection()
-        
-        self.assertTrue(self.app._is_playing_selection)
-        self.app.after.assert_called()
+    def test_end_unchanged_when_in_before(self):
+        p = _make()
+        p.app_state.v_playhead.set(1.0)
+        p.app_state.v_manual_end.set(5.0)
+        p._set_in_point()
+        self.assertEqual(p.app_state.v_manual_end.get(), 5.0)
 
-    def test_toggle_play_selection_stops_play(self):
-        self.app._ai_preview_cap = MagicMock()
-        self.app._is_playing_selection = True
-        self.app._btn_play_selection = MagicMock()
-        
-        self.toggle_play_selection()
-        
-        self.assertFalse(self.app._is_playing_selection)
+
+class TestSetOutPoint(unittest.TestCase):
+    def test_sets_end(self):
+        p = _make()
+        p.app_state.v_playhead.set(4.0)
+        p.app_state.v_manual_start.set(2.0)
+        p._set_out_point()
+        self.assertEqual(p.app_state.v_manual_end.get(), 4.0)
+        self.assertEqual(p.app_state.v_manual_start.get(), 2.0)
+
+    def test_pushes_start(self):
+        p = _make()
+        p.app_state.v_playhead.set(1.0)
+        p.app_state.v_manual_start.set(3.0)
+        p._set_out_point()
+        self.assertEqual(p.app_state.v_manual_end.get(), 1.0)
+        self.assertEqual(p.app_state.v_manual_start.get(), 0.0)
+
+
+class TestTogglePlaySelection(unittest.TestCase):
+    def test_starts_play(self):
+        p = _make()
+        p._ai_preview_cap = MagicMock()
+        p._ai_preview_cap.get.return_value = 30.0
+        p._is_playing_selection = False
+        p._btn_play_selection = MagicMock()
+        p._on_playhead_change = MagicMock()
+        p._toggle_play_selection()
+        self.assertTrue(p._is_playing_selection)
+        p.after.assert_called()
+
+    def test_stops_play(self):
+        p = _make()
+        p._ai_preview_cap = MagicMock()
+        p._is_playing_selection = True
+        p._btn_play_selection = MagicMock()
+        p._toggle_play_selection()
+        self.assertFalse(p._is_playing_selection)
+
+    def test_no_cap_noop(self):
+        p = _make()
+        p._ai_preview_cap = None
+        p._is_playing_selection = False
+        p._toggle_play_selection()
+        p.after.assert_not_called()
+
+
+class TestOnAiAnalysisComplete(unittest.TestCase):
+    def test_enables_report_button(self):
+        p = _make()
+        p._btn_ai_show_report = MagicMock()
+        p._ai_results = []
+        p._add_moments_to_queue = MagicMock()
+        p._show_ai_report_popup = MagicMock()
+        p._populate_results = MagicMock()
+        result = [MagicMock()]
+        p._on_ai_analysis_complete(result)
+        p._btn_ai_show_report.configure.assert_called_with(state="normal")
+        self.assertEqual(p._ai_results, result)
+
+    def test_no_results_noop_queue(self):
+        p = _make()
+        p._btn_ai_show_report = MagicMock()
+        p._add_moments_to_queue = MagicMock()
+        p._show_ai_report_popup = MagicMock()
+        p._populate_results = MagicMock()
+        p._on_ai_analysis_complete([])
+        p._add_moments_to_queue.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
