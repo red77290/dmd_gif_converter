@@ -6,12 +6,17 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 
 ### Content mode
 
-| Mode | Best for | Saturation | Sharpening |
-|---|---|---|---|
-| `pixel_art` | Retro sprites, arcade, consoles ★ default | `2.2` 🔥 | `1.8` aggressive |
-| `anime` | Softer for complex gradients | `1.9` ✨ | `1.3` crisp |
-| `cinema` | Live-action films, photography | `1.3` 🎞️ | `0.8` gentle |
-| `custom` | Manual control | free | free |
+| Mode | Best for | contrast | saturation | gamma | Sharpening |
+|---|---|---|---|---|---|
+| `pixel_art` | Retro sprites, arcade, consoles ★ default | `1.60` | `2.20` 🔥 | `0.85` | `1.8` aggressive |
+| `anime` | Softer for complex gradients | `1.50` | `1.90` ✨ | `0.87` | `1.3` crisp |
+| `cinema` | Live-action films, photography | `1.35` ¹ | `1.30` 🎞️ | `0.95` ¹ | `0.8` gentle |
+| `custom` | Manual control | free | free | free | free |
+
+> ¹ **Cinema preset v6.x** — contrast reduced (1.40 → 1.35), gamma raised (0.90 → 0.95), brightness set to 0.00 to avoid crushing dark cinema scenes.  
+> For dark content with any preset, enable **Smart Color Boost** which detects luminance and applies stronger corrections automatically.
+
+> **Note:** Static presets produce the same output regardless of scene brightness. For dark scenes (night, cinema, dungeons) with **any** preset, enable **Smart Color Boost** (`--auto-color-enabled`).
 
 ### Full parameter reference
 
@@ -106,7 +111,35 @@ The integer part is the number of complete **round-trips** (down→up); the frac
 
 | Machine | Recommended |
 |---|---|
-| MacBook Pro M3 Pro (11 cores, 36 GB) | `8` |
+| MacBook Pro M-series (10+ cores) | `6`–`8` |
 | Desktop SSD, 8+ cores, 16 GB+ | `6`–`8` |
 | Desktop SSD, 4 cores, 8 GB | `3`–`4` |
 | Laptop or HDD | `2` |
+
+> Workers are CPU-bound (ffmpeg palette generation + dithering). Going beyond 8 workers rarely helps and increases memory pressure.  
+> In UI mode, each parallel worker's log is prefixed with `[W1]`, `[W2]`, etc. for easy isolation in the log panel.
+
+### Terminal logs — launcher vs direct invocation
+
+To get **full Python logging output in your terminal**, always launch via the provided script:
+
+```bash
+# ✅ Full logs — uses src.ui.launcher which configures logging.basicConfig
+./launch_ui.sh         # macOS / Linux
+launch_ui.bat          # Windows (double-click or cmd)
+./launch_ui.ps1        # PowerShell
+
+# ⚠️  Also works — simpler format
+python -m src.ui.launcher
+
+# ❌ No terminal logs (bypasses logging setup)
+python -m src.ui.app
+```
+
+For CLI use, control verbosity with:
+```bash
+--log-level INFO     # all messages
+--log-level WARNING  # quiet (progress bar only, default)
+--verbose / -v       # alias for --log-level DEBUG (shows raw ffmpeg output)
+```
+

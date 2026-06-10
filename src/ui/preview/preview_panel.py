@@ -783,8 +783,11 @@ class PreviewPanel(ctk.CTkFrame):
                 out_gif = src
             else:
                 out_gif = os.path.join(tmpdir, "preview.gif")
-                success, msg = process_file(src, out_gif, params, start_s, end_s,
-                                            callback=lambda m, lv="info": None)
+                success, msg = process_file(
+                    src, out_gif, params, start_s, end_s,
+                    callback=lambda m, lv="info": self.after(
+                        0, lambda _m=m, _lv=lv: self._log(_m, _lv))
+                )
                 if not success or not os.path.isfile(out_gif):
                     self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
                     return
@@ -1140,6 +1143,9 @@ class PreviewPanel(ctk.CTkFrame):
 
         done_count = [0]
         done_lock = threading.Lock()
+        # Per-task sequential worker ID for log isolation
+        _wid_seq = [0]
+        _wid_lock = threading.Lock()
         lp = self._left_panel
         mp = self._middle_panel
         per_gif_enabled = (
@@ -1149,6 +1155,10 @@ class PreviewPanel(ctk.CTkFrame):
         )
 
         def _process_one(task_tuple):
+            with _wid_lock:
+                _wid_seq[0] += 1
+                wid = _wid_seq[0]
+            wid_tag = f"[W{wid}] "
             src, out, start_s, end_s, iid = task_tuple
             if self._cancel_event.is_set():
                 return
@@ -1160,7 +1170,7 @@ class PreviewPanel(ctk.CTkFrame):
             success, msg = process_file(
                 src, out, task_params, start_s, end_s,
                 callback=lambda m, lv="info": self.after(
-                    0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
+                    0, lambda _m=m, _lv=lv, _t=wid_tag: self._log(f"{_t}{_m}", _lv)),
                 cancel_event=self._cancel_event,
             )
             if success:
