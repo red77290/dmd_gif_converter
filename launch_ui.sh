@@ -14,7 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV="$SCRIPT_DIR/.venv"
-UI="-m src.ui.app"
+UI="-m src.ui.launcher"
 REQ="$SCRIPT_DIR/requirements_ui.txt"
 REQ_HASH_FILE="$VENV/.requirements_hash"
 

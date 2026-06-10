@@ -1,6 +1,8 @@
+import io
 import os
 import subprocess
 import tempfile
+import threading
 from typing import Tuple, Optional
 import numpy as np
 
@@ -57,27 +59,45 @@ class FFmpegWriter:
             return False
 
     def close(self) -> Tuple[bool, str]:
-        """Closes the pipe and waits for FFmpeg to finish. Returns (ok, stderr_hint)."""
+        """Closes the pipe and waits for FFmpeg to finish. Returns (ok, stderr_hint).
+
+        stderr is drained in a background thread to prevent the pipe-buffer
+        deadlock that would cause proc.wait() to block forever when ffmpeg
+        outputs more than ~64 KB of encoding diagnostics.
+        """
         if self.proc is None:
             return False, "Process not started"
-            
+
+        # Start draining stderr before closing stdin so the pipe never fills.
+        _stderr_buf = io.BytesIO()
+
+        def _drain():
+            try:
+                while True:
+                    chunk = self.proc.stderr.read(4096)
+                    if not chunk:
+                        break
+                    _stderr_buf.write(chunk)
+            except Exception:
+                pass
+
+        drain = threading.Thread(target=_drain, daemon=True, name="ffmpeg-writer-drain")
+        drain.start()
+
         try:
             if self.proc.stdin:
                 self.proc.stdin.close()
         except Exception:
             pass
-            
+
         rc = self.proc.wait()
-        
+        drain.join(timeout=10)
+
         _stderr_hint = ""
         if rc != 0 or not os.path.isfile(self.out_path):
-            try:
-                if self.proc.stderr:
-                    _se = self.proc.stderr.read().decode(errors="replace").strip()
-                    if _se:
-                        _stderr_hint = " | ffmpeg: " + _se[-300:]
-            except Exception:
-                pass
+            _se = _stderr_buf.getvalue().decode(errors="replace").strip()
+            if _se:
+                _stderr_hint = " | ffmpeg: " + _se[-300:]
             return False, _stderr_hint
-            
+
         return True, ""

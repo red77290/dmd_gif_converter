@@ -198,6 +198,15 @@ class DMDConverterApp(ctk.CTk):
         self.destroy()
 
 def main():
+    import logging as _logging
+    # Ensure terminal logs reach the console even when called directly
+    # (not via launcher.py which already configures basicConfig).
+    if not _logging.root.handlers:
+        _logging.basicConfig(
+            level=_logging.INFO,
+            format="%(asctime)s [%(levelname)-7s] %(name)s — %(message)s",
+            datefmt="%H:%M:%S",
+        )
     app = DMDConverterApp()
     app.mainloop()
 

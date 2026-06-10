@@ -64,21 +64,26 @@ class TestGammaDelta(unittest.TestCase):
       - Clamping at the extremes (x=0 and x=255)
       - Monotonically non-increasing across the [0, 255] range
       - Continuity: adjacent inputs produce close outputs (no step jumps)
+
+    Knot values updated in v6.x to improve dark-scene visibility:
+      lum=0..40  : +0.55 (was +0.40) — stronger lift for dark content
+      lum=75     : +0.30 (was +0.20)
+      lum=100    : +0.10 (was +0.08)
     """
 
     # ── Knot boundary values ──────────────────────────────────────────────────
 
     def test_knot_x0(self):
-        self.assertAlmostEqual(_gamma_delta(0.0),   +0.40)
+        self.assertAlmostEqual(_gamma_delta(0.0),   +0.55)
 
     def test_knot_x40(self):
-        self.assertAlmostEqual(_gamma_delta(40.0),  +0.40)
+        self.assertAlmostEqual(_gamma_delta(40.0),  +0.55)
 
     def test_knot_x75(self):
-        self.assertAlmostEqual(_gamma_delta(75.0),  +0.20)
+        self.assertAlmostEqual(_gamma_delta(75.0),  +0.30)
 
     def test_knot_x100(self):
-        self.assertAlmostEqual(_gamma_delta(100.0), +0.08)
+        self.assertAlmostEqual(_gamma_delta(100.0), +0.10)
 
     def test_knot_x140(self):
         self.assertAlmostEqual(_gamma_delta(140.0),  0.00)
@@ -96,7 +101,7 @@ class TestGammaDelta(unittest.TestCase):
 
     def test_below_minimum_clamped(self):
         # Values at or below the first knot (0) return the first fp value.
-        self.assertAlmostEqual(_gamma_delta(-10.0), +0.40)
+        self.assertAlmostEqual(_gamma_delta(-10.0), +0.55)
 
     def test_above_maximum_clamped(self):
         # Values at or above the last knot (255) return the last fp value.
@@ -126,10 +131,10 @@ class TestGammaDelta(unittest.TestCase):
 
     def test_intermediate_values_bounded(self):
         """Any x between two knots must produce a value between those knots' fp."""
-        # Between knot 40 (+0.40) and knot 75 (+0.20)
+        # Between knot 40 (+0.55) and knot 75 (+0.30)
         v = _gamma_delta(57.0)
-        self.assertGreaterEqual(v, +0.20)
-        self.assertLessEqual(v,   +0.40)
+        self.assertGreaterEqual(v, +0.30)
+        self.assertLessEqual(v,   +0.55)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

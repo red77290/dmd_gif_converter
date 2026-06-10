@@ -85,11 +85,12 @@ _BASE_SHARPEN_C  = 0.50
 def _gamma_delta(mean_lum: float) -> float:
     """Luminance → gamma correction delta (continuous interpolation).
 
-    Knots are placed at the original if/elif threshold boundaries so the
-    curve passes through the same anchor values while being smooth in between.
+    More aggressive lifting for dark scenes (lum < 80) so characters and
+    subjects remain visible in dark cinema/game content.
+    Previously capped at +0.40; raised to +0.55 for very dark material.
     """
     xp = [  0,  40,  75, 100, 140, 175, 210, 255]
-    fp = [+0.40, +0.40, +0.20, +0.08, 0.00, -0.10, -0.20, -0.30]
+    fp = [+0.55, +0.55, +0.30, +0.10, 0.00, -0.10, -0.20, -0.30]
     return _linear_interp(mean_lum, xp, fp)
 
 
@@ -105,6 +106,19 @@ def _saturation_delta(mean_sat: float) -> float:
     xp = [  0,  10,  40,  80, 130, 180, 255]
     fp = [+1.10, +1.10, +0.70, +0.30, 0.00, -0.30, -0.60]
     return _linear_interp(mean_sat, xp, fp)
+
+
+def _brightness_delta(mean_lum: float) -> float:
+    """Luminance → brightness correction delta (continuous interpolation).
+
+    Replaces the simple linear formula ``(110 - lum) / 255 * 0.20`` with a
+    piecewise curve that lifts dark content (lum < 80) more aggressively.
+    For lum=67 (dark scene): old delta ≈ +0.034 → brightness ≈ +0.004;
+                              new delta ≈ +0.066 → brightness ≈ +0.036.
+    """
+    xp = [  0,  40,  80, 110, 180, 255]
+    fp = [+0.10, +0.10, +0.05, 0.00, -0.05, -0.10]
+    return _linear_interp(mean_lum, xp, fp)
 
 
 def _sample_frames(src_str: str, is_gif: bool, cv2) -> list:
@@ -187,13 +201,22 @@ def analyze_and_compensate(src_path: str,
     n_frames = len(sampled_frames)
 
     # ── 3. Gamma + brightness corrections ────────────────────────────────────
-    gamma      = _clamp(_BASE_GAMMA      + _gamma_delta(mean_lum),    0.55, 1.40)
-    bri_delta  = _clamp((110.0 - mean_lum) / 255.0 * 0.20,          -0.10, 0.08)
-    brightness = _clamp(_BASE_BRIGHTNESS  + bri_delta,               -0.15, 0.10)
+    # Gamma cap raised to 1.70 (was 1.40) to allow stronger lifting of very dark content.
+    gamma      = _clamp(_BASE_GAMMA      + _gamma_delta(mean_lum),    0.55, 1.70)
+    brightness = _clamp(_BASE_BRIGHTNESS + _brightness_delta(mean_lum), -0.15, 0.12)
 
     # ── 4. Contrast + saturation corrections ─────────────────────────────────
     contrast   = _clamp(_BASE_CONTRAST   + _contrast_delta(std_lum),  1.40, 2.50)
     saturation = _clamp(_BASE_SATURATION + _saturation_delta(mean_sat), 0.90, 3.50)
+
+    # ── 4b. Dark-scene constraint: cap contrast to preserve shadow detail ─────
+    # High contrast on dark content (lum < 80) crushes the limited tonal range,
+    # making characters invisible.  Linearly reduce the contrast cap as the
+    # scene gets darker:  1.60 at lum=80 → 1.40 at lum=0.
+    if mean_lum < 80.0:
+        dark_ratio   = (80.0 - mean_lum) / 80.0          # 0 at lum=80, 1 at lum=0
+        contrast_cap = 1.60 - dark_ratio * 0.20           # [1.40 … 1.60]
+        contrast     = min(contrast, contrast_cap)
 
     # ── 5. Build result ───────────────────────────────────────────────────────
     params: Dict = {
@@ -209,8 +232,9 @@ def analyze_and_compensate(src_path: str,
     frame_label = f"{n_frames} frame{'s' if n_frames > 1 else ''}"
     delta_c = round(contrast   - _BASE_CONTRAST,   2)
     delta_s = round(saturation - _BASE_SATURATION, 2)
+    dark_tag = " 🌑dark" if mean_lum < 80.0 else ""
     message = (
-        f"auto-color ({frame_label}): lum={mean_lum:.0f} std={std_lum:.0f} sat={mean_sat:.0f} "
+        f"auto-color ({frame_label}): lum={mean_lum:.0f} std={std_lum:.0f} sat={mean_sat:.0f}{dark_tag} "
         f"→ contrast={params['contrast']} ({delta_c:+.2f})  "
         f"sat={params['saturation']} ({delta_s:+.2f})  "
         f"gamma={params['gamma']}  bri={params['brightness']:+.3f}"
