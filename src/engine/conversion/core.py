@@ -1,6 +1,10 @@
+import io
 import os
+import sys
 import subprocess
 import math
+import threading
+import time
 import concurrent.futures
 import logging
 from pathlib import Path
@@ -13,6 +17,95 @@ except Exception:
 from src.engine.conversion.ffmpeg_utils import _check_drawtext, _apply_text_overlay_pillow, snap_to_clean_fps, get_metadata
 from src.engine.conversion.quality import evaluate_gif_quality
 logger = logging.getLogger(__name__)
+
+
+# ── FFmpeg subprocess helper ───────────────────────────────────────────────────
+
+def _run_ffmpeg_with_drain(cmd: list, cancel_event=None) -> tuple:
+    """Run an ffmpeg command while continuously draining its stderr pipe.
+
+    **Why this exists — the pipe-buffer deadlock problem**
+    When ffmpeg runs with ``stderr=subprocess.PIPE`` and produces verbose output
+    (long scroll animations can exceed 100 s, generating hundreds of KB of
+    progress stats), the ~64 KB OS pipe buffer fills up.  ffmpeg then blocks
+    trying to write to stderr, ``poll()`` never returns → deadlock.
+
+    This manifests as "Convert All" appearing sequential (all workers freeze
+    simultaneously) or individual conversions hanging forever.
+
+    The fix: a daemon drain-thread reads stderr in 4 KB chunks concurrently so
+    the pipe never fills, while the main polling loop remains free to check the
+    cancel event every 100 ms.
+
+    Parameters
+    ----------
+    cmd           : ffmpeg command list (same as passed to subprocess.Popen)
+    cancel_event  : optional threading.Event — set it to interrupt the process
+
+    Returns
+    -------
+    (returncode: int, stderr_data: bytes)
+        returncode == -1 signals cancellation (process was terminated).
+    """
+    _stderr_buf = io.BytesIO()
+    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+    def _drain():
+        try:
+            while True:
+                chunk = process.stderr.read(4096)
+                if not chunk:
+                    break
+                _stderr_buf.write(chunk)
+        except Exception:
+            pass
+
+    drain_thread = threading.Thread(target=_drain, daemon=True, name="ffmpeg-stderr-drain")
+    drain_thread.start()
+
+    while process.poll() is None:
+        if cancel_event and cancel_event.is_set():
+            process.terminate()
+            process.wait()
+            drain_thread.join(timeout=2)
+            try:
+                process.stderr.close()
+            except Exception:
+                pass
+            return -1, _stderr_buf.getvalue()
+        time.sleep(0.1)
+
+    drain_thread.join(timeout=10)
+    try:
+        process.stderr.close()
+    except Exception:
+        pass
+    return process.returncode, _stderr_buf.getvalue()
+
+
+def _terminal_log(msg: str, level: str = "info") -> None:
+    """Write a log line directly to the original stderr (sys.__stderr__).
+
+    This bypasses the Python logging framework entirely and is therefore
+    immune to any sys.stderr redirection performed by Tkinter, customtkinter,
+    or OpenCV at runtime.  Used by process_file() to guarantee that
+    conversion progress is always visible in the launch terminal.
+
+    Format matches launcher.py's basicConfig:  HH:MM:SS [LEVEL  ] message
+    """
+    if level == "debug":
+        return  # debug is only for the logging framework, not terminal
+    try:
+        _err = getattr(sys, "__stderr__", None) or sys.stderr
+        if _err is None:
+            return
+        _ts = time.strftime("%H:%M:%S")
+        _lvl = level.upper()[:7].ljust(7)
+        _err.write(f"{_ts} [{_lvl}] {msg}\n")
+        _err.flush()
+    except Exception:
+        pass
+
 
 SUPPORTED_EXTENSIONS = {
     ".gif", ".mp4", ".avi", ".mkv", ".mov", ".webm",
@@ -112,7 +205,10 @@ _PRESETS = {
     #               contrast  sat    bright  gamma  sh_lum sh_chr  dither
     "pixel_art": (  1.6,      2.2,  -0.03,  0.85,  1.8,   0.5,   "none" ),
     "anime":     (  1.5,      1.9,  -0.02,  0.87,  1.3,   0.3,   "none" ),
-    "cinema":    (  1.4,      1.3,  -0.01,  0.90,  0.8,   0.2,   "none" ),
+    # gamma 0.90 was darkening already-dark cinema content; 0.95 is more neutral.
+    # contrast 1.35 (was 1.4) avoids crushing shadow detail in dark scenes.
+    # brightness 0.00 (was -0.01) stops the slight push toward black in low-light.
+    "cinema":    (  1.35,     1.3,   0.00,  0.95,  0.8,   0.2,   "none" ),
 }
 
 def process_file(src_path, out_path, params=None, start_s=None, end_s=None, callback=None, cancel_event=None):
@@ -136,7 +232,12 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     filename = os.path.basename(src_path)
 
     def log(msg, level="info"):
+        # 1. Always write directly to the original stderr — immune to
+        #    sys.stderr redirection by Tkinter / customtkinter / OpenCV.
+        _terminal_log(msg, level)
+        # 2. Logging framework (test capture, external file handlers).
         getattr(logger, level)(msg)
+        # 3. Callback for the UI log panel.
         if callback:
             callback(msg, level)
 
@@ -507,19 +608,14 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         out_path
     ]
 
-    import time
-    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    
-    while process.poll() is None:
-        if cancel_event and cancel_event.is_set():
-            process.terminate()
-            process.wait()
-            log(f"[CANCEL] {filename} — ffmpeg interrupted by user", "warning")
-            return False, f"[CANCEL] {filename} interrupted"
-        time.sleep(0.1)
-        
-    result_stderr = process.stderr.read()
-    process.stderr.close()
+    # ── Run ffmpeg with continuous stderr drain (prevents pipe-buffer deadlock) ─
+    returncode, result_stderr = _run_ffmpeg_with_drain(cmd, cancel_event)
+    if returncode == -1:
+        log(f"[CANCEL] {filename} — ffmpeg interrupted by user", "warning")
+        if temp_pre_src and os.path.isdir(temp_pre_src):
+            import shutil
+            shutil.rmtree(temp_pre_src, ignore_errors=True)
+        return False, f"[CANCEL] {filename} interrupted"
 
     if (p.get("verbose") or p.get("log_level") == "DEBUG") and result_stderr:
         ffmpeg_log = result_stderr.decode(errors="replace").strip()
@@ -530,7 +626,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         import shutil
         shutil.rmtree(temp_pre_src, ignore_errors=True)
 
-    if process.returncode != 0:
+    if returncode != 0:
         err = result_stderr.decode(errors="replace").strip().splitlines()
         last_line = err[-1] if err else "unknown error"
         log(f"[ERROR ] {filename} — ffmpeg: {last_line}", "error")
@@ -625,6 +721,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     # Phase 1: run OpenCV preprocessing for all files in parallel.
     # This avoids interleaving heavy HOG detection with ffmpeg on the same cores.
     def log(msg, level="info"):
+        _terminal_log(msg, level)
         getattr(logger, level)(msg)
         if callback:
             callback(msg, level)

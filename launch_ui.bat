@@ -14,7 +14,7 @@ setlocal EnableDelayedExpansion
 
 set "SCRIPT_DIR=%~dp0"
 set "VENV=%SCRIPT_DIR%.venv"
-set "UI=-m src.ui.app"
+set "UI=-m src.ui.launcher"
 set "REQ=%SCRIPT_DIR%requirements_ui.txt"
 set "REQ_HASH_FILE=%VENV%\.requirements_hash"
 
