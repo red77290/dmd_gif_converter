@@ -6,12 +6,15 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 
 ### Mode de contenu
 
-| Mode | Pour quel contenu | Saturation | Sharpening |
-|---|---|---|---|
-| `pixel_art` | Sprites rétro, arcade, consoles ★ défaut | `2.2` 🔥 max | `1.8` agressif |
-| `anime` | Anime / cartoon (plus doux) | `1.9` ✨ vif | `1.3` net |
-| `cinema` | Films live, vidéos réelles | `1.3` 🎞️ naturel | `0.8` doux |
-| `custom` | Réglage manuel de chaque valeur | libre | libre |
+| Mode | Pour quel contenu | contraste | saturation | gamma | Sharpening |
+|---|---|---|---|---|---|
+| `pixel_art` | Sprites rétro, arcade, consoles ★ défaut | `1.60` | `2.20` 🔥 max | `0.85` | `1.8` agressif |
+| `anime` | Anime / cartoon (plus doux) | `1.50` | `1.90` ✨ vif | `0.87` | `1.3` net |
+| `cinema` | Films live, vidéos réelles | `1.35` ¹ | `1.30` 🎞️ naturel | `0.95` ¹ | `0.8` doux |
+| `custom` | Réglage manuel de chaque valeur | libre | libre | libre | libre |
+
+> ¹ **Preset cinema v6.x** — contraste réduit (1.40 → 1.35), gamma relevé (0.90 → 0.95), brightness à 0.00 pour ne pas écraser les scènes sombres.  
+> Pour du contenu sombre quel que soit le preset, activez **Smart Color Boost** (`--auto-color-enabled`) qui adapte automatiquement les corrections.
 
 ### Référence complète des paramètres
 
@@ -104,7 +107,35 @@ La partie entière = nombre d'**allers-retours complets** (bas→haut) ; la part
 
 | Machine | Recommandé |
 |---|---|
-| MacBook Pro M3 Pro (11 cœurs, 36 Go) | `8` |
+| MacBook Pro M-series (10+ cœurs) | `6`–`8` |
 | Desktop SSD, 8+ cœurs, 16 Go+ | `6`–`8` |
 | Desktop SSD, 4 cœurs, 8 Go | `3`–`4` |
 | Laptop ou disque dur (HDD) | `2` |
+
+> Les workers sont limités par le CPU (génération de palette + dithering ffmpeg). Au-delà de 8 workers le gain est faible et la pression mémoire augmente.  
+> En mode UI, chaque log de worker parallèle est préfixé par `[W1]`, `[W2]`, etc. pour faciliter le filtrage.
+
+### Logs terminal — launcher vs invocation directe
+
+Pour obtenir **les logs Python dans votre terminal**, utilisez toujours le script fourni :
+
+```bash
+# ✅ Logs complets — src.ui.launcher configure logging.basicConfig
+./launch_ui.sh         # macOS / Linux
+launch_ui.bat          # Windows
+./launch_ui.ps1        # PowerShell
+
+# ⚠️  Fonctionne aussi — format plus simple
+python -m src.ui.launcher
+
+# ❌ Pas de logs terminal (contourne la configuration logging)
+python -m src.ui.app
+```
+
+Contrôle de la verbosité en CLI :
+```bash
+--log-level INFO     # tous les messages
+--log-level WARNING  # silencieux (barre de progression uniquement, défaut)
+--verbose / -v       # alias pour --log-level DEBUG (sortie ffmpeg brute)
+```
+

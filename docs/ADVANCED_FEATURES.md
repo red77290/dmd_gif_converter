@@ -154,19 +154,20 @@ If OpenCV is not installed, the feature is silently skipped and the standard pip
 
 ## 🎨 Smart Color Boost — AI heuristic colorimetry
 
-> **TL;DR — one checkbox, perfect colours on any source.**  
+> **TL;DR — one checkbox, perfect colours on any source, including dark cinema scenes.**  
 > Located in the **⚙️ Parameters** panel → **🎨 Content mode → Smart Color Boost** checkbox · disabled by default.
 
 LED matrix panels have very different rendering characteristics compared to screens: diffused light, limited bit depth, and high perceived brightness. Content that looks perfect on a monitor can appear washed-out, too dark, or over-saturated on a 128×32 HUB75 panel.
 
-**Smart Color Boost** solves this automatically. It analyses a representative keyframe from each source video and computes the optimal colorimetry profile for that specific piece of content, without any manual intervention.
+**Smart Color Boost** solves this automatically. It analyses three representative keyframes from each source video (at 25 %, 50 %, 75 % of duration) and computes the optimal colorimetry profile for that specific piece of content, without any manual intervention.
 
 ```
-Source video  ──[keyframe @ 50%]──▶  heuristic analysis  ──▶  optimal params  ──▶  ffmpeg
+Source video  ──[keyframes × 3]──▶  heuristic analysis  ──▶  optimal params  ──▶  ffmpeg
                                            ↑
                                Luminance (mean grey level)
                                Dynamic range (standard deviation)
                                Colour saturation (HSV S-channel)
+                               🌑 Dark scene detection (lum < 80)
 ```
 
 ### What it analyses and adjusts
@@ -176,26 +177,60 @@ Source video  ──[keyframe @ 50%]──▶  heuristic analysis  ──▶  op
 | **Mean luminance** | Under-exposed (dark) · over-exposed (bright) | **Gamma** boost/reduction |
 | **Std deviation** | Flat / dull image (low dynamic range) | **Contrast** multiplier |
 | **HSV saturation** | Desaturated · near-greyscale content | **Saturation** boost |
-| Residual offset | Fine brightness mismatch | **Brightness** fine-tune |
+| **Dark scene** `lum < 80` | Night / cinema / dungeon | Contrast **capped** to preserve shadows + stronger gamma & brightness lift |
 
-### Compensation examples
+### 🌑 Dark scene detection (v6.x improvement)
 
-| Source type | lum | std | → contrast | saturation | gamma |
-|---|---|---|---|---|---|
-| Night scene / dungeon | 31 | 22 | **2.50** ↑↑ | 2.45 | **1.40** ↑↑ |
-| Foggy / washed-out | 55 | 18 | **2.50** ↑↑ | **3.00** ↑↑ | **1.40** ↑↑ |
-| Normal arcade sprite | 116 | 62 | 1.20 | 1.90 | 0.93 |
-| Over-exposed bright | 190 | 20 | **2.50** ↑↑ | **3.46** ↑↑ | **0.55** ↓↓ |
-| High-contrast vivid | 120 | 75 | 1.20 | 1.50 | 0.89 |
-| Near-greyscale / B&W | 129 | 54 | 1.20 | **3.00** ↑↑ | 0.81 |
+For content with mean luminance below 80/255 (dark cinema, night scenes, dungeons), earlier versions applied high contrast that **crushed shadow detail**, making characters invisible on the LED panel. This is now fixed:
+
+| Parameter | Behaviour when `lum < 80` | Effect |
+|---|---|---|
+| **Gamma** | Up to **1.70** (was capped at 1.40) | Lifts midtones; characters become visible |
+| **Brightness** | **+0.04 to +0.07** (was ≈ 0) | Shifts the entire tonal range upward |
+| **Contrast** | **Capped at 1.40–1.60** (was uncapped) | Prevents crushing the limited shadow detail |
+
+> **Example** — *Back to the Future II* dark scene (`lum=67 std=51`):  
+> - Before: `contrast=1.79 gamma=1.10 bri=+0.004` → characters barely visible  
+> - After:  `contrast=1.57 gamma=1.21 bri=+0.036 🌑dark` → characters clearly visible
+
+The log now shows a `🌑dark` tag when dark-scene mode is triggered:
+```
+[COLOR  ] scene.mkv — auto-color (3 frames): lum=67 std=51 sat=138 🌑dark → contrast=1.57 (+−0.03) …
+```
+
+### Which modes benefit?
+
+> **Smart Color Boost works the same for ALL content modes** (pixel_art, anime, cinema, custom) because it overrides the preset entirely with mode="custom" once activated.
+
+| Mode | Without Smart Color Boost | With Smart Color Boost |
+|---|---|---|
+| `pixel_art` | gamma=0.85, contrast=1.60 (fixed) | Adapts to source content |
+| `anime` | gamma=0.87, contrast=1.50 (fixed) | Adapts to source content |
+| `cinema` | gamma=0.95, contrast=1.35 (fixed) | Adapts to source content |
+| `custom` | Manual sliders | **Smart Color Boost takes over** |
+
+**For dark pixel art, dark anime, or dark cinema clips → enable Smart Color Boost.**  
+Static presets cannot detect dark scenes; only Smart Color Boost can.
+
+### Compensation examples (updated)
+
+| Source type | lum | std | → contrast | saturation | gamma | notes |
+|---|---|---|---|---|---|---|
+| Dark cinema scene | 67 | 51 | **1.57** | 2.15 | **1.21** | 🌑dark cap applied |
+| Night scene / dungeon | 31 | 22 | **1.40** | 2.45 | **1.65** | 🌑dark cap applied |
+| Normal arcade sprite | 116 | 62 | 1.20 | 1.90 | 0.93 | |
+| Over-exposed bright | 190 | 20 | 1.60 | 3.46 | **0.60** | |
+| High-contrast vivid | 120 | 75 | 1.20 | 1.50 | 0.89 | |
+| Near-greyscale / B&W | 129 | 54 | 1.20 | **3.00** ↑↑ | 0.81 | |
 
 ### Why it is disabled by default
 
-Smart Color Boost **overrides the manual colorimetry sliders** (contrast, saturation, gamma, brightness) and disables them in the UI to prevent conflicts. Users who prefer to tune their own presets, or who use the `pixel_art` / `anime` / `cinema` modes that already ship with carefully hand-tuned values, should leave it off.
+Smart Color Boost **overrides the manual colorimetry sliders** (contrast, saturation, gamma, brightness) and disables them in the UI to prevent conflicts. Users who prefer to tune their own presets should leave it off.
 
 **Enable it for:**
 - Heterogeneous batch libraries with wildly different brightness levels
 - Live footage or cinema clips where the source exposure is unknown
+- **Dark content (night scenes, dungeons, dark cinema) with any preset**
 - Any content that looks wrong with the standard presets
 
 ### How to enable it
@@ -204,7 +239,8 @@ Smart Color Boost **overrides the manual colorimetry sliders** (contrast, satura
 2. In the **⚙️ Parameters** panel → **🎨 Content mode** section
 3. Check **"🎨 Smart Color Boost — IA auto-colorimetry"**
 4. The manual colorimetry sliders are automatically grayed out
-5. Convert — the log will show the computed values: `[COLOR ] lum=XX std=XX → contrast=X.XX saturation=X.XX …`
+5. Convert — the log will show the computed values:  
+   `[COLOR ] lum=XX std=XX → contrast=X.XX saturation=X.XX …` (+ `🌑dark` if dark scene)
 
 ### Requirements
 
@@ -238,3 +274,95 @@ Vertically centred on the 32-pixel panel. Natural source duration preserved (min
 |---|---|
 | `color=black` + `overlay` | Source alpha → black — no clock bleed-through |
 | `-gifflags -offsetting-transdiff` | Disables GIF delta encoding |
+| `-f gif` (explicit) | Forces GIF output format regardless of input extension |
+
+---
+
+## ⚡ Parallel Conversion — multithreading
+
+### Worker IDs in logs
+
+When using **Convert All** with multiple workers, each file's log messages are now prefixed with a `[W{n}]` tag so you can tell which worker produced which output:
+
+```
+🚀  Convert 3 file(s) using 2 worker(s)…
+[W1] [ACTION ] clip_a.mkv — Auto action OK (303 frames…)
+[W2] [ACTION ] clip_b.mkv — Auto action OK (241 frames…)
+[W1] [COLOR  ] clip_a.mkv — lum=67 … 🌑dark
+[W2] [COLOR  ] clip_b.mkv — lum=146 …
+[W1] [OK    ] clip_a.mkv
+[W2] [OK    ] clip_b.mkv
+[W1] [OK    ] clip_c.mkv   ← W1 picks up the 3rd task
+✅  3 conversion(s) done.
+```
+
+### Long conversion deadlock fix (v6.x)
+
+A pipe-buffer deadlock was silently causing **Convert All** to appear sequential or to freeze when converting long clips (scroll animations can be 30–120 s of rendered output):
+
+- **Root cause:** ffmpeg writes progress stats to stderr. Without continuous reading, the ~64 KB OS pipe buffer fills up. ffmpeg then blocks trying to write, `poll()` never returns → all parallel workers freeze simultaneously.
+- **Fix:** a background drain thread reads stderr in 4 KB chunks throughout the conversion. The polling/cancellation loop is unaffected.
+
+This fix applies to:
+- `process_file()` (single file, UI or CLI)
+- `process_folder()` (batch folder)
+- `FFmpegWriter.close()` (auto-action preprocessing pipe)
+
+### `--workers` tuning
+
+| Machine | Recommended |
+|---|---|
+| MacBook Pro M-series (10+ cores) | `6`–`8` |
+| Desktop SSD, 8+ cores, 16 GB+ | `6`–`8` |
+| Desktop SSD, 4 cores, 8 GB | `3`–`4` |
+| Laptop or HDD | `2` |
+
+> Workers are CPU-bound on the ffmpeg side (palette generation + dithering). Going beyond 8 workers rarely helps and increases memory pressure.
+
+---
+
+## 📟 Terminal Logs
+
+### UI launcher
+
+The `./launch_ui.sh` (macOS/Linux), `launch_ui.bat` (Windows), and `launch_ui.ps1` (PowerShell) scripts now correctly route Python logging to the terminal. All `[ACTION]`, `[COLOR]`, `[QUALITY]`, `[ERROR]` messages visible in the UI log panel are also printed to the terminal.
+
+```bash
+./launch_ui.sh
+# Output:
+# 10:42:31 [INFO   ] [UI] DMD Converter starting…
+# 10:42:35 [INFO   ] src.engine.conversion.core — [ACTION ] clip.mkv — Auto action OK …
+# 10:42:36 [INFO   ] src.engine.conversion.core — [COLOR  ] clip.mkv — lum=67 🌑dark …
+```
+
+**If logs are missing from your terminal**, make sure you launch via the script (not `python -m src.ui.app` directly):
+
+```bash
+# ✅ Correct — logging configured by launcher.py
+./launch_ui.sh
+
+# ⚠️  Direct invocation — also works but uses a simpler log format
+python -m src.ui.launcher
+
+# ❌ No terminal logs (bypasses logging setup)
+python -m src.ui.app
+```
+
+### Log level control (UI)
+
+Use the **Filter** dropdown in the log panel footer to control which messages are shown:
+
+| Level | Shows |
+|---|---|
+| `DEBUG` | Everything including raw ffmpeg output |
+| `INFO` | Normal conversion messages (default) |
+| `WARNING` | Only warnings and errors |
+| `ERROR` | Only errors |
+
+### Log level control (CLI)
+
+```bash
+python -m src.engine.conversion.cli input/ --log-level INFO    # verbose
+python -m src.engine.conversion.cli input/ --log-level WARNING # quiet (progress bar only)
+python -m src.engine.conversion.cli input/ --verbose           # alias for --log-level DEBUG
+```

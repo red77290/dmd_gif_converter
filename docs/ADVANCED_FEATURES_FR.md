@@ -172,19 +172,20 @@ Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée e
 
 ## 🎨 Smart Color Boost — colorimétrie heuristique par IA
 
-> **En bref — une case à cocher, des couleurs parfaites sur toutes les sources.**  
+> **En bref — une case à cocher, des couleurs parfaites sur toutes les sources, y compris les scènes sombres.**  
 > Dans le panneau **⚙️ Parameters** → section **🎨 Content mode → Smart Color Boost** · désactivé par défaut.
 
 Les dalles LED matricielles ont des caractéristiques d'affichage très différentes des écrans : lumière diffusée, profondeur de bits limitée, luminosité perçue élevée. Un contenu parfait sur écran peut apparaître délavé, trop sombre ou sur-saturé sur un panel HUB75 128×32.
 
-**Smart Color Boost** résout ça automatiquement. Il analyse une keyframe représentative de chaque vidéo source et calcule le profil colorimétrique optimal pour ce contenu spécifique, sans aucune intervention manuelle.
+**Smart Color Boost** résout ça automatiquement. Il analyse **trois keyframes représentatives** de chaque vidéo source (à 25 %, 50 %, 75 % de la durée) et calcule le profil colorimétrique optimal pour ce contenu spécifique, sans aucune intervention manuelle.
 
 ```
-Vidéo source  ──[keyframe @ 50%]──▶  analyse heuristique  ──▶  paramètres optimaux  ──▶  ffmpeg
+Vidéo source  ──[keyframes × 3]──▶  analyse heuristique  ──▶  paramètres optimaux  ──▶  ffmpeg
                                               ↑
                                   Luminance (niveau de gris moyen)
                                   Dynamique (écart-type)
                                   Saturation couleur (canal S HSV)
+                                  🌑 Détection scène sombre (lum < 80)
 ```
 
 ### Ce qu'il analyse et corrige
@@ -194,26 +195,60 @@ Vidéo source  ──[keyframe @ 50%]──▶  analyse heuristique  ──▶  
 | **Luminance moyenne** | Sous-exposé (sombre) · sur-exposé (clair) | Boost/réduction du **Gamma** |
 | **Écart-type** | Image terne / délavée (faible dynamique) | Multiplicateur de **Contraste** |
 | **Saturation HSV** | Désaturé · quasi-niveaux de gris | Boost de **Saturation** |
-| Décalage résiduel | Fine correction de luminosité | **Brightness** fine-tune |
+| **Scène sombre** `lum < 80` | Nuit / cinéma / donjon | Contraste **capé** + gamma et brightness plus agressifs |
 
-### Exemples de compensation
+### 🌑 Détection des scènes sombres (amélioration v6.x)
 
-| Type de source | lum | std | → contraste | saturation | gamma |
-|---|---|---|---|---|---|
-| Scène nocturne / donjon | 31 | 22 | **2.50** ↑↑ | 2.45 | **1.40** ↑↑ |
-| Brumeux / délavé | 55 | 18 | **2.50** ↑↑ | **3.00** ↑↑ | **1.40** ↑↑ |
-| Sprite arcade normal | 116 | 62 | 1.20 | 1.90 | 0.93 |
-| Surexposé / trop lumineux | 190 | 20 | **2.50** ↑↑ | **3.46** ↑↑ | **0.55** ↓↓ |
-| Déjà contrasté et vivid | 120 | 75 | 1.20 | 1.50 | 0.89 |
-| Quasi N&B | 129 | 54 | 1.20 | **3.00** ↑↑ | 0.81 |
+Pour les contenus avec une luminance moyenne inférieure à 80/255 (cinéma sombre, scènes nocturnes, donjons), les versions précédentes appliquaient un contraste élevé qui **écrasait les détails sombres**, rendant les personnages invisibles sur la dalle LED. C'est maintenant corrigé :
+
+| Paramètre | Comportement si `lum < 80` | Effet |
+|---|---|---|
+| **Gamma** | Jusqu'à **1,70** (était capé à 1,40) | Élève les tons moyens ; personnages visibles |
+| **Brightness** | **+0,04 à +0,07** (était ≈ 0) | Décale toute la plage tonale vers le haut |
+| **Contraste** | **Capé à 1,40–1,60** (était non capé) | Évite d'écraser les détails sombres |
+
+> **Exemple** — *Retour vers le futur II* scène sombre (`lum=67 std=51`) :  
+> - Avant : `contrast=1.79 gamma=1.10 bri=+0.004` → personnages à peine visibles  
+> - Après  : `contrast=1.57 gamma=1.21 bri=+0.036 🌑dark` → personnages clairement visibles
+
+Le log affiche désormais le tag `🌑dark` quand le mode scène sombre est déclenché :
+```
+[COLOR  ] scene.mkv — auto-color (3 frames): lum=67 std=51 sat=138 🌑dark → contrast=1.57 (+−0.03) …
+```
+
+### Quels modes profitent de cette amélioration ?
+
+> **Smart Color Boost fonctionne de la même façon pour TOUS les modes de contenu** (pixel_art, anime, cinema, custom) car il remplace entièrement le preset par `mode="custom"` une fois activé.
+
+| Mode | Sans Smart Color Boost | Avec Smart Color Boost |
+|---|---|---|
+| `pixel_art` | gamma=0.85, contrast=1.60 (fixe) | S'adapte au contenu source |
+| `anime` | gamma=0.87, contrast=1.50 (fixe) | S'adapte au contenu source |
+| `cinema` | gamma=0.95, contrast=1.35 (fixe) | S'adapte au contenu source |
+| `custom` | Curseurs manuels | **Smart Color Boost prend le relais** |
+
+**Pour du pixel art sombre, de l'anime nocturne, ou du cinéma obscur → activez Smart Color Boost.**  
+Les presets statiques ne peuvent pas détecter les scènes sombres ; seul Smart Color Boost le peut.
+
+### Exemples de compensation (mis à jour)
+
+| Type de source | lum | std | → contraste | saturation | gamma | notes |
+|---|---|---|---|---|---|---|
+| Scène cinéma sombre | 67 | 51 | **1,57** | 2,15 | **1,21** | 🌑dark cap appliqué |
+| Scène nocturne / donjon | 31 | 22 | **1,40** | 2,45 | **1,65** | 🌑dark cap appliqué |
+| Sprite arcade normal | 116 | 62 | 1,20 | 1,90 | 0,93 | |
+| Surexposé / trop lumineux | 190 | 20 | 1,60 | 3,46 | **0,60** | |
+| Déjà contrasté et vivid | 120 | 75 | 1,20 | 1,50 | 0,89 | |
+| Quasi N&B | 129 | 54 | 1,20 | **3,00** ↑↑ | 0,81 | |
 
 ### Pourquoi c'est désactivé par défaut
 
-Smart Color Boost **remplace les curseurs de colorimétrie manuelle** (contraste, saturation, gamma, luminosité) et les grise dans l'UI pour éviter les conflits. Les utilisateurs qui préfèrent régler leurs propres presets, ou qui utilisent les modes `pixel_art` / `anime` / `cinema` déjà calibrés à la main, doivent le laisser désactivé.
+Smart Color Boost **remplace les curseurs de colorimétrie manuelle** et les grise dans l'UI pour éviter les conflits.
 
 **Activez-le pour :**
 - Des bibliothèques hétérogènes avec des expositions très différentes d'un fichier à l'autre
 - Des vidéos live ou cinéma dont l'exposition source est inconnue
+- **Tout contenu sombre (scènes nocturnes, donjons, cinéma) quel que soit le preset**
 - Tout contenu qui ne rend pas bien avec les presets standards
 
 ### Comment l'activer
@@ -222,13 +257,86 @@ Smart Color Boost **remplace les curseurs de colorimétrie manuelle** (contraste
 2. Dans le panneau **⚙️ Parameters** → section **🎨 Content mode**
 3. Cochez **"🎨 Smart Color Boost — IA auto-colorimetry"**
 4. Les curseurs de colorimétrie manuelle se grisent automatiquement
-5. Lancez la conversion — le log affiche les valeurs calculées : `[COLOR ] lum=XX std=XX → contrast=X.XX …`
+5. Lancez la conversion — le log affiche les valeurs calculées :  
+   `[COLOR ] lum=XX std=XX → contrast=X.XX …` (+ `🌑dark` si scène sombre détectée)
 
 ### Prérequis
 
 Smart Color Boost utilise le même **OpenCV + NumPy** qu'Auto Action — aucune dépendance supplémentaire. L'analyse est rapide (<0,5 s par fichier) et négligeable par rapport au temps de conversion ffmpeg.
 
 En l'absence d'OpenCV, le fallback silencieux s'applique — **pas de crash, pas de perte de données**.
+
+---
+
+## ⚡ Conversion parallèle — multithreading
+
+### Identifiants worker dans les logs
+
+Lors d'un **Convert All** avec plusieurs workers, chaque message de log est maintenant préfixé par un tag `[W{n}]` permettant d'identifier quel worker a produit quelle sortie :
+
+```
+🚀  Convert 3 file(s) using 2 worker(s)…
+[W1] [ACTION ] clip_a.mkv — Auto action OK (303 frames…)
+[W2] [ACTION ] clip_b.mkv — Auto action OK (241 frames…)
+[W1] [COLOR  ] clip_a.mkv — lum=67 … 🌑dark
+[W2] [COLOR  ] clip_b.mkv — lum=146 …
+[W1] [OK    ] clip_a.mkv
+[W2] [OK    ] clip_b.mkv
+[W1] [OK    ] clip_c.mkv   ← W1 traite le 3e fichier
+✅  3 conversion(s) done.
+```
+
+### Correction du deadlock pipe stderr (v6.x)
+
+Un deadlock de buffer pipe causait silencieusement l'apparence d'une conversion séquentielle ou d'un gel lors de conversions longues :
+
+- **Cause racine :** ffmpeg écrit des stats de progression sur stderr. Sans lecture continue, le buffer OS (~64 Ko) se remplit. ffmpeg se bloque en tentant d'écrire, `poll()` ne revient jamais → tous les workers parallèles se gelent simultanément.
+- **Correction :** un thread daemon de drainage lit stderr en chunks de 4 Ko en permanence. La boucle de polling et d'annulation n'est pas affectée.
+
+Ce correctif s'applique à :
+- `process_file()` (fichier unique, UI ou CLI)
+- `process_folder()` (dossier batch)
+- `FFmpegWriter.close()` (pipe de prétraitement auto-action)
+
+---
+
+## 📟 Logs terminal
+
+### Lancement UI
+
+Les scripts `./launch_ui.sh` (macOS/Linux), `launch_ui.bat` (Windows), et `launch_ui.ps1` (PowerShell) routent maintenant correctement les logs Python vers le terminal.
+
+```bash
+./launch_ui.sh
+# Sortie :
+# 10:42:31 [INFO   ] [UI] DMD Converter starting…
+# 10:42:35 [INFO   ] … [ACTION ] clip.mkv — Auto action OK …
+# 10:42:36 [INFO   ] … [COLOR  ] clip.mkv — lum=67 🌑dark …
+```
+
+**Si les logs n'apparaissent pas dans votre terminal**, assurez-vous de lancer via le script :
+
+```bash
+# ✅ Correct — logging configuré par launcher.py
+./launch_ui.sh
+
+# ⚠️  Invocation directe — fonctionne aussi
+python -m src.ui.launcher
+
+# ❌ Pas de logs terminal (contourne la configuration logging)
+python -m src.ui.app
+```
+
+### Contrôle du niveau de log (UI)
+
+Utilisez le menu **Filter** dans le bas du panneau log :
+
+| Niveau | Affiche |
+|---|---|
+| `DEBUG` | Tout, y compris la sortie brute ffmpeg |
+| `INFO` | Messages de conversion normaux (défaut) |
+| `WARNING` | Seulement avertissements et erreurs |
+| `ERROR` | Seulement les erreurs |
 
 ---
 
