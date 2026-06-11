@@ -100,46 +100,32 @@ class TrackingEngine(ITracker):
                 self.prev_roi_cy = None
         self.prev_frame_for_scene = frame
         
-        # 2. ROI Detection
-        roi = None
+        # 2. ROI Detection  (raw bbox from detector, before any face-clipping)
+        raw_roi = None
         if self.face_priority_mode:
-            roi = self.detector.detect(
+            raw_roi = self.detector.detect(
                 frame, self.cfg.detector,
                 multi_fusion=self.cfg.multi_roi_fusion_enabled and not self.cfg.platformer_mode,
                 min_conf=self.cfg.roi_confidence_min,
                 roi_persistence_score=self.roi_persistence_score if getattr(self.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=self.cfg.platformer_mode
             )
-            if roi is not None:
-                rx, ry, rw, rh = roi
-                # Detect close-up: roi height covers >40 % of the frame → the face fills the screen.
-                # In this case the standard top-28 % clip lands on hair/forehead only.
-                # Instead skip the top 25 % (hair) and keep 35 % (eyes → chin).
-                is_closeup = rh > self.frame_h * 0.40
-                if is_closeup:
-                    hair_skip = int(rh * 0.25)
-                    _face_h   = max(8, int(rh * 0.35))
-                    roi = (rx, ry + hair_skip, rw, _face_h)
-                else:
-                    # Normal shot: keep only the top 28 % of body bbox = head region.
-                    _face_h = max(8, int(rh * 0.28))
-                    roi = (rx, ry, rw, _face_h)
         else:
             detect_frame = frame[self.effective_frame_top:self.effective_frame_h, :]
-            roi = self.detector.detect(
+            raw_roi = self.detector.detect(
                 detect_frame, self.cfg.detector,
                 multi_fusion=self.cfg.multi_roi_fusion_enabled and not self.cfg.platformer_mode,
                 min_conf=self.cfg.roi_confidence_min,
                 roi_persistence_score=self.roi_persistence_score if getattr(self.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=self.cfg.platformer_mode
             )
-            if roi is not None and self.effective_frame_top > 0:
-                rx, ry, rw, rh = roi
-                roi = (rx, ry + self.effective_frame_top, rw, rh)
+            if raw_roi is not None and self.effective_frame_top > 0:
+                rx, ry, rw, rh = raw_roi
+                raw_roi = (rx, ry + self.effective_frame_top, rw, rh)
 
-        # 3. Persistence Update
+        # 3. Persistence Update  (based on the raw detection, before size filters)
         if getattr(self.cfg, 'roi_persistence_score_enabled', True):
-            if roi is not None:
+            if raw_roi is not None:
                 self.roi_persistence_frames = min(120, self.roi_persistence_frames + 1)
             else:
                 self.roi_persistence_frames = max(0, self.roi_persistence_frames - 2)
@@ -147,32 +133,38 @@ class TrackingEngine(ITracker):
         else:
             self.roi_persistence_score = 1.0
 
-        # 4. Micro-detection Rejection
-        if roi is not None and self.cfg.min_roi_area_ratio > 0.0:
-            roi_area = roi[2] * roi[3]
+        # 4. Micro-detection Rejection  (use raw bbox so face-clipping cannot shrink
+        #    the roi below the threshold for a legitimate full-body detection)
+        if raw_roi is not None and self.cfg.min_roi_area_ratio > 0.0:
+            check_roi = raw_roi  # always compare against the original detection
+            roi_area = check_roi[2] * check_roi[3]
             frame_area = self.frame_w * self.frame_h
             if frame_area > 0 and (roi_area / frame_area) < self.cfg.min_roi_area_ratio:
-                roi = None
+                raw_roi = None
 
-        # 5. Minimum Useful Size Rejection
+        # 5. Minimum Useful Size Rejection  (same: compare raw detection to threshold)
         cx, cy_center, crop_w_full, crop_h_src = self._cam_full_view
-        if roi is not None and self.cfg.min_subject_dmd_px > 0:
+        if raw_roi is not None and self.cfg.min_subject_dmd_px > 0:
             _dmd_scale = out_w / float(crop_w_full)
-            dmd_w = roi[2] * _dmd_scale
-            dmd_h = roi[3] * _dmd_scale
+            dmd_w = raw_roi[2] * _dmd_scale
+            dmd_h = raw_roi[3] * _dmd_scale
             if dmd_w < self.cfg.min_subject_dmd_px and dmd_h < self.cfg.min_subject_dmd_px:
-                roi = None
+                raw_roi = None
 
-        # 6. Floor Estimation
+        # 2b. Face-region clipping (after size validation so filters use raw bbox).
+        # Determine the clipped ROI used EXCLUSIVELY for camera framing.
+        face_roi = self._clip_to_face_roi(raw_roi)
+
+        # 6. Floor Estimation (uses original unclipped roi)
         floor_y_est: Optional[float] = None
         if self.floor_est is not None:
-            roi_bottom = float(roi[1] + roi[3]) if roi is not None else None
+            roi_bottom = float(raw_roi[1] + raw_roi[3]) if raw_roi is not None else None
             floor_y_est = self.floor_est.update(roi_bottom)
 
-        # 7. Temporal History Synthesis
+        # 7. Temporal History Synthesis (uses original unclipped roi)
         if self.roi_history_enabled:
-            if roi is not None:
-                self.roi_history.append((1.0, roi))
+            if raw_roi is not None:
+                self.roi_history.append((1.0, raw_roi))
                 while len(self.roi_history) > self.roi_history_max_len:
                     self.roi_history.popleft()
             elif self.roi_history:
@@ -187,11 +179,12 @@ class TrackingEngine(ITracker):
                     ww += w * hr[2]
                     wh += w * hr[3]
                 if total_w > 0:
-                    roi = (int(wx / total_w), int(wy / total_w), int(ww / total_w), int(wh / total_w))
+                    raw_roi = (int(wx / total_w), int(wy / total_w), int(ww / total_w), int(wh / total_w))
+                    face_roi = self._clip_to_face_roi(raw_roi)
 
-        # 8. Build Base Camera
+        # 8. Build Base Camera (uses face_roi for positioning)
         cam_now_proposed = _build_camera_rect(
-            self.frame_w, self.cam_frame_h, roi, self.cfg,
+            self.frame_w, self.cam_frame_h, face_roi, self.cfg,
             floor_y_est=floor_y_est, frame_top=self.cam_frame_top,
             face_priority_mode=self.face_priority_mode,
             effective_frame_left=self.effective_frame_left,
@@ -209,8 +202,8 @@ class TrackingEngine(ITracker):
                 _scale = out_w / cw if cw > 0 else 1.0
                 return (int(sx*_scale), int(sy*_scale), int(r_roi[2]*_scale), int(r_roi[3]*_scale))
 
-            sub_rect_prev = get_sub_rect(cam_prev, roi)
-            sub_rect_prop = get_sub_rect(cam_now_proposed, roi)
+            sub_rect_prev = get_sub_rect(cam_prev, raw_roi)
+            sub_rect_prop = get_sub_rect(cam_now_proposed, raw_roi)
 
             cropped_prev = Renderer.crop_frame_static(frame, cam_prev)
             dmd_prev_frame = cv2.resize(cropped_prev, (self.cfg.target_width, self.cfg.target_height), interpolation=cv2.INTER_LANCZOS4)
@@ -242,12 +235,12 @@ class TrackingEngine(ITracker):
                 with open(os.path.join(_ds_dir, "scores.csv"), "a") as f:
                     f.write(f"{src_idx},{vis_proposed:.3f},{read_proposed:.3f},{self.roi_persistence_score:.3f}\n")
 
-        # 10. Look-Ahead and Momentum
+        # 10. Look-Ahead and Momentum (uses original unclipped roi)
         curr_roi_cx: Optional[float] = None
         curr_roi_cy: Optional[float] = None
-        if roi is not None:
-            curr_roi_cx = float(roi[0] + roi[2] / 2.0)
-            curr_roi_cy = float(roi[1] + roi[3] / 2.0)
+        if raw_roi is not None:
+            curr_roi_cx = float(raw_roi[0] + raw_roi[2] / 2.0)
+            curr_roi_cy = float(raw_roi[1] + raw_roi[3] / 2.0)
             
         live_vx, live_vy = 0.0, 0.0
         if curr_roi_cx is not None and self.prev_roi_cx is not None:
@@ -255,7 +248,7 @@ class TrackingEngine(ITracker):
             live_vy = curr_roi_cy - self.prev_roi_cy
             
         if getattr(self.cfg, "scroll_direction_memory_enabled", True):
-            if roi is not None:
+            if raw_roi is not None:
                 self.scroll_vx = 0.9 * self.scroll_vx + 0.1 * live_vx
                 self.scroll_vy = 0.9 * self.scroll_vy + 0.1 * live_vy
                 self.scroll_memory_frames = min(60, self.scroll_memory_frames + 1)
@@ -281,5 +274,47 @@ class TrackingEngine(ITracker):
         self.prev_roi_cx = curr_roi_cx
         self.prev_roi_cy = curr_roi_cy
         
-        self._last_roi = roi  # Store for vignette
+        self._last_roi = raw_roi  # Store for vignette
         return cam_now
+
+    def _clip_to_face_roi(self, raw_roi: Optional[BoundingBox]) -> Optional[BoundingBox]:
+        """Apply face clipping based on the configured scene profile."""
+        if raw_roi is None:
+            return None
+
+        # Fallback if config has no face_clip_mode but face_priority_mode is enabled
+        clip_mode = getattr(self.cfg, "face_clip_mode", "auto")
+        if clip_mode == "none" or (not self.face_priority_mode and clip_mode == "auto"):
+            return raw_roi
+
+        rx, ry, rw, rh = raw_roi
+        aspect = rh / max(1, rw)
+
+        # "auto" uses aspect ratio to choose between close-up and full body
+        if clip_mode == "auto":
+            clip_mode = "closeup" if aspect <= 1.4 else "full_body_head"
+
+        if clip_mode == "closeup":
+            # Face / head close-up — bbox IS the face.
+            # Skip top 25 % (hair) and keep eye region (35 %).
+            hair_skip = int(rh * 0.25)
+            face_h    = max(8, int(rh * 0.35))
+            return (rx, ry + hair_skip, rw, face_h)
+
+        if clip_mode == "full_body_head":
+            # Adaptive eye targeting using aspect-ratio formula
+            # Eye center goes down as aspect gets taller (less head proportion)
+            # clamp(0.32 / (aspect + 0.6), 0.08, 0.22)
+            eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
+            
+            # Allow manual overrides if defined via config sliders
+            manual_eye_offset = getattr(self.cfg, "face_eye_offset", 0.45)
+            # Map slider (0.3-0.6) back to pct of body, but adaptive is preferred
+            # We'll use the adaptive one as the baseline.
+            
+            roi_h   = max(8, int(rh * 0.10))  # 10% of body height is the eye zone
+            roi_top = max(0, int(rh * eye_target_pct - roi_h / 2.0))
+            return (rx, ry + roi_top, rw, roi_h)
+
+        return raw_roi
+

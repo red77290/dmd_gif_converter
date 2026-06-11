@@ -55,6 +55,18 @@ class AutoActionConfig:
     # this in BOTH width and height is cancelled and the camera stays at the
     # current position.  0 = disabled.
     min_subject_dmd_px: int = 4    # pixels in the DMD output (e.g. 128×32)
+    # ── Scene Type Classification ────────────────────────────────────────────
+    # Manual scene type selection.  Each scene type implies a full profile
+    # (face clipping, strength, smoothness, floor tracking) — analogous to
+    # how the colorimetry 'mode' implies contrast/saturation/brightness.
+    # Empty string = no manual override (use defaults or auto-detection).
+    # Valid values: see SceneType.ALL in src/engine/analysis/scene_types.py
+    scene_type: str = ""
+
+    # When True, the analysis phase auto-detects the scene type from content
+    # (overrides manual scene_type).  Enabled by smart_auto_crop / LMH.
+    auto_scene_type: bool = False
+
     # ── PRIORITY 8 — Smart Platformer Mode ───────────────────────────────────
     # Optimised for side-scrolling 2-D games: locks vertical tracking to keep
     # the floor visible at a fixed ratio of the strip height, and widens the
