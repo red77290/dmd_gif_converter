@@ -26,7 +26,9 @@ class VideoAnalyzer:
         self.effective_frame_left: int = 0
         self.effective_frame_w: int = frame_w
         self.face_priority_mode: bool = False
+        self.scene_profile = None   # populated by analyze() when scene classification is active
         self.smart_reasons: List[str] = []
+        self.scoreboard: List[str] = []
         
     def analyze(self, cap) -> None:
         """Runs smart/auto crop analysis and updates configuration variables."""
@@ -50,6 +52,7 @@ class VideoAnalyzer:
                     _auto_tc                  = _decision["auto_top_crop"]
                     self.cfg.auto_vertical_bias    = _decision["auto_vertical_bias"]
                     self.smart_reasons        = _decision["reasons"]
+                    self.scoreboard           = _decision.get("scoreboard_lines", [])
                     _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
                     _smart_face_priority = _decision.get("face_priority", False)
                     
@@ -62,7 +65,15 @@ class VideoAnalyzer:
                     self.cfg.strength = _decision["suggested_strength"]
                 if (_smart or _auto_sm) and "suggested_smoothness" in _decision:
                     self.cfg.smoothness = _decision["suggested_smoothness"]
-                    
+
+                # Apply scene profile to cfg when auto_scene_type is active
+                _sp = _decision.get("scene_profile")
+                if _sp is not None:
+                    self.scene_profile = _sp
+                    self.cfg.scene_type = _sp.scene_type
+                    if _sp.platformer_mode:
+                        self.cfg.platformer_mode = True
+
             except Exception as _e:
                 if _smart:
                     self.smart_reasons = [f"smart scan error ({_e!r}) → all manual"]

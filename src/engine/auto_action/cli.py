@@ -32,6 +32,12 @@ def main() -> int:
     p.add_argument("--smoothness", type=float, default=0.85)
     p.add_argument("--zoom-max", type=float, default=1.8)
     p.add_argument("--padding", type=float, default=0.20)
+    p.add_argument("--scene-type", default="", choices=["", "platformer", "talking_closeup",
+                   "full_body_tall", "fighting_2d", "action_horizontal", "talking_medium",
+                   "full_body_medium", "wide_shot", "action_moving"],
+                   help="Manual scene type (default: none)")
+    p.add_argument("--auto-scene-type", action="store_true", default=False,
+                   help="Auto-detect scene type from content (overrides --scene-type)")
     p.add_argument("--bottom-crop", type=float, default=0.0,
                    help="Fraction of image bottom to exclude from framing (0=disabled, e.g. 0.15)")
     p.add_argument("--auto-bottom-crop", action="store_true", default=False,
@@ -54,6 +60,8 @@ def main() -> int:
         smoothness=args.smoothness,
         zoom_max=args.zoom_max,
         padding=args.padding,
+        scene_type=args.scene_type,
+        auto_scene_type=args.auto_scene_type,
         bottom_crop_pct=args.bottom_crop,
         auto_bottom_crop=args.auto_bottom_crop,
         top_crop_pct=args.top_crop,

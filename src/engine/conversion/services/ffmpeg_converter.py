@@ -17,7 +17,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 class FFmpegConverter(IConverter):
-    """Implémentation de IConverter utilisant FFmpeg pour générer des GIFs."""
+    """Implementation of IConverter using FFmpeg to generate GIFs."""
     
     def __init__(self, default_params: Dict[str, Any]):
         self.default_params = default_params
@@ -56,6 +56,8 @@ class FFmpegConverter(IConverter):
             cfg.auto_top_crop = p.get("action_auto_top_crop", False)
             cfg.vertical_bias = p.get("action_vertical_bias", 0.0)
             cfg.auto_vertical_bias = p.get("action_auto_vertical_bias", False)
+            cfg.scene_type = p.get("action_scene_type", "")
+            cfg.auto_scene_type = p.get("action_auto_scene_type", False)
             cfg.smart_auto_crop = p.get("action_smart_auto_crop", False)
             
             cfg.target_width = target_width

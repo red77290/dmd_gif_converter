@@ -40,6 +40,23 @@ class _FloorEstimator:
         return self._floor_y
 
 
+def _is_dark_frame(frame, threshold: float = 40.0) -> bool:
+    """Return True if the frame is too dark to produce reliable detections."""
+    try:
+        import cv2 as _cv2
+        gray = _cv2.cvtColor(frame, _cv2.COLOR_BGR2GRAY)
+        return float(gray.mean()) < threshold
+    except Exception:
+        return False
+
+
+# Shared face-priority height ratio: ROI height relative to the DMD crop window
+# height that triggers face-priority mode. Must be consistent across all scan
+# functions so both _compute_auto_crop_margins and _smart_auto_crop_decision
+# agree on when a subject is "large enough" to be treated as a close-up.
+_FACE_PRIORITY_H_RATIO: float = 0.80
+
+
 def _compute_auto_crop_margins(  # noqa: C901
     cap,
     detector,
@@ -72,7 +89,6 @@ def _compute_auto_crop_margins(  # noqa: C901
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     dmd_crop_h   = frame_w / target_ratio
 
-    DMD_CROP_H_FACTOR: float = 0.80
     FACE_FRAC: float = 0.28
 
     step = max(1, total_frames // sample_count)
@@ -84,19 +100,25 @@ def _compute_auto_crop_margins(  # noqa: C901
 
     saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
 
-    for i in range(0, min(total_frames - 1, sample_count * step), step):
+    # Use total_frames (not total_frames-1) so that 1-frame GIFs are also sampled.
+    for i in range(0, min(total_frames, sample_count * step), step):
         cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
         ok, frame = cap.read()
         if not ok or frame is None:
             continue
-        roi = detector.detect(frame, cfg.detector)
+        # Skip frames that are too dark for reliable detection (e.g. fade-in)
+        if _is_dark_frame(frame):
+            continue
+        # Use person detection only (no motion fallback): detect_motion relies on
+        # sequential frames via MOG2, which is meaningless when using cap.set() jumps.
+        roi = detector.detect_person(frame) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector)
         if roi is not None:
             rx, ry, rw, rh = roi
             roi_tops.append(float(ry))
             roi_heights.append(float(rh))
             roi_widths.append(float(rw))
 
-            if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
+            if rh > dmd_crop_h * _FACE_PRIORITY_H_RATIO:
                 roi_bottoms.append(float(ry + rh * FACE_FRAC))
                 face_priority_count += 1
             else:
@@ -181,7 +203,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     dmd_crop_h   = frame_w / target_ratio
-    DMD_CROP_H_FACTOR = 0.80
+    DMD_CROP_H_FACTOR = _FACE_PRIORITY_H_RATIO  # synchronized with _compute_auto_crop_margins
     FACE_FRAC = 0.28
 
     step = max(1, total_frames // sample_count)
@@ -190,23 +212,33 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     roi_bottoms_fp: list[float]   = []
     roi_heights: list[float]      = []
     roi_widths: list[float]       = []
+    x_centers: list[float]        = []   # horizontal center of each detection
+    fill_ratios: list[float]      = []   # rh / frame_h per detection
 
     frame_lefts: list[float]      = []
     frame_rights: list[float]     = []
     check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False)
 
     saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    for i in range(0, min(total_frames - 1, sample_count * step), step):
+    # Use total_frames (not total_frames-1) so that 1-frame GIFs are also sampled.
+    for i in range(0, min(total_frames, sample_count * step), step):
         cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
         ok, frame = cap.read()
         if not ok or frame is None: continue
-        roi = detector.detect(frame, cfg.detector)
+        # Skip frames that are too dark for reliable detection (e.g. fade-in / dark scenes)
+        if _is_dark_frame(frame):
+            continue
+        # Use person detection only (no motion fallback): detect_motion relies on
+        # sequential frames via MOG2, which is meaningless when using cap.set() jumps.
+        roi = detector.detect_person(frame) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector)
         if roi is not None:
             rx, ry, rw, rh = roi
             roi_tops.append(float(ry))
             roi_bottoms_feet.append(float(ry + rh))
             roi_heights.append(float(rh))
             roi_widths.append(float(rw))
+            x_centers.append(float(rx + rw / 2.0))
+            fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
             if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
                 roi_bottoms_fp.append(float(ry + rh * FACE_FRAC))
             else:
@@ -242,7 +274,12 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     TOP_SPACE_THRESH  = 0.08
     BOTTOM_GAP_THRESH = 0.08
-    TALL_FACTOR       = 1.30
+    # face_priority triggers when the median ROI height exceeds this fraction of the
+    # DMD crop window height.  MUST stay in sync with _FACE_PRIORITY_H_RATIO above so
+    # that _smart_auto_crop_decision and _compute_auto_crop_margins agree.
+    # History: was accidentally raised to 1.30 in fix/2921a4d, which caused regression
+    # where face-priority never triggered for normal close-up shots.
+    TALL_FACTOR       = _FACE_PRIORITY_H_RATIO  # 0.80 — restored to match DMD_CROP_H_FACTOR
     FLOOR_LOWER       = 0.50
     FLOOR_VAR_MAX     = 0.25
 
@@ -252,16 +289,50 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     floor_in_lower  = (median_bottom / frame_h) > FLOOR_LOWER
     floor_var_score = std_bottom / frame_h
 
+    # Additional signals for scene classification
+    median_w       = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
+    body_aspect    = median_height / max(1.0, median_w)
+    median_fill    = float(np.median(fill_ratios)) if fill_ratios else 0.0
+    x_var          = float(np.var(x_centers)) / max(1.0, float(frame_w) ** 2) if x_centers else 0.0
+
+    # ── Scene classification (auto_scene_type or smart_auto_crop) ────────────
+    scene_profile = None
+    _auto_scene = getattr(cfg, "auto_scene_type", False) or getattr(cfg, "smart_auto_crop", False)
+    if _auto_scene:
+        from src.engine.analysis.scene_types import classify_scene
+        scene_signals = {
+            "tall_ratio":      tall_ratio,
+            "fill_ratio":      median_fill,
+            "body_aspect":     body_aspect,
+            "floor_in_lower":  floor_in_lower,
+            "floor_var_score": floor_var_score,
+            "x_variance":      x_var,
+        }
+        scene_profile, scoreboard_lines = classify_scene(scene_signals)
+    else:
+        scoreboard_lines = []
+
     reasons = []
     auto_bottom = False
     auto_top    = False
     auto_floor  = False
 
-    if tall_ratio > TALL_FACTOR:
+    if scene_profile is not None:
+        # Scene profile drives crop/tracking decisions
+        auto_floor  = scene_profile.auto_vertical_bias
+        auto_top    = scene_profile.face_priority  # narrow to head when face-aware
+        auto_bottom = scene_profile.face_priority or (bottom_gap > BOTTOM_GAP_THRESH)
+        if scene_profile.platformer_mode:
+            auto_top    = False
+            auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
+        suggested_strength   = scene_profile.suggested_strength
+        suggested_smoothness = scene_profile.suggested_smoothness
+        reasons.append(f"SCENE={scene_profile.scene_type} → face_clip={scene_profile.face_clip_mode} floor={scene_profile.auto_vertical_bias}")
+    elif tall_ratio > TALL_FACTOR:
         auto_bottom = True
         auto_floor  = False
         auto_top    = True
-        # Anime / Movies: large sprites, cinematic feel. 
+        # Anime / Movies: large sprites, cinematic feel.
         # Less strength (looser framing), more smoothness (slower panning).
         suggested_strength = 0.55
         suggested_smoothness = 0.85
@@ -271,7 +342,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         auto_top    = False
         auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
         stability   = "stable" if floor_var_score < 0.10 else "dynamic"
-        # Video games (Platformers): fast movement, but user prefers slower/smoother tracking
+        # Video games (Platformers): fast movement, smoother tracking preferred
         suggested_strength = 0.65
         suggested_smoothness = 0.85
         reasons.append(f"GROUP 2 — floor@{median_bottom/frame_h*100:.0f}% var={floor_var_score*100:.0f}% ({stability}) → floor-tracking ✓ / top-crop ✗ (redundant)")
@@ -279,14 +350,13 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         auto_floor  = False
         auto_top    = top_space > TOP_SPACE_THRESH
         auto_bottom = (bottom_gap > BOTTOM_GAP_THRESH) or auto_top
-        # Video games (Top-down, RPGs, generic action): fast movement, but user prefers slower/smoother tracking
+        # Video games (Top-down, RPGs, generic action): smoother tracking preferred
         suggested_strength = 0.65
         suggested_smoothness = 0.85
         reasons.append(f"GROUP 3 — no trackable floor")
 
-    median_w      = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
-    aspect        = median_height / max(1.0, median_w)
-    face_priority = tall_ratio > TALL_FACTOR
+    face_priority = scene_profile.face_priority if scene_profile is not None else (tall_ratio > TALL_FACTOR)
+    aspect        = body_aspect
     if face_priority:
         # Increase top padding heavily for face priority to protect tall hair (like Goku)
         pad_top_px    = frame_h * 0.35
@@ -338,6 +408,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         "reasons":            reasons,
         "suggested_strength": suggested_strength,
         "suggested_smoothness": suggested_smoothness,
+        "scene_profile":      scene_profile,
+        "scoreboard_lines":   scoreboard_lines,
     }
 
 
