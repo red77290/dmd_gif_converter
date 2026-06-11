@@ -964,7 +964,7 @@ class PreviewPanel(ctk.CTkFrame):
             "text_animation":  s.v_text_animation.get(),
             "max_duration": (s.v_max_duration.get() if s.v_max_dur_enabled.get() else 0.0),
             "auto_color_enabled": s.v_auto_color_enabled.get(),
-            "log_level": "DEBUG",
+            "log_level": getattr(self.winfo_toplevel(), "v_log_level", tk.StringVar(value="INFO")).get(),
         }
         if s.v_let_me_handle_it.get():
             params.update({

@@ -29,6 +29,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
     analyzer = VideoAnalyzer(reader.frame_w, reader.frame_h, cfg)
     analyzer.analyze(reader.cap)
 
+    import logging
+    logger = logging.getLogger(__name__)
+
     initial_start_s = cfg.start_s if cfg.start_s is not None else 0.0
     if initial_start_s > 0:
         reader.set_time(float(initial_start_s) * 1000.0)
@@ -172,9 +175,19 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
     crop_info = (" crop=" + "+".join(_crops)) if _crops else ""
     smart_tag = " smart" if (cfg.smart_auto_crop or cfg.roi_confidence_min > 0 or cfg.min_subject_dmd_px > 0) else ""
     plat_tag = " plat" if cfg.platformer_mode else ""
+    scene_tag = f" scene={analyzer.scene_profile.scene_type}" if analyzer.scene_profile else ""
     
-    msg = (f"Auto action OK ({frame_idx} frames{intro_info}, "
-           f"{analyzer.out_w}×{analyzer.out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag}{plat_tag} "
+    msg_lines = []
+    if hasattr(analyzer, 'scoreboard') and analyzer.scoreboard:
+        msg_lines.extend(analyzer.scoreboard)
+    if hasattr(analyzer, 'smart_reasons') and analyzer.smart_reasons:
+        for reason in analyzer.smart_reasons:
+            msg_lines.append(f"Auto Crop Decision: {reason}")
+            
+    msg_lines.append(f"Auto action OK ({frame_idx} frames{intro_info}, "
+           f"{analyzer.out_w}×{analyzer.out_h}, detector={cfg.detector}{onnx_tag}{crop_info}{smart_tag}{plat_tag}{scene_tag} "
            f"str={cfg.strength:.2f} sm={cfg.smoothness:.2f}).")
+           
+    msg = "\n".join(msg_lines)
            
     return True, writer.out_path, msg
