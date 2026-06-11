@@ -151,6 +151,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Smart Auto Crop: engine analyses context and activates the optimal combination of "
              "auto-bottom-crop, auto-top-crop and auto-floor-tracking (default: disabled).",
     )
+    ag.add_argument(
+        "--action-scene-type", type=str, default="",
+        choices=["", "platformer", "talking_closeup", "full_body_tall",
+                 "fighting_2d", "action_horizontal", "talking_medium",
+                 "full_body_medium", "wide_shot", "action_moving"],
+        help="Manual scene type selection (default: none).",
+    )
+    ag.add_argument(
+        "--action-auto-scene-type", action="store_true", default=False,
+        help="Auto-detect scene type from content (overrides --action-scene-type).",
+    )
     
     # ── AI Moments Extraction ───────────────────────────────────────────────
     am = p.add_argument_group("AI Moments Extraction")
@@ -198,9 +209,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Alias for --log-level DEBUG. Show detailed FFMPEG processing logs.",
     )
     lg.add_argument(
-        "--log-level", type=str, default="WARNING",
+        "--log-level", type=str, default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Set the logging level. Default is WARNING (shows progress bar).",
+        help="Set the logging level. Default is INFO.",
     )
 
     # ── Search & Download (Integrated CLI) ───────────────────────────────────
@@ -316,6 +327,8 @@ if __name__ == "__main__":
         "action_smoothness": args.action_smoothness,
         "action_zoom_max": args.action_zoom_max,
         "action_padding": args.action_padding,
+        "action_scene_type": args.action_scene_type,
+        "action_auto_scene_type": args.action_auto_scene_type,
         "bg_sub_enable": args.bg_sub_enable,
         "action_smart_auto_crop": args.smart_auto_crop,
         "max_duration": args.max_duration,
@@ -340,6 +353,7 @@ if __name__ == "__main__":
             "auto_color_enabled":     True,
             "auto_action_enabled":    True,
             "action_smart_auto_crop": True,
+            "action_auto_scene_type": True,
             "dmd_visibility_score_enabled": True,
             "dmd_readability_score_enabled": True,
         })

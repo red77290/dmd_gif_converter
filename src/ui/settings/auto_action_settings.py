@@ -110,7 +110,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         row_frame.pack(fill="x", padx=14, pady=(0, 4))
         self._cb_dmd_visibility_score_enabled = ctk.CTkCheckBox(
             row_frame,
-            text="DMD Visibilité",
+            text="DMD Visibility",
             variable=self.app_state.v_action_dmd_visibility_score_enabled,
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
         )
@@ -119,7 +119,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
 
         self._cb_dmd_readability_score_enabled = ctk.CTkCheckBox(
             row_frame,
-            text="DMD Lisibilité",
+            text="DMD Readability",
             variable=self.app_state.v_action_dmd_readability_score_enabled,
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
         )
@@ -195,6 +195,37 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         _b3.configure(text="Automatically analyzes the scene to optimize bottom crop, top crop, and floor tracking.\n(Forced ON when Let me handle it is active)")
         _b3.pack(side="left", padx=(0, 8))
 
+        scene_type_row = ctk.CTkFrame(parent, fg_color="transparent")
+        scene_type_row.pack(fill="x", padx=14, pady=(6, 2))
+        ctk.CTkLabel(scene_type_row, text="Scene Type:").pack(side="left", padx=(0, 10))
+        self._scene_type_menu = ctk.CTkOptionMenu(
+            scene_type_row,
+            variable=self.app_state.v_action_scene_type,
+            values=["", "platformer", "talking_closeup", "full_body_tall",
+                    "fighting_2d", "action_horizontal", "talking_medium",
+                    "full_body_medium", "wide_shot", "action_moving"],
+            width=200,
+        )
+        self._scene_type_menu.pack(side="left")
+        self.app_state.lmh_widgets.append(self._scene_type_menu)
+
+        scene_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
+        scene_auto_row.pack(fill="x", padx=14, pady=(0, 2))
+        self._cb_auto_scene_type = ctk.CTkCheckBox(
+            scene_auto_row,
+            text="Auto Scene Type  (overrides dropdown · detects scene from content)",
+            variable=self.app_state.v_action_auto_scene_type,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        )
+        self._cb_auto_scene_type.pack(side="left")
+        self.app_state.lmh_widgets.append(self._cb_auto_scene_type)
+
+        def _toggle_auto_scene_type(*_):
+            if self.app_state.v_action_smart_auto_crop.get(): return
+            state = "disabled" if self.app_state.v_action_auto_scene_type.get() else "normal"
+            self._safe_cfg(self._scene_type_menu, state=state)
+        self.app_state.v_action_auto_scene_type.trace_add("write", _toggle_auto_scene_type)
+
         pillarbox_row = ctk.CTkFrame(parent, fg_color="transparent")
         pillarbox_row.pack(fill="x", padx=14, pady=(6, 0))
         self._cb_auto_pillarbox = ctk.CTkCheckBox(
@@ -267,10 +298,12 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         def _toggle_smart_auto(*_):
             smart_on  = self.app_state.v_action_smart_auto_crop.get()
             cb_state  = "disabled" if smart_on else "normal"
+            self._safe_cfg(self._cb_auto_scene_type, state=cb_state)
             self._safe_cfg(self._cb_auto_bottom_crop, state=cb_state)
             self._safe_cfg(self._cb_auto_top_crop, state=cb_state)
             self._safe_cfg(self._cb_auto_floor, state=cb_state)
             if not smart_on:
+                _toggle_auto_scene_type()
                 _toggle_auto_bottom_crop()
                 _toggle_auto_top_crop()
                 _toggle_auto_floor()

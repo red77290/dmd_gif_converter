@@ -1,4 +1,4 @@
-# Auto Action Framing (v6.1.0)
+# Auto Action Framing (v6.2.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
@@ -25,7 +25,9 @@ It creates an intermediate video that follows action/person areas at the target 
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
 
-**v6.1.0 improvements:**
+**v6.2.0 improvements:**
+- Continuous Scoring Matrix dynamically selects the optimal camera profile instead of relying on a rigid waterfall model.
+- Complete thread-safety for OpenCV C-level stderr suppression.
 - **Close-up hair detection**: The tracker now detects close-up shots (`roi_h > 40 % of frame height`) and clips the detection zone to skip the top 25 % (hair) and keep the 35 % below (eyes). Prevents camera drift toward forehead/hair on anime-style content.
 - **Face-priority camera fix**: `face_priority_mode` in `camera.py` now uses `cy = y + h/2.0` (ROI centre) instead of the buggy `ideal_top + crop_h/2` formula that placed the camera ~300 px below the actual face.
 - **C-level stderr suppression**: `_quiet_c_stderr()` context manager in `reader.py` uses `os.dup2` to redirect file-descriptor 2 to `/dev/null` during `cv2.VideoCapture()` construction, silencing `[mp3float @ ...] Header missing` messages that bypass Python's logging system entirely.

@@ -1,10 +1,16 @@
-# 🎞️ DMD GIF Converter — v6.1.0
+# 🎞️ DMD GIF Converter — v6.2.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
 ---
+
+## What is New in v6.2.0?
+- **📊 Continuous Scoring Matrix**: Scene detection (Auto Action) no longer relies on a rigid waterfall model. It uses a dynamic, continuous scoring matrix to identify the optimal camera profile (e.g., Platformer, Talking Closeup, Action). The scoreboard is fully visible in the UI logs.
+- **🏷️ Semantic Logs for Colorimetry**: Smart Color Boost now tags your scenes directly in the UI logs (e.g., `[Dark + Low Contrast]`, `[Vivid]`) so you know exactly how the AI perceives your footage.
+- **🛡️ Thread-Safe Stderr Suppression**: Fixed a critical concurrency bug where multiple parallel conversions would permanently redirect the application's terminal output to `/dev/null`. C-level `stderr` suppression is now fully protected by a `threading.Lock`.
+- **📝 UI Log Interception Fix**: Engine `logger.info()` calls (which bypassed the UI and printed directly to the terminal) have been consolidated into the final conversion payload, ensuring that all Auto Action reasoning and scoring matrices appear perfectly inside the application's Log Panel.
 
 ## What is New in v6.1.0?
 - **🎯 Close-up Hair Detection Fix**: The auto-action tracker now correctly identifies close-up faces (`roi_h > 40 % of frame height`) and skips the top 25 % of the bounding-box (hair) to lock onto the eye region instead of forehead/hair — eliminating the camera drift bug on anime-style content.
@@ -109,13 +115,13 @@ Want to use the tool without the GUI? Here are the most powerful commands.
 
 ```bash
 # 1. Download GIFs and fully auto-convert them!
-./dmd_gif_converter.py --search-keyword "arcade" --let-me-handle-it
+python3 -m src.engine.conversion.cli --search-keyword "arcade" --let-me-handle-it
 
 # 2. Process specific folders with cinematic AI framing
-./dmd_gif_converter.py gifs_Arcade --auto-action-enabled
+python3 -m src.engine.conversion.cli gifs_Arcade --auto-action-enabled
 
 # 3. Add a retro pixel-art text overlay
-./dmd_gif_converter.py --text-overlay --text-content "PLAYER 1" --text-color yellow
+python3 -m src.engine.conversion.cli --text-overlay --text-content "PLAYER 1" --text-color yellow
 ```
 
 

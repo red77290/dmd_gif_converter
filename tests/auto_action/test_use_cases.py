@@ -82,9 +82,20 @@ class TestUseCases(unittest.TestCase):
         
         # --- SEMANTIC ASSERTIONS ---
         if "visage" in filename or "face" in filename or "closeup" in filename:
-            # After the fix (v6.1.0): the camera should be centred on the EYE
-            # region (~25-65 % of the detected body bbox), NOT on the hair/top.
-            # The camera must include at least the middle 40-60 % of the roi.
+            # After the fix (v6.1.0+): the camera should be centred on the EYE region.
+            #
+            # The close-up-to-body regression (old code applied face proportions to a
+            # tall body bbox when rh > 40% of frame height, placing the camera at ~42%
+            # of body height = waist) is covered by the unit tests in
+            # test_tracker_closeup.py::test_full_body_shot_clips_to_head_eye_region.
+            #
+            # NOTE: For "full_body*" GIFs the full pipeline test is a smoke test only,
+            # because face_priority_mode depends on YOLO being available in the analysis
+            # phase (detect_person → ONNX). In environments where only motion detection
+            # is available, face_priority_mode=False and the camera is at the body centre
+            # — which is unavoidable at the pipeline level without YOLO.
+            # The aspect-ratio fix in tracker.py protects the eye focus when YOLO IS
+            # active; unit tests validate that path directly.
             valid_roi_found = False
             for roi, cam in recorded_pairs:
                 valid_roi_found = True
@@ -94,7 +105,12 @@ class TestUseCases(unittest.TestCase):
                 cam_top    = cy - ch / 2.0
                 cam_bottom = cy + ch / 2.0
 
-                # Eye zone in the original bbox: roughly 25 %–65 % from top.
+                # Eye zone in the original bbox: roughly 20 %–65 % from top.
+                # For face close-ups: the bbox IS the face → eye zone is 20-65 %.
+                # For full-body shots: the bbox is the body; with face_priority_mode
+                # active the camera will be much higher (~8 %), but with only motion
+                # detection available cy ≈ 50 % (body centre) which falls just inside
+                # this generous zone thanks to the wide camera window.
                 eye_top    = ry + rh * 0.20
                 eye_bottom = ry + rh * 0.65
 
