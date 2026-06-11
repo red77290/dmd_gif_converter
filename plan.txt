@@ -1,0 +1,428 @@
+voici ma demande:
+
+
+ce que je constate, c'est que la version tag 6.0.0 se débrouille mieux pour les visage de personnage plus grand que l'écran, mais pas les gros plan sur visage.
+la version origin/main, c'est l'inverse, c'est bien sur les gros plan visage mais moins bien sur les full body pour prioriser le visage.
+et ce que tu viens de corriger, c'est mieux pour le visage, mais pas parfait tu montes trop sur les cheveux et tu ne pointe pas les yeux. par contre tu as completement casser les plateformers, le flooring et caractere priority.
+aussi tu m'as mis plein de commentaire en français arrête de faire ça, corrige et met en anglais.
+En faite il faut partager les choses, il faut bien determiner de quelle type de scene il s'agit, et il faut être exaustif sur les type de scene, anime, pixel, movie, gros plan, plan large, fighting scene movie, fighting scene 2D fighting game, plateformer.
+tu as 4 genre c'est vrai,
+Anime
+Pixel
+Cinema
+3D
+mais dans chacun de ces genre tu as des sous genre
+fighting
+fix talking
+moving
+plateformer
+wide shot
+long shot
+close-up
+etc...
+il faut être très exaustif.
+ensuite il faut determiner la scene correctement et mettre les bonnes priorité pour chacune,
+après certaine scene on les même priorité il faut les mettre ensemble
+
+
+
+
+voici la reflexion de claude :
+
+
+
+
+The user wants me to:
+Fix the regression I introduced (broken platformers, flooring, character priority)
+Translate all French comments to English
+Design a comprehensive scene classification system that properly handles different scene types
+The scene types should be exhaustive across genres (Anime, Pixel, Cinema, 3D) and sub-genres (fighting, talking, moving, platformer, wide shot, long shot, close-up, etc.)
+Each scene type should have proper camera priorities
+Let me first understand what I broke:
+Platformers: floor tracking broken
+Character priority: broken
+The face focus for full_body is "too high" (on hair instead of eyes)
+I replaced the closeup detection with an aspect ratio check, which likely broke the platformer and floor tracking paths
+For platformers, face_priority_mode should be False, so the face clipping logic shouldn't run, but the floor estimation still needs the ROI bottom calculation to work properly
+The user's complaint mentions platformers, flooring, and character priority are all broken, so I need to check if my restructuring of the detection order or changes to analysis.py caused the issue
+The analysis fix that now samples the last frame instead of excluding it could be changing how content gets classified
+For platformers specifically, face_priority_mode remains False, so the detection flow shouldn't change there, but I should trace through the original tracker structure to see what I actually modified
+In my refactored code, I moved face-region clipping to a separate step that only runs when needed, and for platformers this step gets skipped entirely, so the raw ROI values used in the micro-detection and size rejection steps should be identical to what they were before
+.
+Now I'm looking at the cam_frame_h initialization logic and noticing that platformers use effective_frame_h while face-priority mode uses the full frame_h. I'm wondering if the recent change to _smart_auto_crop_decision — shifting from total_frames - 1 to total_frames — might be pulling in the last frame of certain GIFs, which could have unexpected properties.
+Let me trace through the changes more carefully. I modified tracker.py to separate raw detection from face clipping, which shouldn't affect non-face-priority behavior, but I also changed the frame sampling in analysis.py. For a 10-frame GIF, this now includes frame 9 instead of stopping at frame 8, and that extra frame might be throwing off floor or crop calculations for platformers. a 4-frame GIF should work fine. But the user's complaint about breaking platformers, flooring, and character priority makes me think the real issue is in my face clipping changes. The analysis fix might be causing tall-but-moving platformer characters to be misclassified in the last frame, making them look like face priority characters when they shouldn't be.
+Actually, wait—platformers don't even use face_priority_mode, so my changes shouldn't affect them at all. Unless the analysis fix itself is triggering wrong classifications for some GIFs that previously worked correctly. Let me reconsider what the user is actually reporting here. The hairline positioning is still too high—it's catching hair instead of the eyes where it should be. I also need to translate those French comments to English. More fundamentally, I need to build out a proper scene classification system that accounts for different genres and shot types. Let me map out the scene categories: anime, pixel art, live action, and 3D games, each with subcategories like platformers, fighting games, dialogue scenes, action sequences, and various shot compositions from wide establishing shots down to medium shots.
+For the DMD's limited 128x32 pixel display, the priority is keeping the most important visual element centered and stable. I'm thinking through a priority system where face-focused scenes—close-ups, medium shots, talking scenes—should center on the eye region with minimal camera movement, while full-body shots with face priority need to adjust the center point based on the aspect ratio.
+Then there's character tracking for action sequences where the camera follows the center of mass dynamically, floor-anchored framing for platformers to prevent jitter during jumps, and wide shots for RPGs and strategy views that show the full scene. The system determines which mode to use by analyzing whether face priority is active, if it's a platformer, the vertical bias, and the tracking strength and smoothness parameters.
+The current classification breaks down into three groups: tall characters that need face priority and auto-cropping, scenes with stable floors for floor tracking, and everything else that gets generic tracking. The user wants something more comprehensive, but first I need to address the immediate issues—making sure platformers don't break, fixing the face focus so it doesn't land on hair, translating French comments to English, and then tackling the larger classification system. The frame count adjustment in analysis.py is risky since it could affect classification, so I need to think carefully about whether to apply it.
+Looking at the platformer issue more closely, changing the frame range from 0-2 to 0-3 on a 4-frame GIF could push the tall_ratio above 0.80 if frame 3 has an odd character position, which would incorrectly reclassify it from GROUP 2 to GROUP 1. For single-frame GIFs, the old code wouldn't sample anything while the new code would sample frame 0, but even with the full_body_prioritize_face.gif test case, the analysis still returns face_priority as false because of how the Y-coordinate threshold is being evaluated.
+The user mentioned the platformers are completely broken, so if they tested with actual GIFs, my frame sampling change might have altered classification for some of their platformer animations. I should probably revert this fix since it's not actually solving the integration test issue and could be causing more harm. Let me reconsider the face-focus logic more carefully—with the full-body bounding box dimensions, I'm calculating the head height, hair skip, and face height values, but something in the ROI calculation isn't working as expected. Now I'm checking where this region actually falls relative to the full body height. The ROI spans from about 4% to 11% of the body, centering around 7.5% from the top—which would place it in the lower part of the head, possibly around the nose or mouth area rather than the eyes where I'd expect it to be for a typical portrait.
+Let me recalculate using standard proportions: if the head is roughly one-eighth of the total body height, that's about 21 pixels. The eyes should sit around the middle of the head, which puts them at roughly 62.5 pixels from the top of the body. My camera center at 64.5 pixels is actually very close to eye level, which makes sense for framing a face.
+But the user's feedback suggests I'm capturing too much of the hair and missing the eyes. This might mean the character model uses anime proportions instead—where the head is about one-fifth of the body height, making it roughly 33 pixels tall. With that scaling, my 29-pixel head calculation is actually pretty accurate, and the eye positioning would shift accordingly.
+Let me recalculate: for anime proportions, the eye center lands around 73.5 pixels, but my camera is positioned at 64.5 pixels. That's definitely too high—I'm sitting in the hair region. For realistic 8-head proportions, 64.5 pixels is perfect, so the real issue is that I'm using a fixed 18% head fraction that doesn't adapt to different character styles.
+I should increase the head fraction to something like 25% and adjust the eye position calculation accordingly, so it works across both realistic and anime character models. Calculating the eye region with proportional offsets from the body height, centering around 11% down from the top. The user mentioned v6.0.0 handled tall characters better while the current main branch works well for close-up face shots, so I should check what logic v6.0.0 used for that scenario.
+Actually, I'm realizing this needs a more comprehensive approach than just tweaking coordinates. The user is asking for a proper scene classification system that can distinguish between different framing types using signals like the person's height relative to the crop, the bounding box aspect ratio, floor position stability, and other contextual cues.
+I'm mapping out the detection criteria for each scene type—face close-ups have a narrow aspect ratio and tall person-to-frame ratio, while full body shots are wider and shorter. Then I'm defining what each scene type should prioritize for camera focus, whether that's the eye region for close-ups or the floor for platformer games.
+The real challenge is that YOLO gives us the body bounding box, but for face-priority scenes we need to estimate where the face actually sits within that box. Different art styles have different head-to-body proportions, so I can use the detected aspect ratio of the body bbox itself to infer the style—very tall bboxes suggest realistic proportions with an 8-head ratio, while medium-tall ones could be anime with a 4-6 head ratio.
+Once I know the style, I can calculate where the face region sits: for realistic full-body shots the head occupies roughly the top 12-15%, for anime it's more like 18-25%, and for portrait framing it's 25-35%. Now I'm mapping out the complete scene detection strategy with specific camera behaviors for each case—starting with face closeups where the bbox itself is the face, then moving into portrait and wider framings. Continuing through the camera tracking patterns for different scenarios—platformers need the camera anchored to a stable floor, fighting games track the action center across multiple characters, action sequences lead the character movement, wide shots keep small characters in full frame, and topdown views use standard centered tracking. This is getting complicated though, so I should focus on the immediate priorities: fixing the platformer regression, correcting the face focus that's sitting too high on the hair, cleaning up the French comments, and then tackling the comprehensive implementation.
+Looking at what's actually broken, the platformer and floor tracking issues likely stem from my recent analysis change that now includes the final frame—if that frame happens to be a jump, it makes the character appear taller and triggers the wrong group classification. The face focus problem is simpler: the 18% head fraction is too conservative for anime characters, so I need to bump it up to 25%. I'll revert or safeguard that analysis change first, then apply these fixes.
+Now I'm working through the scene classification logic. The key insight is that in face priority mode, YOLO always gives us a body bounding box, so I need to estimate where the face actually sits based on the aspect ratio. For close-ups where the aspect ratio is tight, the bbox essentially is the face, so I skip the top portion for hair and focus on the eye region. For wider aspect ratios like portraits with shoulders visible, the head occupies just the upper portion of the bbox.
+Continuing with the aspect ratio tiers...
+Then I'm calculating the region of interest by combining the head height and hair skip offset with the face height, and working through the eye center positioning for different aspect ratios to determine the vertical placement. For characters with larger heads, the eye center shifts lower—around 15% from the top for a 4-head proportion character, where the head itself occupies roughly the top quarter of the body.
+When the framing includes the chest up, the head takes up more of the bounding box (45-60%), which pushes the eye center down to around 19-22% from the top. The exact position depends on how much of the upper body is visible and the character's proportions.
+Actually, let me approach this more systematically. The key insight is that the head always sits at the top of the bounding box, so I need to estimate head size relative to the full bbox, then locate the eyes within that head. For close-ups with aspect ratios under 1.5, the head fills nearly the entire box and eyes fall in the 25-65% range. When the framing widens to include shoulders (1.5-2.0 aspect), the head shrinks to 50-60% of the bbox height, placing eyes around 20-35% from the top. As the frame pulls back further to show more of the upper body (2.0-3.0 aspect), the head occupies just 30-40% of the total height.
+I'm working out a formula that scales eye position based on aspect ratio—essentially dividing a base eye percentage by the aspect ratio to account for how much of the frame the head occupies. Testing this against different aspect values to see if the math produces reasonable eye positions across all scene types. I'm realizing this is getting too complicated, so let me step back and use a simpler piecewise approach. The key insight is that for any detected body bounding box, I can estimate where the eyes are positioned based on the aspect ratio—specifically, the eye midpoint sits at a height that depends on the ratio of the box's height to width. Let me work through the math to verify this holds across different aspect ratios. Testing this formula across different aspect ratios—it gives me 40.5% for a face, 27.4% for portrait, 18.5% for full body anime, and 14% for realistic full body, which all feel reasonable. Now I'm implementing the eye position calculation with this formula to determine the region of interest for clipping. Verifying the math across different aspect ratios to confirm the camera center aligns correctly with the eye position. aspect = 5.0: 0.65/5.6 = 0.116
+For aspect = 3.5 (full body anime, rh=166): eye at 15.8% from top = 26px below top of body. For anime 5-head body: head ≈ 33px (= 166/5), eyes at ~40% of head = 13px below top → eye_y ≈ ry + 13px = 13/166 = 7.8% from top. Still my formula gives 15.8% (too low, but in the face area).
+Actually, for an anime character with a big head (1/5 body ratio), the EYES would be at:
+ry (top of body = top of head)
+Eyes at 40% of head from top = 0.40 *
+So that's ry + 13px = ry + 8% of body, but my formula places the camera at ry + 15.8% = ry + 26px, which is way too low—landing on the nose or chin instead of the eyes. The issue is that for very tall characters with small heads relative to body size, my current approach overshoots into the lower face.
+I think I need to abandon the smooth formula and switch to a clamp-based approach with better tuned constants for different shot types. For face close-ups where aspect ≤ 1.5, the bounding box is essentially the face itself, so I'd use the standard hair skip and eye zone percentages. For head-and-shoulders shots starting around aspect 1.5, I'd adjust the constants differently.
+Defining the clamp cases... Continuing to work through the eye positioning for wider aspect ratios—for the 4-head anime style with a 3:1 aspect, the eyes land around 12.6% from the top, which still falls in the chin area rather than where they should be. Moving to even wider formats with aspect ratios above 3.5, I'm positioning the head at just 22% of the rectangle height and recalculating where the eyes should sit...
+The core problem I'm running into is that cases 2 and 3 place the camera too low because anime characters have proportionally larger heads relative to their bodies, so I'd need to account for a bigger head fraction. But here's the catch—I can't determine the art style just from the aspect ratio alone.
+Looking back at the user's feedback about "tu montes trop sur les cheveux" (too high, in the hair), I realize the current fix is actually pushing the camera too high rather than too low. Let me recalculate with the full body case to verify where the camera is actually landing.
+With a 166px body height, my current approach places the camera around 12.5px from the top of the body, which lands right at the hairline area. But the eyes should be positioned lower—around 9-10px down from the top of the head itself. This confirms the camera is indeed sitting too high in the hair region, which matches what the user reported. The eye center lands right at y=64.5, which confirms my calculation is pointing at the eyes for a realistic character. But the user's feedback about going too high into the hair suggests I need to reconsider how this applies to anime proportions. For a typical 4-5 head anime character, the head would be much larger relative to the body, shifting where the eye center actually falls.
+Let me recalculate: if the head is 25% of the body height, that's about 41.5 pixels, and the eyes would sit around 70.7 pixels from the top. My current camera position at 64.5 pixels is actually 6 pixels too high—landing in the hair and forehead area instead of the eyes. To fix this for anime characters, I'd need to adjust my head fraction calculation to account for the larger head-to-body ratio. For anime characters the eye level lands almost perfectly at 70.7px, but for realistic proportions it's off by about 8.5px since the calculation centers between two heads rather than on the actual head. Since there's no single percentage that works for both 4-head and 8-head proportions, I'm testing a compromise at 22% body height to see if it balances better across both styles. ) is the key issue. For close-ups where the aspect ratio is low, I should just use the face bounding box directly instead of trying to extract head proportions from a body model. So I'm adding a conditional check: if the aspect ratio is 1.5 or smaller, treat the entire bbox as the face and skip the head extraction logic.
+For taller aspect ratios where we're dealing with body shots, I'm using a formula that scales the head fraction inversely with aspect ratio—clamped between 0.16 and 0.38—so that portrait shots get a larger head fraction (around 35%) while full-body shots get a smaller one (around 18-23%). For a 2:1 portrait aspect ratio where the head occupies about 50% of the visible area, the eyes should land around 20% down from the top of the bounding box, but my current formula is placing them too high. I need to recalibrate the head fraction and hair skip calculations to better match realistic portrait proportions where eyes sit lower in the frame. The real problem is that my eye position estimate within the head itself is off, not the head size calculation. For portrait shots where the head dominates the frame at around 50% of the bbox height, my head_frac formula is actually sizing the head correctly, but I'm placing the eyes too low within it. Let me work through a concrete example to figure out where the eyes should actually sit relative to the head boundaries. So head_frac = 0.93 / aspect with bounds between 0.16 and 0.55 gives me the right eye positioning across different aspect ratios. For a 2:1 portrait it lands at exactly 20% from the top, and for a 3:1 anime-style ratio it gets close to the expected 11.25% mark. The formula works well across different body types, staying within a few percent of expected eye positions. For face close-ups where the aspect ratio is 1.5 or less, I'll treat the bounding box as the face itself with fixed percentages for hair and face height. For larger body shots, I'll use the dynamic head fraction calculation, then derive the hair skip distance from that head fraction.
+Let me verify this holds up with a specific example like the full body shot with aspect ratio 2.27—calculating the head fraction, then working through to get the pixel measurements for hair skip and face height. The resulting camera center lands around 16.9% from the top of the body, which seems slightly high compared to typical eye placement in anime or portrait compositions, but it's in the right ballpark.
+Let me tweak the formula to push the eye position down a bit more. I'm adjusting the hair skip and face height calculations so the camera centers deeper into the head. With these new parameters, an aspect ratio of 2.27 should give me around 19.7% from the top, which aligns much better with expected eye placement.
+For the 1.5 aspect ratio case, I'm getting about 26.4%, but that's too low for a portrait that's mostly face—it should be closer to 22%. I think I need to handle these cases separately rather than trying to force one formula to work for everything. Looking back at the user's feedback, the core issues are that the camera is climbing too high into the hair and not centering on the eyes properly. Let me simplify and focus on those two specific problems instead of chasing perfect percentages across every aspect ratio. So the camera at y=64.5 is actually positioned around the chin area for a realistic character with a 20px head, not the eyes—which means it's too low, not too high. But the user's complaint about going "too much toward the hair" suggests they're thinking about it visually rather than numerically, so there's a mismatch between what I calculated and what they're experiencing. hair area). This IS the hair area!
+Wait, earlier I calculated:
+hair_skip = 7px → ry + 7 = 59
+face_h = 11px → roi from 59 to 70
+cy = 64.5 = ry + 12.5px
+For a 20px head (ry=52 to ry+20=72):
+Hair: 52 to 57 (top 25% of head = 5px)
+Forehead: 57 to 61 (25-45% of head)
+Eyes: 61 to 67 (45-75% of head, ~center at 64)
+Nose/cheeks: 67 to 72
+My cy = 64.5 which IS in the eye zone (61-67)! So for a realistic character, the camera is actually positioned right where it should be—centered on the eyes, not the hair.
+But for an anime character with a larger head, the proportions shift dramatically. If I'm working with a 4-head proportion where the head takes up 25% of the total height, the eye placement moves lower relative to my fixed cy value. My current 18% offset is calibrated for realistic 8-head proportions, so it's placing the camera too high in the forehead area for anime-style characters with oversized heads.
+I need to adjust the head fraction dynamically based on aspect ratio. For medium aspect ratios between 1.5 and 3.5, which could indicate an anime or stylized character shot from the waist up, I should use a larger head fraction around 25%. For wider aspect ratios above 3.5, which typically means a realistic full-body shot, I'd stick with 16-18%. Looking at the actual image with its aspect ratio of 2.27, this falls into that medium range where the character could be anime-style, and the camera position of 64.5 is indeed landing too high—it should be closer to 73 to properly center on the eyes.
+Refining the face clipping logic... Still refining the head detection logic... I'm realizing my 50% head fraction is way too aggressive for this aspect ratio—the camera ends up positioned in the chest or neck area instead of at eye level, which is way too low. Even accounting for different character styles like anime versus realistic proportions, the math shows I'm consistently overshooting the head size, which throws off the entire framing.
+The real issue is that I'm conflating the full-body detection bbox with the visible portrait portion. YOLO captures the entire person from head to toe, but the head-to-body ratio depends on whether we're looking at a full figure or just the upper portion that's actually visible in frame. So the eye position at 78.4px makes sense for the chibi case, but when I use a 50% head proportion, the head extends way too far down into the torso—that's why the camera isn't landing on the eyes. The issue is that a 2.27 aspect ratio is ambiguous: it could be a full-body chibi character with a smaller head, or just an upper-body shot, and I'm applying the wrong proportions for what's actually in the frame.
+The real question is what the user needs. Looking back at version 6.0.0, it was using the top 28% of the body bbox with the camera centered at 28% down—that approach worked better for close-up character faces that fill the screen. So the eye level sits around 11.3% from the top of the body, while 6.0.0's camera at 14% puts it in the nose area—about 2-3% below eye level. The user found 6.0.0 worked better for tall characters, which suggests positioning slightly below the eyes gives better framing than my current fix at 7.5% in the forehead area. I'm wondering if that nose-level positioning is actually the sweet spot for full-body face priority shots. " should take up a meaningful portion of the display, and centering at eye level captures the hair, eyes, and nose—probably the sweet spot for face visibility. My adjustment with cy at 7.5% seems better for DMD face readability than the 6.0.0 approach at 14%, but the user reported the opposite. Let me trace back through the git history to understand what 6.0.0 actually implemented.
+Looking at the old camera code before the face priority fix, the roi was the full body bounding box passed directly without any face clipping. The calculation used a simple center-of-mass approach: taking the region height, applying a 5% hair headroom offset, and centering vertically from there.
+Then commit ffa88df introduced the face_priority_mode parameter being passed to camera.py, which changed how the vertical center was calculated—instead of using the full crop height, it now uses just the crop height when face priority is enabled.
+Before that commit, there was no special face handling in camera.py, so the camera was positioned at the body center. For this specific GIF, that would put the camera around y=135, which the user says was actually better for tall characters in v6.0.0, even though that positioning isn't ideal for focusing on the face.
+Let me work through what the v6.0.0 formula would have produced with face_priority_mode enabled. Using ideal_top + crop_h / 2 with ideal_top at 43.7 and crop_h around 125, that gives cy ≈ 106.2—better than the body center but still not at eye level where it should be around 70.
+Now I need to step back and focus on what's actually happening with the current fix. The user is saying it's positioning the camera too high on the hair and breaking platformers, so let me look at the specific GIF dimensions and where the body actually sits to understand what "too high" means in practice.
+With the aspect ratio-based approach placing the focus point at y=64.5, I'm checking what that corresponds to across different head proportions—realistic, anime, and chibi styles—to see if the positioning makes sense for where the eyes should actually be.
+The camera ends up too high for anime and chibi characters since their heads take up a much larger portion of the body bounding box, which shifts where the eye level falls. I'm realizing the formula needs adjustment for these styles, where the head occupies 20-40% of the full body height depending on the art style, and the eyes sit around 40-45% down from the top of the head.
+For a more universal approach that handles anime better, I should use around 12% from the top of the body bounding box for the camera position in full-body shots, which accounts for the eye level across different character proportions. Defining scene classification system... I'm mapping out camera tracking strategies for each scene type—action scenes need to follow the character's movement, wide shots stay static, and top-down views center on the player. I've already got some detection criteria working like face priority and floor tracking, and I could add more sophisticated analysis like motion variance or scene density, but I should focus on building a solid foundation first rather than overcomplicating it. Time to start implementing the actual code.
+For the face clipping formula, I'm working through a piecewise approach based on aspect ratio—narrow characters get treated as close-ups with specific hair and face percentages, while wider characters need different calculations depending on whether they're chibi-style or tall. The tricky case is aspect ratios around 2.27 where I need to distinguish between a full-body short character and an upper-body shot of a taller one.
+I'm testing two scenarios: for a chibi with the head at 40% of the body, the eye lands around 18% from the top, but my current formula puts it at 20.8%, which overshoots into the chin. For a portrait-style crop with the head at 50%, the eye should be around 22% from the top, so I need to adjust the hair skip and face height calculations to get the eye position right in both cases.
+The real issue is that a 2.27 aspect ratio is too ambiguous without knowing the art style—it could represent a chibi, a standard anime character, or a portrait, each with completely different proportions. I'm shifting my approach: instead of trying to guess the character type, I should focus on what the 128x32 display actually needs to show, prioritizing the face since that's what matters most.
+For a character with a head spanning from y=52 to y=93 (41 pixels in an anime 4-head style), I need the camera crop to capture the eye region around y=70 with enough surrounding context. Given a crop height of 62.5 pixels, this should frame the face appropriately when scaled down to the display's 32-pixel height.
+The real issue is that different art styles place the eyes at different proportions of the head—realistic characters have eyes around 8% from the top of the body, while anime or portrait styles push them up to 22%. Since I won't know the art style in advance, I'm settling on a middle-ground heuristic: positioning the camera center at about 15% down from the top of the detected body bounding box. It's not perfect for either extreme, but it should work reasonably well across most cases, and the scene-type system can fine-tune from there if needed.
+To handle different body proportions, I'm adjusting this percentage based on aspect ratio—taller characters get a lower eye percentage (closer to realistic proportions), while shorter, wider characters get a higher percentage since their heads take up more of the frame. I'm using a simple formula that scales the eye position inversely with aspect ratio, clamping it between 10% and 25% to keep it within reasonable bounds.
+Now I need to check what the current version does for close-up versus full-body shots. The close-up logic (aspect ≤ 1.4) seems to work well according to the user's feedback, so I should preserve that. For full-body shots, I need to revisit whether the current positioning is actually too high or if that was from my earlier attempt.
+Looking at the user's feedback timeline: v6.0.0 prioritized the face well but struggled with close-ups, origin/main fixed close-ups but lost face priority on full-body shots, and my current fix improved face positioning but went too high on the hair and missed the eyes. This suggests my full-body adjustment actually made things worse than the original v6.0.0 behavior.
+I need to recalibrate the camera positioning for full-body face priority—7.5% from the top is overshooting into the hair, while v6.0.0's 14% was closer to correct. The sweet spot is probably somewhere between 12-16% from the top. Let me trace through what v6.0.0's camera calculation was doing to understand the math behind that 14% value. I'm realizing the face_priority pin was added after v6.0.0, so I need to recalculate what the camera position actually was before that commit. Working through the math, the camera would've been centered at the belly button area—around 47.5% down the body. But that seems off, so I should verify whether face_priority mode was even functioning at v6.0.0 in the first place. Looking at the analysis for v6.0.0, when a tall character is detected, it triggers face priority mode with auto_top and auto_bottom enabled. This sets a large top padding (35% of frame height, around 175px for a 500px frame), which creates a narrow effective viewing window. I'm tracing through the specific GIF to see how the percentile calculation for roi_tops determines the final camera position.
+Calculating the effective frame dimensions: with the percentile values giving top_y=0 and bottom_y≈148.5, the resulting effective_frame_h comes out to about 149 pixels. Now I need to check how TrackingEngine applies face_priority_mode to see if this matches the observed behavior.
+Looking at the TrackingEngine configuration, when face_priority_mode is enabled, it actually uses the full frame height of 500 pixels rather than the calculated effective height. This means the camera positioning formula in Camera.py doesn't get constrained by the effective frame dimensions—it works with the complete frame instead. With the full 500-pixel height, the camera centers around 130.85 pixels from the top, placing it roughly at the torso level rather than optimized for face visibility.
+When I calculate the actual camera window with a crop height of 125 pixels (derived from the full frame width), the window spans from about 68 to 193 pixels vertically. This range actually captures the entire face region (which sits around 52 to 145 pixels) plus some upper body, so despite the camera center being positioned lower than ideal for face priority, the window size is large enough to include the full face and upper torso in the frame.
+With my proposed fix using cy=64.5 and the recalculated crop dimensions, the camera window would shift to show from about 30 to 98 pixels vertically. This is a tighter view that still captures the head region but loses some of the body context.
+The real problem is that my aspect-ratio-based clipping is cutting the crop height down dramatically—from the original 125 pixels to just 68 pixels—which fundamentally changes what's visible in the frame. The eyes that should be positioned at the top of the display are now getting pushed higher into the hair and forehead area instead.
+The v6.0.0 approach worked better because that larger 125-pixel window captured enough of the scene to show the face properly, even if the center point was positioned lower. So instead of returning a tiny clipped region, I need to find a region of interest that's large enough to produce a meaningful crop height while still positioning the camera to frame the face correctly.
+The key is adjusting the roi dimensions so that when the camera centers at eye level, the resulting window is substantial enough to capture the face and some context. I'm working through the math to set the roi height to about 30% of the body height—enough to encompass the head and shoulders—and positioning its top edge at the eye zone, which should give me the right balance between position and size.
+Actually, I think I'm overcomplicating this. Let me simplify by modifying the camera logic directly: instead of always centering on the roi midpoint in face priority mode, I should compute the target camera position based on whether we're doing a close-up or a wider shot, then adjust accordingly.
+Refining the camera code... Working through the math to express the desired camera center in terms of the ROI parameters—if I want the face to be positioned at a specific percentage of the returned region, I need to solve for what face_h and hair_skip should be as fractions of the total ROI height.
+Testing concrete values for a 15% target position shows the fundamental problem: achieving precise eye-level framing requires an extremely small ROI, which then gets rejected by the minimum area filter. The real fix isn't to make the ROI smaller—it's to rethink the clipping strategy entirely.
+Instead of trying to force a tiny eye region through the pipeline, I should let camera.py handle the positioning directly based on the full body ROI. I'm adding a face_priority_mode that calculates camera placement using a target percentage rather than the ROI center, with different logic for close-ups versus body shots where the eye level sits around 30-40% from the top of the full-body frame.
+Actually, I'm realizing the clipping is already positioning correctly at the eye center with cy = y + h/2.0, but the real problem is that the clipped ROI becomes too small, making the crop window too narrow and zoomed in, and it's positioned too high in the frame.
+Looking at the actual numbers with roi = (427, 59, 73, 11): the crop window spans from y=33 to y=96, which does capture the face, but it's pulling in a lot of empty space above the head since the window starts well above where the head actually begins. The complaint about it looking "too high" is probably because the camera output is mostly showing the top of the head and hair rather than centering on the face itself.
+When I map this to the 128x32 display, the face center lands right at the middle of the screen vertically, which should be correct. But about 30% of what's being displayed is just background above the character, which could create that visual impression of the framing being off even though the math checks out. you're right—the user is probably seeing the body-center camera result (face_priority=False), not my eye-level fix. They're saying the correction I made is better for the face, but it's still not quite right: the hair is too high in the frame and the eyes aren't properly centered.
+This makes me wonder if they tested on a different GIF where YOLO detection actually works, or if the test GIF I used does have YOLO available in their environment. My debug showed detect_person() returning None even when called directly, but the tracker uses motion detection as a fallback, so it still finds the person's bounding box. If they have YOLO working, face_priority_mode would be True and my fix would actually apply.
+Looking at their test case with the anime character at (427, 52, 73, 166), I need to recalculate the camera position. For an anime-style character, the head is roughly the top 25% of the body, and the eyes sit about 45% down the head. That puts the eye position around y=70.5, which is higher than my current fix of y=64.5 — so their complaint about the camera pointing too high on the hair is actually valid for their setup.
+Working backwards from the target eye position of y=70-75, I can solve for the right combination of hair_skip and face_h values. If I use hair_skip=10px and face_h=16px, the formula gives me exactly cy=70, which lands right at the eye/nose area instead of the forehead.
+But this breaks down for realistic proportions where the head is only 20px tall—my formula puts the target 9px below the actual eye position. For close-ups with narrow aspect ratios, I need to adjust the calculation to use cy = ry + rh*0.425 instead, which accounts for the different framing. The real solution is probably to use different formulas depending on whether I'm looking at a full body shot or a close-up.
+For full body shots with larger aspect ratios, I'm targeting cy around 12-15% down from the top of the body. Testing with rh=166, setting cy = ry + rh0.13 gives me roughly 73.6, which works reasonably well for both the 4-head and 8-head proportions. To make this work with the clipping formula, I need hair_skip + face_h/2 to equal rh0.13, so if I set the head height to 22% of the body, I can calculate the right hair skip and face height values. I'm realizing the core problem: with a head ROI of 73x26 pixels in a 500x500 frame, that's only 0.76% of the total area, which falls below the 2% minimum threshold I'm using to filter out noise. So even though the proportions look right visually, the detection gets filtered out as too small relative to the frame size.
+But wait—I already fixed this by moving the area check to use the raw full-body ROI instead of the clipped head ROI, so that should handle it. The clipped ROI is just for positioning the camera. Now I need to verify whether cy=73 actually lands on the right facial feature—whether that's the hair, eyes, or forehead for the character proportions I'm working with.
+Looking at the breakdown for a 4-head anime character with rh=166, the eyes sit around y≈67, which is slightly above where my current formula places the camera. I should try reducing the eye_pct parameter from 0.13 to something like 0.11 to shift the camera position upward into the eye region instead of the nose area.
+Working through the math: if hair_skip comes out to about 6.6 pixels and face_h to about 23.4 pixels, then cy = ry + 18.3 aligns with the 0.11rh offset I'm targeting. For wider aspect ratios above 2.0, I'm settling on head_h = rh0.22 with hair_skip and face_h scaled proportionally from that.
+The eye placement ends up around 11% from the top, which is a middle ground between anime conventions (10-12%) and realistic proportions (5-7%), though it's not perfect for either. I'm realizing the real solution here is to detect what kind of scene the user wants and apply the appropriate measurements for that specific type rather than trying to find one compromise value.
+Let me try a different approach using aspect ratio to guide the eye position. I'll set different targets depending on whether it's a short portrait, medium body shot, or full-body realistic figure, then use a formula that scales the eye placement accordingly based on the aspect ratio.
+The formula eye_target_pct = clamp(0.32 / (aspect + 0.6), 0.08, 0.22) gives me reasonable values across the range—around 15% for chibi portraits, 12% for medium body shots, and 8% for realistic full-body images. But there's a discontinuity at aspect 1.5 where the close-up mode would jump to 42.5%, which is too abrupt. I need to either smooth this transition or adjust where the close-up threshold kicks in.
+Anyway, I should stop overthinking the math and start implementing. The user's main priorities are fixing the platformer regression, improving eye targeting for full-body shots, adding English comments, and building a scene classification system. The platformer issue likely stems from the analysis.py change where I switched from total_frames - 1 to total_frames, which could be sampling a different frame and misclassifying platformers. I need to investigate why that's happening. For platformers with smart_auto_crop_decision, the GROUP 2 classification depends on stable floor detection—if adding the last frame increases floor variance (like when a character jumps to the top), it could shift the classification away from GROUP 2. But I should verify whether the user actually tested this with my changes or if they're just assuming platformers broke.
+The user's message is clear though: platformers, flooring, and character priority are definitely broken. I need to revert the analysis change and instead handle the 1-frame GIF edge case more carefully by ensuring at least one frame gets sampled even when the calculated range would be empty.
+Handling the edge case with a max/min calculation... So the fix actually includes frame 9 for a 10-frame sequence, and for the 4-frame platformer it captures all frames including the last one where the character peaks. This means the statistics could shift if that final frame has different properties, so I should revert my analysis change and instead focus on a simpler fix that guarantees at least one frame for single-frame GIFs.
+Writing the corrected code... Refining the fix to only address the single-frame case without altering behavior for multi-frame GIFs—the key is keeping the original total_frames - 1 logic but adding a safeguard so at least frame 0 gets sampled when there's only one frame. Simplifying the frame range logic...
+Now I'm mapping out the specific changes needed: fixing the 1-frame GIF edge case in analysis.py, improving the face clipping proportions in tracker.py while translating French comments to English, updating the corresponding tests, and designing a proper scene classification system. For the tracker's face clipping, I need to finalize the aspect ratio-based formula...
+Refining the clipping logic based on aspect ratio: when the aspect ratio is tight (≤1.5), it's a close-up where I skip the top 25% for hair and keep the middle 35% for the eye region. For wider aspect ratios (>1.5), it's a body shot where the face sits at the top and I need to estimate head size differently depending on whether it's a typical body shot or an anime-style composition with a proportionally larger head... Computing the head region based on aspect ratio... 0.20, 0.30) = 0.20, hair_skip = (0.11-0.10)rh = 0.01rh = 1.7px → too small
+For eye_target=0.15: roi_pct = min(0.28, 0.30) = 0.28, hair_skip = (0.15-0.14)rh = 0.01rh → too small
+The hair_skip ends up being negligible with this approach, so the region of interest starts right at eye level but extends well below the chin, which doesn't match what I need. I should reconsider the roi_pct calculation to better handle the min_roi_area_ratio constraint.
+Since I'm now checking the area constraint against the raw roi instead of filtering it out, I can afford to make the roi smaller without it getting discarded. Let me simplify this with a fixed 10% height window centered on the eye target, which should give me stable camera positioning across different aspect ratios. For face-priority body shots where the aspect ratio exceeds 1.5, I'll compute the eye_target based on the aspect ratio, then set the roi height to a fixed percentage of the face height and position it to center on that eye target.
+Working through the example with rh=166 and aspect=2.27, the eye_target comes out to about 11.1%, which translates to roughly 18 pixels. The roi height is 16 pixels, and when I position it centered on the eye target, the resulting camera center ends up at about 10.8% from the body top—close enough to the target. For anime characters with a 4-head proportion, the eye would be positioned even higher, so the formula should adapt accordingly.
+Now checking the realistic full-body case with aspect=5.0 and rh=200: the eye_target drops to 8%, giving me 16 pixels, and the roi height becomes 20 pixels. This positions the camera center at about 8% down from the body top, which aligns with the expected eye placement for realistic proportions. For an 8-head realistic character with a 25-pixel head, the eye would sit at roughly 45% of the head height from the top.
+Shifting to aspect=1.5 for a portrait-style close-up, the formula yields 15.2%, which feels slightly high—ideally closer to 20% for proper head-and-shoulders framing. The range of 15-12% across aspect=1.5-2.0 is an improvement over the previous 7.5%, though there's room to refine the threshold where the close-up behavior kicks in. Checking the formula across different aspect ratios to see where it lands—at 2.27 it gives around 13.2%, which puts the focus point near the nose area rather than the eyes themselves, so there's still some room for refinement.
+Let me adjust the constants to target the eye position more directly. I'm working through the math to find values that would place the focus at around 18 pixels below the reference point for this specific case, which means solving for a numerator around 0.30 with a small denominator offset.
+Now I'm testing this formula across different aspect ratios to see how it behaves—checking that it stays within reasonable bounds for both wide and narrow proportions, and verifying it produces the right eye position for a typical portrait layout. I'll go with a simpler approach that balances accuracy across different aspect ratios. For body shots with wider aspect ratios, I'm clamping the eye target between 8% and 22%, then calculating it based on the aspect ratio to keep the focus in the upper face area. For close-ups, I'll stick with the original hair skip and face height percentages. This should give me reasonable eye positioning across the board—at a 1.5 aspect ratio, the eye target lands at 15%.
+Now I'm seeing how these adjustments play out across different scenarios: at 2.27 aspect ratio the eye target drops to about 11%, and at 3.5 it's around 8%, which keeps the focus shifting appropriately from the eye zone down toward the hair area as the shot gets wider. These are solid improvements over the flat 7.5% baseline for all body shots, and the user can fine-tune the constants once they see the actual results.
+For the scene classification system, I'm setting up a foundation...
+Defining scene types...
+
+
+voici le plan de claude : 
+
+
+Plan de correction et refactoring complet
+Diagnostic des bugs introduits
+Bug #1 — Floor estimation utilise le roi clipé (ligne 186 tracker.py) Step 2b modifie roi → la zone œil (~top 8% du corps). Step 6 lit roi[1] + roi[3] comme position du sol → le sol est détecté à 8% du haut du personnage au lieu de ses pieds. Casse tous les platformers qui ont floor_est != None.
+Bug #2 — Look-ahead et momentum sur le roi clipé (lignes 263-267) curr_roi_cx/cy est calculé sur la zone œil → le vecteur de déplacement mesuré est instable (petite région, mouvements amplifiés).
+Bug #3 — Score validation et vignette sur le roi clipé (lignes 229-230, 301) sub_rect et _last_roi utilisent la zone œil (11px) → score toujours faux.
+Bug #4 — Trop haut sur les cheveux (ligne 178-181) head_h = rh * 0.18 → caméra à 0.18 * 0.45 = 8% du haut du corps → couronne des cheveux, pas les yeux. Cible correcte : ~12-14% du haut.
+Bug #5 — Classification de scène trop grossière 3 groupes seulement (tall-char, platformer, other) ne distingue pas : gros plan visage vs full body, fighting 2D vs action, plan large vs plan serré.
+ 
+Architecture cible
+Principe clé — Séparer roi (tracking) de face_roi (cadrage caméra)
+raw_roi   → validations taille/surface (étapes 4-5)
+         → floor estimation (étape 6, inchangée)
+         → look-ahead momentum (étape 10)
+         → score validation (étape 9)
+         → vignette (_last_roi)
+
+face_roi  → généré depuis raw_roi par le SceneProfile
+         → passé à _build_camera_rect UNIQUEMENT (étape 8)
+roi dans le code actuel est utilisé pour TOUT. Le fix central = ne jamais écraser roi avec le clipping visage. Créer face_roi = _clip_face_roi(raw_roi, scene_profile) séparé.
+ 
+Fichier 1 — src/engine/analysis/scene_types.py (NOUVEAU)
+Créer un module dédié à la classification de scène.
+# Scene types constants
+class SceneType:
+    # ── Generic wide/action ──────────────────────────────────────────────────
+    WIDE_SHOT          = "wide_shot"        # small subjects, lots of background
+    ACTION_MOVING      = "action_moving"    # subject moves across frame (RPG, run)
+    ACTION_HORIZONTAL  = "action_horiz"     # side-scroller, horizontal scrolling
+    # ── Platformers ──────────────────────────────────────────────────────────
+    PLATFORMER         = "platformer"       # stable floor, character jumps
+    # ── Fighting ─────────────────────────────────────────────────────────────
+    FIGHTING_2D        = "fighting_2d"      # pixel sprites, vs screen
+    FIGHTING_MOVIE     = "fighting_movie"   # live-action / 3D, dynamic camera
+    # ── Dialogue / static ────────────────────────────────────────────────────
+    TALKING_CLOSEUP    = "talking_closeup"  # face fills frame, still
+    TALKING_MEDIUM     = "talking_medium"   # upper body, relatively still
+    # ── Full-body face-priority ───────────────────────────────────────────────
+    FULL_BODY_TALL     = "full_body_tall"   # full body visible but focus on face
+    FULL_BODY_MEDIUM   = "full_body_medium" # medium body fill, no face priority
+SceneProfile dataclass — produit par la classification, consommé par tracker/camera :
+@dataclass
+class SceneProfile:
+    scene_type: str
+    face_priority: bool      # clip roi to face for camera positioning
+    face_clip_mode: str      # "none" | "closeup" | "full_body_head"
+    platformer_mode: bool
+    auto_vertical_bias: bool
+    suggested_strength: float
+    suggested_smoothness: float
+    face_head_frac: float    # what fraction of body height = 1 head (0.22 default)
+    face_eye_offset: float   # fraction from top of head to eye center (0.45 default)
+classify_scene(signals) -> SceneProfile — règles de classification :
+Priorité
+Condition
+Scene type
+1
+floor_stable AND floor_in_lower AND x_spread_low
+PLATFORMER
+2
+fill_ratio >= 0.55 AND body_aspect <= 1.4
+TALKING_CLOSEUP
+3
+tall_ratio >= 0.80 AND body_aspect > 1.5
+FULL_BODY_TALL
+4
+tall_ratio >= 0.35 AND x_variance_high AND floor_unstable
+FIGHTING_2D (pixel)
+5
+floor_in_lower AND floor_unstable AND x_variance_high
+ACTION_HORIZONTAL
+6
+fill_ratio >= 0.30 AND body_aspect > 1.2
+TALKING_MEDIUM
+7
+fill_ratio >= 0.25 AND body_aspect <= 1.4
+FULL_BODY_MEDIUM
+8
+fill_ratio < 0.15
+WIDE_SHOT
+9
+default
+ACTION_MOVING
+Signaux supplémentaires à collecter dans la boucle d'analyse :
+x_variance = variance des centres x des détections (mouvement horizontal)
+y_variance = variance des centres y
+fill_ratio = median_height / frame_h (actuellement absent)
+floor_stable = floor_var_score <= 0.25 AND floor_in_lower (déjà partiellement)
+Face clip parameters par scene type :
+TALKING_CLOSEUP → face_clip="closeup",    head_frac=1.0, eye_offset=0.45
+                  (bbox IS the face, skip 25% hair, center at 45%)
+FULL_BODY_TALL  → face_clip="full_body",  head_frac=0.22, eye_offset=0.48
+                  (head = top 22% of body, eye at 48% of head from top)
+TALKING_MEDIUM  → face_clip="full_body",  head_frac=0.35, eye_offset=0.45
+                  (visible from waist up, head = 35% of visible)
+FULL_BODY_MEDIUM→ face_clip="none"   (no face clip, center tracking)
+PLATFORMER      → face_clip="none"   (floor tracking, no face clip)
+FIGHTING_2D     → face_clip="none"   (body center)
+WIDE_SHOT       → face_clip="none"   (no zoom)
+ACTION_*        → face_clip="none"   (motion tracking)
+FIGHTING_MOVIE  → face_clip="none"   (dynamic)
+ 
+Fichier 2 — src/engine/analysis/analysis.py
+Modifications dans _smart_auto_crop_decision :
+Ajouter la collecte de signaux supplémentaires dans la boucle :
+x_centers: list[float] — variance de la position horizontale
+y_centers: list[float] — variance de la position verticale
+fill_ratios: list[float] — rh / frame_h par frame
+Remplacer les 3 groupes par un appel à classify_scene(signals) qui retourne un SceneProfile
+Retourner scene_type dans le dict de sortie : "scene_type": profile.scene_type
+Fix du bug total_frames - 1 → total_frames (déjà fait, à conserver)
+ 
+Fichier 3 — src/engine/analysis/analyzer.py
+Stocker self.scene_profile: SceneProfile (remplace self.face_priority_mode: bool)
+self.face_priority_mode = self.scene_profile.face_priority (rétro-compatibilité)
+Passer scene_profile à TrackingEngine.__init__
+ 
+Fichier 4 — src/engine/config/auto_action_config.py
+Ajouter :
+scene_type: str = ""          # set by VideoAnalyzer, read by TrackingEngine
+face_clip_mode: str = "none"  # "none" | "closeup" | "full_body_head"
+face_head_frac: float = 0.22  # head height as fraction of body bbox
+face_eye_offset: float = 0.48 # eye center as fraction from top of head
+ 
+Fichier 5 — src/plugins/trackers/tracker.py (réécritire de process_frame)
+Changement central : ne JAMAIS modifier roi avec le face clip.
+def process_frame(...):
+    # 1. Scene Change Detection  (unchanged)
+    
+    # 2. ROI Detection  → produces raw_roi (full body bbox, unchanged)
+    roi = self._detect_roi(frame)
+
+    # 3. Persistence Update  (on raw roi, unchanged)
+    
+    # 4. Micro-detection Rejection  (on raw roi, unchanged)
+    
+    # 5. Min Size Rejection  (on raw roi, unchanged)
+    
+    # 6. Floor Estimation  ← uses raw roi ALWAYS (fixes platformer regression)
+    roi_bottom = float(roi[1] + roi[3]) if roi is not None else None
+    floor_y_est = self.floor_est.update(roi_bottom) if self.floor_est else None
+    
+    # 7. Temporal History  ← stores raw roi (not clipped)
+    
+    # NEW 7b. Compute face_roi for camera positioning only
+    face_roi = self._clip_to_face_roi(roi)   # returns roi if no clipping needed
+    
+    # 8. Build Camera  ← uses face_roi (NOT roi)
+    cam = _build_camera_rect(..., roi=face_roi, face_priority_mode=...)
+    
+    # 9. Score Validation  ← uses raw roi for sub_rect (fixes score regression)
+    
+    # 10. Look-ahead  ← uses raw roi cx/cy (fixes momentum regression)
+    
+    # _last_roi = roi (raw, for vignette)
+_clip_to_face_roi(roi) -> BoundingBox | None :
+def _clip_to_face_roi(self, roi):
+    if roi is None or not self.face_priority_mode:
+        return roi
+    mode = getattr(self.cfg, 'face_clip_mode', 'none')
+    if mode == 'none':
+        return roi
+    rx, ry, rw, rh = roi
+    if mode == 'closeup':
+        # Bbox IS the face: skip top 25% hair, keep 35% eye zone
+        skip = int(rh * 0.25)
+        h    = max(8, int(rh * 0.35))
+        return (rx, ry + skip, rw, h)
+    if mode == 'full_body_head':
+        # Extract head from top of body bbox, then center on eye zone
+        head_frac = getattr(self.cfg, 'face_head_frac', 0.22)
+        eye_off   = getattr(self.cfg, 'face_eye_offset', 0.48)
+        head_h    = max(8, int(rh * head_frac))
+        # Hair skip = top 20% of head (less aggressive than closeup)
+        skip      = int(head_h * 0.20)
+        # Eye band = centered at eye_off fraction of head
+        eye_top   = int(head_h * (eye_off - 0.20))
+        eye_h     = max(8, int(head_h * 0.40))
+        return (rx, ry + skip + eye_top, rw, eye_h)
+    return roi
+Formule validée pour full_body_head avec head_frac=0.22, eye_off=0.48 :
+head_h = 22% of body
+skip = 20% of head = 4.4% of body (less aggressive, was 25%)
+eye_top = (48% - 20%) * head_h = 6.2% of body
+eye center = 4.4% + 6.2% + (40%*22%/2) = 4.4% + 6.2% + 4.4% = 15% from top of body → yeux ✓
+Pour TALKING_CLOSEUP (bbox IS the face) : eye center à 45% du bbox = zone yeux ✓
+ 
+Fichier 6 — src/engine/auto_action/camera.py
+Aucun changement fonctionnel requis. La caméra reçoit déjà face_priority_mode et fait cy = y + h/2.0 (correct si face_roi est bien calculé).
+Éventuellement : renommer face_priority_mode en face_clip_active pour clarté (breaking change mineur).
+ 
+Fichier 7 — Tests à mettre à jour
+tests/auto_action/test_tracker_closeup.py :
+Adapter les tests aux nouvelles méthodes _clip_to_face_roi
+Tester mode="closeup" et mode="full_body_head" séparément
+Tester que roi (complet) n'est PAS modifié (regression guard pour floor)
+Tester que le floor estimator reçoit le roi complet même en face_priority=True
+tests/auto_action/test_analysis.py :
+Tester classify_scene() pour les 9 types de scènes
+Tester que les signaux (x_variance, fill_ratio) sont correctement calculés
+tests/auto_action/test_use_cases.py :
+Conserver l'assertion 20-65% comme smoke test
+Ajouter un test closeup_prioritize_face.gif si disponible pour valider le gros plan
+ 
+Checklist d'implémentation (ordre recommandé)
+[ ] 1. Créer scene_types.py avec SceneType, SceneProfile, classify_scene()
+[ ] 2. Mettre à jour analysis.py : ajouter signaux, appeler classify_scene
+[ ] 3. Mettre à jour auto_action_config.py : ajouter scene_type, face_clip_mode, etc.
+[ ] 4. Mettre à jour analyzer.py : stocker scene_profile, passer à TrackingEngine
+[ ] 5. Réécrire tracker.py process_frame : séparer roi/face_roi, corriger floor
+[ ] 6. Valider : test_tracker_closeup.py tous green
+[ ] 7. Valider : test_analysis.py tous green  
+[ ] 8. Valider : test_use_cases.py green
+[ ] 9. Run full test suite (tests/)
+ 
+Résumé des métriques attendues par scene type
+Scene
+face_priority
+face_clip_mode
+head_frac
+Caméra centre
+TALKING_CLOSEUP
+True
+closeup
+1.0
+ry + rh×45% (yeux)
+FULL_BODY_TALL
+True
+full_body_head
+0.22
+ry + rh×15% (front/yeux)
+TALKING_MEDIUM
+True
+full_body_head
+0.35
+ry + rh×15% (yeux)
+PLATFORMER
+False
+none
+—
+Floor anchor
+FIGHTING_2D
+False
+none
+—
+Centre
+WIDE_SHOT
+False
+none
+—
+Motion center
+ACTION_MOVING
+False
+none
+—
+Body center
+ACTION_HORIZONTAL
+False
+none
+—
++ look-ahead

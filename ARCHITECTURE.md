@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v6.1.0)
+# DMD GIF Converter — Technical Architecture (v6.2.0)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -964,4 +964,4 @@ class MyPanelMixin(IPanel):
 
 ---
 
-*Last updated: v6.1.0 — June 2026*
+*Last updated: v6.2.0 — June 2026*

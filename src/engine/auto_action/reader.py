@@ -12,23 +12,26 @@ os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "loglevel;quiet")
 os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 
 
+import threading
+
+_stderr_lock = threading.Lock()
+
 @contextlib.contextmanager
 def _quiet_c_stderr():
-    """Redirect C-level fd 2 (stderr) to /dev/null.
-    Suppresses ffmpeg/libav messages printed directly from C code (e.g.
-    cv2.VideoCapture mp3float / Header missing warnings)."""
-    try:
-        devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        old_fd = os.dup(2)
-        os.dup2(devnull_fd, 2)
-        os.close(devnull_fd)
+    """Redirect C-level fd 2 (stderr) to /dev/null safely across threads."""
+    with _stderr_lock:
         try:
-            yield
-        finally:
-            os.dup2(old_fd, 2)
-            os.close(old_fd)
-    except Exception:
-        yield  # fallback: do nothing if fd manipulation fails
+            devnull_fd = os.open(os.devnull, os.O_WRONLY)
+            old_fd = os.dup(2)
+            os.dup2(devnull_fd, 2)
+            os.close(devnull_fd)
+            try:
+                yield
+            finally:
+                os.dup2(old_fd, 2)
+                os.close(old_fd)
+        except Exception:
+            yield  # fallback: do nothing if fd manipulation fails
 
 class VideoReader:
     """Handles video capture and GIF pre-conversion workaround."""

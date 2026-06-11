@@ -67,7 +67,7 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Détecte automatiquement** la limite haute du sujet (tête / ciel) — adapte la marge selon face ou corps entier |
 | `action_vertical_bias` | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol visible), `-1,0` = caméra vers le haut |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Détecte automatiquement** le niveau du sol via un EMA asymétrique — résiste aux sauts, suit les atterrissages. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
-| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Le moteur analyse 60 images et active la combinaison optimale** via 3 groupes mutuellement exclusifs. GROUPE 1 (personnage très grand > 80 %) → face priority (top+bottom, pas de sol). GROUPE 2 (sol stable et détectable) → suivi du sol + bottom optionnel. GROUPE 3 (normal) → top+bottom ensemble. Résout automatiquement la contradiction face-priority ↔ floor-tracking. |
+| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Le moteur analyse 60 images et active le profil de caméra optimal** via une **Matrice de Score Continue**. Il évalue 9 types de scènes (ex: `talking_closeup`, `platformer`, `action_horizontal`) sur la base du ratio de hauteur, variance X/Y, et dimensions de la boîte. La scène avec le meilleur score l'emporte, configurant automatiquement les crops, le suivi du sol et la marge. Les logs UI affichent un `=== Scene Classification Scoreboard ===` détaillant comment l'IA a pris sa décision. |
 | **🚀 Let Me Handle It** | Mode full-auto en un clic — active les 5 systèmes IA (Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond + DMD Visibility Score) et grise les réglages non pertinents |
 
 ### Modes de détection
@@ -211,9 +211,9 @@ Pour les contenus avec une luminance moyenne inférieure à 80/255 (cinéma somb
 > - Avant : `contrast=1.79 gamma=1.10 bri=+0.004` → personnages à peine visibles  
 > - Après  : `contrast=1.57 gamma=1.21 bri=+0.036 🌑dark` → personnages clairement visibles
 
-Le log affiche désormais le tag `🌑dark` quand le mode scène sombre est déclenché :
+Le log affiche désormais le tag `🌑dark` (ainsi que d'autres tags sémantiques comme `[Vivid]`, `[Washed Out]`) quand le mode scène correspondant est déclenché :
 ```
-[COLOR  ] scene.mkv — auto-color (3 frames): lum=67 std=51 sat=138 🌑dark → contrast=1.57 (+−0.03) …
+[COLOR  ] scene.mkv — auto-color (1 frame) [Dark + Low Contrast]: lum=67 std=51 sat=138 → contrast=1.57 (+−0.03) …
 ```
 
 ### Quels modes profitent de cette amélioration ?

@@ -232,9 +232,28 @@ def analyze_and_compensate(src_path: str,
     frame_label = f"{n_frames} frame{'s' if n_frames > 1 else ''}"
     delta_c = round(contrast   - _BASE_CONTRAST,   2)
     delta_s = round(saturation - _BASE_SATURATION, 2)
-    dark_tag = " 🌑dark" if mean_lum < 80.0 else ""
+    
+    type_tags = []
+    if mean_lum < 80.0:
+        type_tags.append("Dark")
+    elif mean_lum > 180.0:
+        type_tags.append("Over-exposed")
+        
+    if std_lum < 35.0:
+        type_tags.append("Low Contrast")
+        
+    if mean_sat < 40.0:
+        type_tags.append("Desaturated")
+    elif mean_sat > 180.0:
+        type_tags.append("Vivid")
+        
+    if not type_tags:
+        type_tags.append("Standard")
+        
+    type_tag_str = " + ".join(type_tags)
+    
     message = (
-        f"auto-color ({frame_label}): lum={mean_lum:.0f} std={std_lum:.0f} sat={mean_sat:.0f}{dark_tag} "
+        f"auto-color ({frame_label}) [{type_tag_str}]: lum={mean_lum:.0f} std={std_lum:.0f} sat={mean_sat:.0f} "
         f"→ contrast={params['contrast']} ({delta_c:+.2f})  "
         f"sat={params['saturation']} ({delta_s:+.2f})  "
         f"gamma={params['gamma']}  bri={params['brightness']:+.3f}"

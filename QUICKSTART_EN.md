@@ -29,7 +29,7 @@ If you prefer the command line or want to automate the process, the same "zero c
 To process a folder called `gifs_MyFolder` with 8 parallel workers, fully automated AI framing/colors, and an automatic trash mechanism for anything scoring below 50%:
 
 ```bash
-python3 -m src.converter.cli gifs_MyFolder --let-me-handle-it --workers 8 --reject-threshold 50
+python3 -m src.engine.conversion.cli gifs_MyFolder --let-me-handle-it --workers 8 --reject-threshold 50
 ```
 
 That's it. The script will crunch the videos and delete any `.gif` files that do not meet the 50% visibility threshold.
@@ -43,7 +43,7 @@ That's it. The script will crunch the videos and delete any `.gif` files that do
 Thanks to the modular architecture, GIF search (via DuckDuckGo, Tenor, or Giphy) is directly integrated into the tool! No need to download your media manually. You can do everything in a single command:
 
 ```bash
-python3 -m src.converter.cli --search-keyword "arcade" --engine DuckDuckGo --limit 5 --let-me-handle-it
+python3 -m src.engine.conversion.cli --search-keyword "arcade" --search-engine DuckDuckGo --search-limit 5 --let-me-handle-it
 ```
 
 This command will download 5 GIFs related to "arcade", and then automatically convert them on the fly using all the AI parameters!
