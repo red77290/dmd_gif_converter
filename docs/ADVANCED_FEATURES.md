@@ -67,7 +67,7 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Automatically** detect where the subject starts at the top (head / sky) — adapts padding to face vs full-body content |
 | `action_vertical_bias` | Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
 | `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings. Overrides the manual vertical bias. Ideal for 2-D platformers. |
-| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Engine analyses 60 frames and activates the optimal combination** of auto-bottom-crop, auto-top-crop and auto-floor-tracking using 3 mutually exclusive groups. GROUP 1 (tall character > 80 % of DMD window) → face priority (top+bottom crop, no floor). GROUP 2 (trackable stable floor) → floor tracking + optional bottom. GROUP 3 (normal) → top+bottom together. Resolves the face-priority ↔ floor-tracking contradiction automatically. Recommended over manual individual options. |
+| `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Engine analyses 60 frames and activates the optimal camera profile** using a **Continuous Scoring Matrix**. It scores 9 different scene types (e.g., `talking_closeup`, `platformer`, `action_horizontal`) based on metrics like height ratio, X/Y variance, and bounding box properties. The scene with the highest score wins, automatically configuring top/bottom crops, floor tracking, and padding. The UI logs show a `=== Scene Classification Scoreboard ===` detailing exactly how the AI made its decision. |
 
 ### Detector modes
 
@@ -193,9 +193,9 @@ For content with mean luminance below 80/255 (dark cinema, night scenes, dungeon
 > - Before: `contrast=1.79 gamma=1.10 bri=+0.004` → characters barely visible  
 > - After:  `contrast=1.57 gamma=1.21 bri=+0.036 🌑dark` → characters clearly visible
 
-The log now shows a `🌑dark` tag when dark-scene mode is triggered:
+The log now shows a `🌑dark` tag (or other semantic tags like `[Vivid]`, `[Washed Out]`) when specific content profiles are triggered:
 ```
-[COLOR  ] scene.mkv — auto-color (3 frames): lum=67 std=51 sat=138 🌑dark → contrast=1.57 (+−0.03) …
+[COLOR  ] scene.mkv — auto-color (1 frame) [Dark + Low Contrast]: lum=67 std=51 sat=138 → contrast=1.57 (+−0.03) …
 ```
 
 ### Which modes benefit?
