@@ -139,6 +139,7 @@ class SettingsPanel(ctk.CTkFrame):
             self.app_state.v_auto_color_enabled.set(True)
             self.app_state.v_action_enabled.set(True)
             self.app_state.v_action_smart_auto_crop.set(True)
+            self.app_state.v_action_auto_scene_type.set(True)
             self.app_state.v_action_dmd_visibility_score_enabled.set(True)
             self.app_state.v_action_dmd_readability_score_enabled.set(True)
             self.app_state.v_action_auto_strength.set(True)

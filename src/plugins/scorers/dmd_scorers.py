@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 from src.engine.auto_action.interfaces import IScorer
 
 class DMDVisibilityScore(IScorer):
-    """Evaluates how clearly forms are visible on the DMD (DMD Visibilité)."""
+    """Evaluates how clearly forms are visible on the DMD (DMD Visibility)."""
     @staticmethod
     def compute(dmd_frame: np.ndarray, subject_dmd_rect: Optional[Tuple[int, int, int, int]] = None) -> float:
         import cv2
@@ -73,7 +73,7 @@ class DMDVisibilityScore(IScorer):
 
 
 class DMDReadabilityScore(IScorer):
-    """Evaluates how understandable and legible the forms are (DMD Lisibilité)."""
+    """Evaluates how understandable and legible the forms are (DMD Readability)."""
     @staticmethod
     def compute(dmd_frame: np.ndarray) -> float:
         import cv2

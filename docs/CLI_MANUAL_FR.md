@@ -80,7 +80,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `action_auto_top_crop` | `False` | Détecte auto la limite haute du sujet (tête / ciel) |
 | `action_vertical_bias` | `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
 | `action_auto_vertical_bias` | `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
-| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — moteur analyse 60 images et active la combinaison optimale via 3 groupes mutuellement exclusifs ; résout la contradiction face-priority ↔ floor-tracking |
+| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — moteur analyse 60 images et active le profil de caméra optimal via une matrice de score continue de 9 types de scènes (ex: platformer, talking_closeup) ; résout la contradiction face-priority ↔ floor-tracking |
 | `let_me_handle_it` | `False` | 🚀 Laisse-moi gérer ça — mode tout-automatique : active Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond + DMD Visibility Score et grise tous les réglages non pertinents |
 | `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
 | `target_height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
