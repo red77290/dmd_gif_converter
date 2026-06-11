@@ -1,10 +1,16 @@
-# 🎞️ DMD GIF Converter — v6.1.0
+# 🎞️ DMD GIF Converter — v6.2.0
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
 ---
+
+## Nouveautés de la v6.2.0
+- **📊 Matrice de Score Continue** : La détection de scène (Auto Action) ne repose plus sur un arbre en cascade rigide. Elle utilise désormais une matrice de score dynamique et continue pour identifier le profil de caméra optimal (ex: Platformer, Talking Closeup, Action). Le tableau des scores est désormais entièrement visible dans les logs de l'interface.
+- **🏷️ Logs Sémantiques de Colorimétrie** : Smart Color Boost ajoute maintenant des tags sémantiques directement dans les logs de l'interface (ex: `[Dark + Low Contrast]`, `[Vivid]`) pour vous indiquer exactement comment l'IA perçoit votre vidéo.
+- **🛡️ Suppression Stderr Thread-Safe** : Correction d'un bug de concurrence critique où de multiples conversions parallèles redirigeaient définitivement la sortie terminal de l'application vers `/dev/null`. La suppression du `stderr` C-level est désormais parfaitement protégée par un `threading.Lock`.
+- **📝 Interception des Logs UI** : Les appels `logger.info()` du moteur (qui contournaient l'UI et s'imprimaient directement dans le terminal) ont été consolidés dans le payload final de conversion. Cela garantit que tous les raisonnements et matrices de scores d'Auto Action apparaissent parfaitement dans le panneau de logs de l'application.
 
 ## Nouveautés de la v6.1.0
 - **🎯 Correction détection visage en gros plan** : Le tracker auto-action identifie désormais correctement les gros plans (`roi_h > 40 % de la hauteur de frame`) et ignore les 25 % supérieurs de la bounding-box (cheveux) pour verrouiller la région des yeux — élimine la dérive de caméra sur contenu anime.
@@ -108,13 +114,13 @@ Vous préférez utiliser le script sans interface ? Voici les commandes les plus
 
 ```bash
 # 1. Télécharger des GIFs et les convertir en mode tout-automatique !
-./dmd_gif_converter.py --search-keyword "arcade" --let-me-handle-it
+python3 -m src.engine.conversion.cli --search-keyword "arcade" --let-me-handle-it
 
 # 2. Convertir un dossier avec la caméra cinématique par IA
-./dmd_gif_converter.py gifs_Arcade --auto-action-enabled
+python3 -m src.engine.conversion.cli gifs_Arcade --auto-action-enabled
 
 # 3. Ajouter un texte en pixel-art avec bordure
-./dmd_gif_converter.py --text-overlay --text-content "PLAYER 1" --text-color yellow
+python3 -m src.engine.conversion.cli --text-overlay --text-content "PLAYER 1" --text-color yellow
 ```
 
 

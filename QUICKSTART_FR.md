@@ -29,7 +29,7 @@ Si vous préférez la ligne de commande ou voulez automatiser le processus dans 
 Pour traiter un dossier nommé `gifs_MonDossier` avec 8 processus en parallèle, le cadrage/couleurs gérés par l'IA, et la mise à la corbeille automatique des fichiers avec un score inférieur à 50% :
 
 ```bash
-python3 -m src.converter.cli gifs_MonDossier --let-me-handle-it --workers 8 --reject-threshold 50
+python3 -m src.engine.conversion.cli gifs_MonDossier --let-me-handle-it --workers 8 --reject-threshold 50
 ```
 
 Et voilà ! Le script va convertir vos vidéos et supprimer automatiquement les fichiers `.gif` qui n'atteignent pas le seuil de visibilité de 50%.
@@ -43,7 +43,7 @@ Et voilà ! Le script va convertir vos vidéos et supprimer automatiquement les 
 Grâce à l'architecture modulaire, la recherche de GIFs (via DuckDuckGo, Tenor ou Giphy) est directement intégrée dans l'outil ! Plus besoin de télécharger vos médias à la main. Vous pouvez tout faire en une seule commande :
 
 ```bash
-python3 -m src.converter.cli --search-keyword "arcade" --engine DuckDuckGo --limit 5 --let-me-handle-it
+python3 -m src.engine.conversion.cli --search-keyword "arcade" --search-engine DuckDuckGo --search-limit 5 --let-me-handle-it
 ```
 
 Cette commande va télécharger 5 GIFs correspondant à "arcade", puis les convertir automatiquement dans la foulée en utilisant tous les paramètres IA !
