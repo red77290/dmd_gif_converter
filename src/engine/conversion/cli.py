@@ -138,6 +138,10 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="STR",
         help="Auto framing detector mode (default: person).",
     )
+    ag.add_argument(
+        "--action-auto-detector-fallback", action="store_true", default=DEFAULT_PARAMS.get("action_auto_detector_fallback", False),
+        help="Dynamically switch to hybrid if person detects nothing.",
+    )
     ag.add_argument("--action-strength", type=float, default=DEFAULT_PARAMS["action_strength"], metavar="F")
     ag.add_argument("--action-smoothness", type=float, default=DEFAULT_PARAMS["action_smoothness"], metavar="F")
     ag.add_argument("--action-zoom-max", type=float, default=DEFAULT_PARAMS["action_zoom_max"], metavar="F")
@@ -169,12 +173,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--action-scene-type", type=str, default="",
         choices=["", "platformer", "talking_closeup", "full_body_tall",
                  "fighting_2d", "action_horizontal", "talking_medium",
-                 "full_body_medium", "wide_shot", "action_moving"],
+                 "full_body_medium", "wide_shot", "action_moving",
+                 "top_down_isometric", "first_person", "menu_static"],
         help="Manual scene type selection (default: none).",
     )
     ag.add_argument(
         "--action-auto-scene-type", action="store_true", default=False,
         help="Auto-detect scene type from content (overrides --action-scene-type).",
+    )
+    ag.add_argument(
+        "--dynamic-scene", action="store_true", default=False,
+        help="Classify the scene dynamically on every camera cut (requires --action-auto-scene-type).",
     )
     
     # ── AI Moments Extraction ───────────────────────────────────────────────
@@ -368,6 +377,7 @@ if __name__ == "__main__":
         "action_padding": args.action_padding,
         "action_scene_type": args.action_scene_type,
         "action_auto_scene_type": args.action_auto_scene_type,
+        "dynamic_scene_detection": args.dynamic_scene,
         "bg_sub_enable": args.bg_sub_enable,
         "action_smart_auto_crop": args.smart_auto_crop,
         "max_duration": args.max_duration,
