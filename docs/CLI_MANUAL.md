@@ -61,7 +61,8 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 
 | Parameter | Flag | Default | Description |
 |-----------|------|---------|-------------|
-| `ai_moments` | `--ai-moments` | `False` | Extract the best moments from videos before converting to GIFs. |
+| `ai_moments` | `--ai-moments` | `False` | Extract the best moments from videos AND automatically convert them to GIFs. |
+| `ai_moments_only`| `--ai-moments-only`| `False` | Extract the best moments (MP4) but DO NOT convert them to GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Max number of moments to extract per video. |
 | `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Strategy to prioritize (`Action`, `Balanced`, `Character`). |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Minimum duration of an extracted moment in seconds. |
@@ -160,5 +161,63 @@ For CLI use, control verbosity with:
 --log-level INFO     # all messages
 --log-level WARNING  # quiet (progress bar only, default)
 --verbose / -v       # alias for --log-level DEBUG (shows raw ffmpeg output)
+```
+
+## 📖 Comprehensive Use Case Examples
+
+Here are examples for all the main use cases, showing how to combine or separate the various AI features via the command line.
+
+### 1. Basic Folder Conversion
+Scans all folders starting with `gifs_` in the current directory and converts them to DMD GIFs using standard settings.
+```bash
+python3 -m src.engine.conversion.cli
+```
+
+### 2. The "Let Me Handle It" Magic Mode
+The ultimate zero-configuration command. It applies AI Colorimetry, Auto Action framing, Background Subtraction, and DMD Visibility Scoring all at once to a specific folder.
+```bash
+python3 -m src.engine.conversion.cli gifs_MyGameplay --let-me-handle-it --workers 8
+```
+
+### 3. Text Overlay (Watermarking / Player Tags)
+Burn a yellow "PLAYER 1" tag at the top left of the GIF with an outline for readability.
+```bash
+python3 -m src.engine.conversion.cli gifs_InputFolder --text-overlay --text-content "PLAYER 1" --text-color "yellow" --text-position "top_left"
+```
+
+### 4. Smart Color Boost for Dark Scenes
+Convert a dark movie scene (e.g. Batman) ensuring it is visible on LED panels by enabling heuristic auto-colorimetry.
+```bash
+python3 -m src.engine.conversion.cli gifs_Batman --auto-color
+```
+
+### 5. Web Search & Download
+Search for "arcade fighting" on DuckDuckGo, download the top 5 results, and convert them immediately using the fighting 2D camera profile.
+```bash
+python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search-limit 5 --action-scene-type "fighting_2d"
+```
+
+### 6. AI Moments: Pipeline Extraction + Conversion
+Take a 10-minute gameplay video, find the 5 best action moments, and immediately convert those 5 moments into 128x32 GIFs.
+```bash
+python3 -m src.engine.conversion.cli gifs_RawGameplay --ai-moments --ai-moments-count 5 --ai-moments-strategy "Action" --let-me-handle-it
+```
+
+### 7. AI Moments: Extraction ONLY
+If you just want to use the AI to find the best moments and save them as `.mp4` files *without* generating GIFs yet.
+```bash
+python3 -m src.engine.conversion.cli gifs_RawGameplay --ai-moments-only --ai-moments-count 10
+```
+
+### 8. Manual Camera Forcing
+Disable AI scene detection and explicitly force the camera to lock onto the floor (Platformer mode) while converting.
+```bash
+python3 -m src.engine.conversion.cli gifs_SonicGameplay --auto-action --action-scene-type "platformer"
+```
+
+### 9. Trash Bad Conversions Automatically
+Run a massive batch conversion but automatically delete any resulting GIF that scores less than 60% on the LED Readability scale.
+```bash
+python3 -m src.engine.conversion.cli --let-me-handle-it --reject-threshold 60
 ```
 
