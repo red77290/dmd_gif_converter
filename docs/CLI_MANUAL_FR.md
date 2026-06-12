@@ -58,7 +58,8 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 
 | Paramètre | Flag | Défaut | Description |
 |-----------|------|---------|-------------|
-| `ai_moments` | `--ai-moments` | `False` | Extrait automatiquement les meilleurs moments des vidéos avant la conversion. |
+| `ai_moments` | `--ai-moments` | `False` | Extrait les meilleurs moments des vidéos ET les convertit automatiquement en GIFs. |
+| `ai_moments_only`| `--ai-moments-only`| `False` | Extrait les meilleurs moments (en MP4) mais NE LES CONVERTIT PAS en GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Nombre maximum de moments à extraire par vidéo. |
 | `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`). |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes. |
@@ -155,7 +156,64 @@ python -m src.ui.app
 Contrôle de la verbosité en CLI :
 ```bash
 --log-level INFO     # tous les messages
---log-level WARNING  # silencieux (barre de progression uniquement, défaut)
---verbose / -v       # alias pour --log-level DEBUG (sortie ffmpeg brute)
+--log-level WARNING  # silencieux (seulement la barre de progression, défaut)
+--verbose / -v       # alias pour --log-level DEBUG (affiche la sortie brute de ffmpeg)
 ```
 
+## 📖 Exemples Complets par Cas d'Usage
+
+Voici des exemples pour les principaux cas d'utilisation, montrant comment combiner ou séparer les différentes fonctionnalités de l'IA via la ligne de commande.
+
+### 1. Conversion de Dossier Basique
+Analyse tous les dossiers commençant par `gifs_` dans le répertoire courant et les convertit en GIFs DMD en utilisant les paramètres standards.
+```bash
+python3 -m src.engine.conversion.cli
+```
+
+### 2. Le Mode Magique "Let Me Handle It"
+La commande ultime sans configuration. Elle applique la colorimétrie IA, le cadrage Auto Action, la soustraction de fond et l'évaluation de visibilité DMD tout en même temps sur un dossier spécifique.
+```bash
+python3 -m src.engine.conversion.cli gifs_MonGameplay --let-me-handle-it --workers 8
+```
+
+### 3. Superposition de Texte (Watermark / Tags Joueur)
+Grave un tag jaune "PLAYER 1" en haut à gauche du GIF avec un contour pour la lisibilité.
+```bash
+python3 -m src.engine.conversion.cli gifs_DossierSource --text-overlay --text-content "PLAYER 1" --text-color "yellow" --text-position "top_left"
+```
+
+### 4. Smart Color Boost pour les Scènes Sombres
+Convertit une scène de film très sombre (ex: Batman) en s'assurant qu'elle soit visible sur les panneaux LED grâce à la colorimétrie heuristique.
+```bash
+python3 -m src.engine.conversion.cli gifs_Batman --auto-color
+```
+
+### 5. Recherche Web & Téléchargement
+Recherche "arcade fighting" sur DuckDuckGo, télécharge les 5 meilleurs résultats, et les convertit immédiatement en utilisant le profil de caméra de combat 2D.
+```bash
+python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search-limit 5 --action-scene-type "fighting_2d"
+```
+
+### 6. AI Moments : Pipeline complet (Extraction + Conversion)
+Prend une vidéo de gameplay de 10 minutes, trouve les 5 meilleurs moments d'action, et convertit immédiatement ces 5 extraits en GIFs 128x32.
+```bash
+python3 -m src.engine.conversion.cli gifs_GameplayBrut --ai-moments --ai-moments-count 5 --ai-moments-strategy "Action" --let-me-handle-it
+```
+
+### 7. AI Moments : Extraction UNIQUEMENT
+Si vous souhaitez juste utiliser l'IA pour trouver les meilleurs moments et les sauvegarder en fichiers `.mp4` *sans* encore générer de GIFs.
+```bash
+python3 -m src.engine.conversion.cli gifs_GameplayBrut --ai-moments-only --ai-moments-count 10
+```
+
+### 8. Forçage Manuel de la Caméra
+Désactive la détection de scène IA et force explicitement la caméra à se verrouiller sur le sol (mode Platformer) pendant la conversion.
+```bash
+python3 -m src.engine.conversion.cli gifs_SonicGameplay --auto-action --action-scene-type "platformer"
+```
+
+### 9. Mise à la corbeille automatique des mauvaises conversions
+Lance une conversion par lot massive mais supprime automatiquement tout GIF résultant qui obtient un score de lisibilité LED inférieur à 60%.
+```bash
+python3 -m src.engine.conversion.cli --let-me-handle-it --reject-threshold 60
+```

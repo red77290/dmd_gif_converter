@@ -181,7 +181,11 @@ def _build_parser() -> argparse.ArgumentParser:
     am = p.add_argument_group("AI Moments Extraction")
     am.add_argument(
         "--ai-moments", action="store_true", default=False,
-        help="Extract the best moments from videos before converting to GIFs."
+        help="Extract the best moments from videos and automatically convert them to GIFs."
+    )
+    am.add_argument(
+        "--ai-moments-only", action="store_true", default=False,
+        help="Extract AI moments but DO NOT convert them to GIFs (keeps the extracted mp4s)."
     )
     am.add_argument(
         "--ai-moments-count", type=int, default=10, metavar="N",
@@ -451,7 +455,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # ── Integrated AI Moments Extraction ──────────────────────────────────────
-    if args.ai_moments:
+    if args.ai_moments or args.ai_moments_only:
         logger.info(f"=== Extracting AI Moments (Count: {args.ai_moments_count}, Strategy: {args.ai_moments_strategy}) ===")
         import subprocess
         try:
@@ -521,6 +525,9 @@ if __name__ == "__main__":
                     extracted_folders.append(str(tmp_dir))
                     
             if extracted_folders:
+                if args.ai_moments_only:
+                    logger.info("AI moments extracted successfully. Skipping GIF conversion as requested (--ai-moments-only).")
+                    sys.exit(0)
                 logger.info("Re-routing conversion to use extracted AI moments folders.")
                 source_folders = extracted_folders
             else:
