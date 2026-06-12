@@ -605,31 +605,32 @@ sequenceDiagram
     P-->>Caller: (True, mp4_path, "Auto action OK …")
 ```
 
-### 6.3 Smart Scan (Pre-analysis)
+### 6.3 Continuous Scoring Matrix (Scene Classification)
 
-Runs once per file before the main loop. Samples N frames and decides which tracking optimisations to activate.
+Runs once per file before the main loop. Samples up to 60 frames and builds a continuous scoring matrix to dynamically select the best camera profile.
 
 ```mermaid
 sequenceDiagram
     participant VA as VideoAnalyzer
-    participant SA as _smart_auto_crop_decision()
+    participant SC as _SceneClassifier
     participant DET as _FrameDetector
     participant CAP as VideoCapture
 
-    VA->>SA: analyze(cap, cfg, frame_w, frame_h)
-    SA->>DET: DetectorFactory.create()
-    loop ~80 sampled frames (adaptive)
-        SA->>CAP: set_pos(frame_i)
-        CAP-->>SA: BGR frame
-        SA->>DET: detect(frame, "person")
-        DET-->>SA: BoundingBox or None
-        SA->>SA: accumulate roi_tops, roi_heights, roi_bottoms
+    VA->>SC: analyze(cap, cfg, frame_w, frame_h)
+    SC->>DET: DetectorFactory.create()
+    loop 60 sampled frames
+        SC->>CAP: set_pos(frame_i)
+        CAP-->>SC: BGR frame
+        SC->>DET: detect(frame, "person")
+        DET-->>SC: BoundingBox or None
+        SC->>SC: Score frame (h/w ratio, ROI height, x/y variance)
+        SC->>SC: Accumulate points for 9 scene profiles
     end
-    SA->>SA: Classify into GROUP 1/2/3
-    Note over SA: GROUP 1 — Tall character (anime face priority)<br/>GROUP 2 — Stable floor (platformer mode)<br/>GROUP 3 — No trackable floor (generic)
-    SA-->>VA: {auto_bottom_crop, auto_top_crop, face_priority, top_pct, bottom_pct, reasons}
+    SC->>SC: Find profile with MAX SCORE
+    Note over SC: Examples: platformer, talking_closeup, action_horizontal
+    SC-->>VA: {auto_bottom_crop, auto_top_crop, face_priority, top_pct, bottom_pct, scoreboard}
     VA->>VA: Set effective_frame_top, effective_frame_h
-    VA->>VA: Set face_priority_mode
+    VA->>VA: Set face_priority_mode based on winning profile
 ```
 
 ### 6.5 AI Iconic Moments Analysis

@@ -168,6 +168,25 @@ pip install opencv-python   # ou : pip install -r requirements_ui.txt
 
 Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée et le pipeline standard s'exécute à la place — **pas de crash, pas de perte de données**.
 
+### 🧠 Matrice de Score Continue (v6.2.0)
+
+> Remplace le modèle en cascade rigide pour classifier intelligemment les scènes et assigner le profil de caméra parfait.
+
+Quand **Smart Auto Crop** est activé, le moteur évalue les 60 premières images de votre vidéo face à 9 profils de scènes distincts (ex: `talking_closeup`, `platformer`, `action_horizontal`, `tall_character`).
+
+Plutôt qu'un simple arbre de décision IF/ELSE, chaque image rapporte des points à une **Matrice de Score Continue** basée sur :
+1. **Ratio d'aspect (`h/w`)** : Le sujet est-il grand et fin, ou large et court ?
+2. **Taille de la boîte (`roi_h`)** : Le sujet remplit-il tout l'écran, ou est-ce un petit sprite ?
+3. **Variance de mouvement (`var_x`, `var_y`)** : Le sujet bouge-t-il rapidement à l'horizontale (comme un jeu de plateforme) ou reste-t-il relativement fixe (comme un visage qui parle) ?
+4. **Stabilité du sol** : Y a-t-il un niveau de sol constant détecté par le tracker EMA ?
+
+Le profil de scène avec le score total le plus élevé à la fin de la phase d'analyse dicte le comportement final de la caméra :
+- **`platformer`** : Active le suivi du sol et le décalage horizontal.
+- **`talking_closeup`** : Désactive le suivi du sol, active le crop supérieur et la marge face-priority.
+- **`action_horizontal`** : Utilise un centrage standard avec des marges plus larges.
+
+Vous pouvez inspecter exactement comment l'IA prend sa décision en consultant le tableau `=== Scene Classification Scoreboard ===` affiché dans le panneau de logs de l'interface pour chaque vidéo traitée.
+
 ---
 
 ## 🎨 Smart Color Boost — colorimétrie heuristique par IA
