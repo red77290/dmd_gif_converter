@@ -97,6 +97,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `action_auto_top_crop` | `False` | Auto-detect top crop from ROI analysis |
 | `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
 | `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
+| `action_scene_type` | `""` | Manually force one of the 9 Continuous Scoring Matrix profiles: `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Overrides auto-detection. |
 | `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — engine scans 60 frames and activates the optimal camera profile using a continuous scoring matrix of 9 scene types (e.g. platformer, talking_closeup); resolves the face-priority ↔ floor-tracking contradiction automatically |
 | `dmd_visibility_score_enabled` | `False` | 🔬 DMD Visibility Score — simulates the proposed crop at target DMD resolution and computes a composite score (contrast, edges, pixel occupation). Cancels any zoom that scores < 95 % of the current view. Prevents zooms that make the subject invisible on low-res LED matrices. CPU cost: < 1 ms/frame. |
 | `let_me_handle_it` | `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction + DMD Visibility Score simultaneously and grays out all unrelated settings |
