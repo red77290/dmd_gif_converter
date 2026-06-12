@@ -207,59 +207,74 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     FACE_FRAC = 0.28
 
     step = max(1, total_frames // sample_count)
-    roi_tops: list[float]         = []
-    roi_bottoms_feet: list[float] = []
-    roi_bottoms_fp: list[float]   = []
-    roi_heights: list[float]      = []
-    roi_widths: list[float]       = []
-    x_centers: list[float]        = []   # horizontal center of each detection
-    fill_ratios: list[float]      = []   # rh / frame_h per detection
-
-    frame_lefts: list[float]      = []
-    frame_rights: list[float]     = []
     check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False)
-
     saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
-    # Use total_frames (not total_frames-1) so that 1-frame GIFs are also sampled.
-    for i in range(0, min(total_frames, sample_count * step), step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
-        ok, frame = cap.read()
-        if not ok or frame is None: continue
-        # Skip frames that are too dark for reliable detection (e.g. fade-in / dark scenes)
-        if _is_dark_frame(frame):
-            continue
-        # Use person detection only (no motion fallback): detect_motion relies on
-        # sequential frames via MOG2, which is meaningless when using cap.set() jumps.
-        roi = detector.detect_person(frame) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector)
-        if roi is not None:
-            rx, ry, rw, rh = roi
-            roi_tops.append(float(ry))
-            roi_bottoms_feet.append(float(ry + rh))
-            roi_heights.append(float(rh))
-            roi_widths.append(float(rw))
-            x_centers.append(float(rx + rw / 2.0))
-            fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
-            if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
-                roi_bottoms_fp.append(float(ry + rh * FACE_FRAC))
+
+    def _run_scan(det_type: str):
+        _roi_tops: list[float]         = []
+        _roi_bottoms_feet: list[float] = []
+        _roi_bottoms_fp: list[float]   = []
+        _roi_heights: list[float]      = []
+        _roi_widths: list[float]       = []
+        _x_centers: list[float]        = []
+        _y_centers: list[float]        = []
+        _fill_ratios: list[float]      = []
+        _frame_lefts: list[float]      = []
+        _frame_rights: list[float]     = []
+        
+        for i in range(0, min(total_frames, sample_count * step), step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
+            ok, frame = cap.read()
+            if not ok or frame is None: continue
+            if _is_dark_frame(frame):
+                continue
+            
+            # For "person", we use the specialized detect_person. For fallback "hybrid", we use detect()
+            if det_type == "person" and hasattr(detector, "detect_person"):
+                roi = detector.detect_person(frame)
             else:
-                roi_bottoms_fp.append(float(ry + rh))
+                roi = detector.detect(frame, det_type)
                 
-        if check_pillarbox:
-            # Downsample for speed
-            small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
-            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
-            coords = np.argwhere(thresh > 0)
-            if coords.size > 0:
-                y_min, x_min = coords.min(axis=0)
-                y_max, x_max = coords.max(axis=0)
-                frame_lefts.append(x_min / 128.0)
-                frame_rights.append(x_max / 128.0)
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                _roi_tops.append(float(ry))
+                _roi_bottoms_feet.append(float(ry + rh))
+                _roi_heights.append(float(rh))
+                _roi_widths.append(float(rw))
+                _x_centers.append(float(rx + rw / 2.0))
+                _y_centers.append(float(ry + rh / 2.0))
+                _fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
+                if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
+                    _roi_bottoms_fp.append(float(ry + rh * FACE_FRAC))
+                else:
+                    _roi_bottoms_fp.append(float(ry + rh))
+                    
+            if check_pillarbox:
+                small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
+                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
+                coords = np.argwhere(thresh > 0)
+                if coords.size > 0:
+                    y_min, x_min = coords.min(axis=0)
+                    y_max, x_max = coords.max(axis=0)
+                    _frame_lefts.append(x_min / 128.0)
+                    _frame_rights.append(x_max / 128.0)
+                    
+        return _roi_tops, _roi_bottoms_feet, _roi_bottoms_fp, _roi_heights, _roi_widths, _x_centers, _y_centers, _fill_ratios, _frame_lefts, _frame_rights
+
+    best_detector = cfg.detector
+    (roi_tops, roi_bottoms_feet, roi_bottoms_fp, roi_heights, roi_widths, 
+     x_centers, y_centers, fill_ratios, frame_lefts, frame_rights) = _run_scan(best_detector)
+     
+    if not roi_tops and getattr(cfg, "auto_detector_fallback", False) and best_detector == "person":
+        best_detector = "hybrid"
+        (roi_tops, roi_bottoms_feet, roi_bottoms_fp, roi_heights, roi_widths, 
+         x_centers, y_centers, fill_ratios, frame_lefts, frame_rights) = _run_scan(best_detector)
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
     if not roi_tops:
-        return {**_EMPTY, "reasons": ["no detections in scan — all manual"]}
+        return {**_EMPTY, "best_detector": best_detector, "reasons": ["no detections in scan — all manual"]}
 
     arr_tops       = np.array(roi_tops)
     arr_btm_feet   = np.array(roi_bottoms_feet)
@@ -294,6 +309,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     body_aspect    = median_height / max(1.0, median_w)
     median_fill    = float(np.median(fill_ratios)) if fill_ratios else 0.0
     x_var          = float(np.var(x_centers)) / max(1.0, float(frame_w) ** 2) if x_centers else 0.0
+    y_var          = float(np.var(y_centers)) / max(1.0, float(frame_h) ** 2) if y_centers else 0.0
 
     # ── Scene classification (auto_scene_type or smart_auto_crop) ────────────
     scene_profile = None
@@ -307,6 +323,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
             "floor_in_lower":  floor_in_lower,
             "floor_var_score": floor_var_score,
             "x_variance":      x_var,
+            "y_variance":      y_var,
         }
         scene_profile, scoreboard_lines = classify_scene(scene_signals)
     else:
@@ -397,6 +414,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
             right_pct = _clamp((1.0 - raw_right) + 0.025, 0.0, 0.4)
 
     return {
+        "best_detector":      best_detector,
         "auto_bottom_crop":   auto_bottom,
         "auto_top_crop":      auto_top,
         "auto_vertical_bias": auto_floor,

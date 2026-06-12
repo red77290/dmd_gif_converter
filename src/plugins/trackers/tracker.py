@@ -61,6 +61,7 @@ class TrackingEngine(ITracker):
         # Scene Change
         self.prev_frame_for_scene: Optional[np.ndarray] = None
         self.scene_change_enabled = self.cfg.scene_change_threshold > 0.0
+        self.frames_since_scene_change: int = 0
         
         # ROI History
         self.roi_history: Deque[Tuple[float, Tuple[int, int, int, int]]] = collections.deque()
@@ -77,6 +78,9 @@ class TrackingEngine(ITracker):
         # Persistence Score
         self.roi_persistence_frames: int = 0
         self.roi_persistence_score: float = 1.0
+        
+        # Detector state
+        self.current_detector: str = self.cfg.detector
 
     @property
     def last_roi(self) -> Optional[BoundingBox]:
@@ -98,14 +102,27 @@ class TrackingEngine(ITracker):
                     self.floor_est = _FloorEstimator(self.cam_frame_h)
                 self.prev_roi_cx = None
                 self.prev_roi_cy = None
+                self.frames_since_scene_change = 0
+                
+                # Reset dynamic profile temporarily on cut
+                if getattr(self.cfg, "dynamic_scene_detection", False):
+                    from src.engine.analysis.scene_types import DEFAULT_SCENE_PROFILE
+                    self.cfg.scene_profile = DEFAULT_SCENE_PROFILE
+                    self.cfg.scene_type = DEFAULT_SCENE_PROFILE.scene_type
+                    
+                # Reset dynamic detector on cut
+                if getattr(self.cfg, "auto_detector_fallback", False):
+                    self.current_detector = "person"
+
         self.prev_frame_for_scene = frame
+        self.frames_since_scene_change += 1
         
         # 2. ROI Detection  (raw bbox from detector, before any face-clipping)
         expected_floor_y = self.floor_est.floor_y if self.floor_est is not None else None
         
         if self.face_priority_mode:
             raw_roi = self.detector.detect(
-                frame, self.cfg.detector,
+                frame, self.current_detector,
                 multi_fusion=self.cfg.multi_roi_fusion_enabled and not self.cfg.platformer_mode,
                 min_conf=self.cfg.roi_confidence_min,
                 roi_persistence_score=self.roi_persistence_score if getattr(self.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
@@ -115,7 +132,7 @@ class TrackingEngine(ITracker):
         else:
             detect_frame = frame[self.effective_frame_top:self.effective_frame_h, :]
             raw_roi = self.detector.detect(
-                detect_frame, self.cfg.detector,
+                detect_frame, self.current_detector,
                 multi_fusion=self.cfg.multi_roi_fusion_enabled and not self.cfg.platformer_mode,
                 min_conf=self.cfg.roi_confidence_min,
                 roi_persistence_score=self.roi_persistence_score if getattr(self.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
@@ -184,6 +201,54 @@ class TrackingEngine(ITracker):
                 if total_w > 0:
                     raw_roi = (int(wx / total_w), int(wy / total_w), int(ww / total_w), int(wh / total_w))
                     face_roi = self._clip_to_face_roi(raw_roi)
+
+        # 7b. Dynamic Scene Classification (on-the-fly per shot)
+        if getattr(self.cfg, "dynamic_scene_detection", False):
+            # We wait a few frames after a cut to gather enough ROI history
+            wait_frames = min(15, max(5, self.roi_history_max_len))
+            if self.frames_since_scene_change == wait_frames and len(self.roi_history) > 3:
+                from src.engine.analysis.scene_types import classify_scene
+                
+                arr_widths = []
+                x_centers = []
+                y_centers = []
+                fill_ratios = []
+                heights = []
+                
+                for _, hr in self.roi_history:
+                    arr_widths.append(hr[2])
+                    heights.append(hr[3])
+                    x_centers.append(hr[0] + hr[2]/2.0)
+                    y_centers.append(hr[1] + hr[3]/2.0)
+                    fill_ratios.append(hr[3] / float(self.frame_h))
+                    
+                median_h = float(np.median(heights))
+                median_w = float(np.median(arr_widths))
+                
+                floor_in_lower = False
+                if self.floor_est and self.floor_est.floor_y and self.floor_est.floor_y > (self.cam_frame_h * 0.5):
+                    floor_in_lower = True
+                
+                scene_signals = {
+                    "tall_ratio":      median_h / float(self.cam_frame_h) if self.cam_frame_h > 0 else 0.0,
+                    "fill_ratio":      float(np.median(fill_ratios)),
+                    "body_aspect":     median_h / max(1.0, median_w),
+                    "floor_in_lower":  floor_in_lower,
+                    "floor_var_score": 1.0, # Hard to compute accurate variance with short history, assume unstable unless floor_est locked
+                    "x_variance":      float(np.var(x_centers)) / max(1.0, float(self.frame_w)**2),
+                    "y_variance":      float(np.var(y_centers)) / max(1.0, float(self.cam_frame_h)**2),
+                }
+                
+                new_profile, _ = classify_scene(scene_signals)
+                self.cfg.scene_profile = new_profile
+                self.cfg.scene_type = new_profile.scene_type
+
+        # 7c. Dynamic Detector Fallback (on-the-fly per shot)
+        if getattr(self.cfg, "auto_detector_fallback", False):
+            wait_frames = min(15, max(5, self.roi_history_max_len))
+            if self.frames_since_scene_change == wait_frames and len(self.roi_history) == 0:
+                if self.current_detector == "person":
+                    self.current_detector = "hybrid"
 
         # 8. Build Base Camera (uses face_roi for positioning)
         cam_now_proposed = _build_camera_rect(

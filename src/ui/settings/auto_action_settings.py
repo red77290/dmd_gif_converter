@@ -115,6 +115,20 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         )
         self._action_detector_menu.grid(row=0, column=1, sticky="w", padx=4)
         _add_dep(self._action_detector_menu)
+        
+        fallback_row = ctk.CTkFrame(parent, fg_color="transparent")
+        fallback_row.pack(fill="x", padx=14, pady=(0, 4))
+        self._cb_auto_detector_fallback = ctk.CTkCheckBox(
+            fallback_row,
+            text="Auto Detector Fallback (Person → Hybrid)",
+            variable=self.app_state.v_action_auto_detector_fallback,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        )
+        self._cb_auto_detector_fallback.pack(side="left")
+        _add_dep(self._cb_auto_detector_fallback)
+        _b1 = _InfoBadge(fallback_row)
+        _b1.configure(text="Dynamically switch to 'hybrid' mode if 'person' detects nothing.\nEvaluates dynamically per-scene if Dynamic Scene Detection is enabled.")
+        _b1.pack(side="left", padx=(0, 8))
 
         row_frame = ctk.CTkFrame(parent, fg_color="transparent")
         row_frame.pack(fill="x", padx=14, pady=(0, 4))
@@ -213,7 +227,8 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             variable=self.app_state.v_action_scene_type,
             values=["", "platformer", "talking_closeup", "full_body_tall",
                     "fighting_2d", "action_horizontal", "talking_medium",
-                    "full_body_medium", "wide_shot", "action_moving"],
+                    "full_body_medium", "wide_shot", "action_moving",
+                    "top_down_isometric", "first_person", "third_person", "menu_static"],
             width=200,
         )
         self._scene_type_menu.pack(side="left")
@@ -235,6 +250,18 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             state = "disabled" if self.app_state.v_action_auto_scene_type.get() else "normal"
             self._safe_cfg(self._scene_type_menu, state=state)
         self.app_state.v_action_auto_scene_type.trace_add("write", _toggle_auto_scene_type)
+
+        dynamic_scene_row = ctk.CTkFrame(parent, fg_color="transparent")
+        dynamic_scene_row.pack(fill="x", padx=14, pady=(0, 2))
+        self._cb_dynamic_scene = ctk.CTkCheckBox(
+            dynamic_scene_row,
+            text="Dynamic Scene Detection (per-shot, requires Auto Scene Type)",
+            variable=self.app_state.v_action_dynamic_scene_detection,
+            font=ctk.CTkFont(size=12), text_color="#ffe08a",
+        )
+        self._cb_dynamic_scene.pack(side="left")
+        self.app_state.lmh_widgets.append(self._cb_dynamic_scene)
+        _add_dep(self._cb_dynamic_scene)
 
         pillarbox_row = ctk.CTkFrame(parent, fg_color="transparent")
         pillarbox_row.pack(fill="x", padx=14, pady=(6, 0))

@@ -167,6 +167,7 @@ DEFAULT_PARAMS = {
     # ── Advanced: Auto action framing (pre-ffmpeg stage) ─────────────────
     "auto_action_enabled": False,
     "action_detector":     "person",   # person | motion | hybrid | center
+    "action_auto_detector_fallback": False, # fallback to hybrid if person fails
     "action_strength":     0.65,       # 0..1 tighter framing around action
     "action_smoothness":   0.98,       # 0..0.98 camera smoothing
     "action_zoom_max":     2.0,        # max dynamic zoom factor (hard limit)
@@ -275,6 +276,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
             smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
             auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
+            dynamic_scene_detection=bool(p.get("dynamic_scene_detection", False)),
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None,
             target_width=target_width, # Pass target dimensions to auto_action
@@ -742,6 +744,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
         smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
         auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
+        dynamic_scene_detection=bool(p.get("dynamic_scene_detection", False)),
         target_width=p["target_width"],
         target_height=p["target_height"],
     )
@@ -764,6 +767,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
             auto_vertical_bias=action_cfg.auto_vertical_bias,
             smart_auto_crop=action_cfg.smart_auto_crop,
             auto_pillarbox_crop=action_cfg.auto_pillarbox_crop,
+            dynamic_scene_detection=action_cfg.dynamic_scene_detection,
             target_width=action_cfg.target_width,
             target_height=action_cfg.target_height,
         )
