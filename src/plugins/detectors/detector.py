@@ -90,6 +90,7 @@ class AbstractDetector(IDetector):
         min_conf: float = _YOLO_CONF_THRESH,
         roi_persistence_score: float = 1.0,
         platformer_mode: bool = False,
+        expected_floor_y: Optional[float] = None,
     ) -> Optional[BoundingBox]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
@@ -101,20 +102,20 @@ class AbstractDetector(IDetector):
         if mode == "person":
             p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
                                    roi_persistence_score=roi_persistence_score,
-                                   platformer_mode=platformer_mode)
-            return p if p is not None else self.detect_motion(frame, platformer_mode=platformer_mode)
+                                   platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+            return p if p is not None else self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
 
         if mode == "motion":
-            m = self.detect_motion(frame, platformer_mode=platformer_mode)
+            m = self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
             return m if m is not None else self.detect_person(
                 frame, multi_fusion=multi_fusion, min_conf=min_conf,
-                roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode)
+                roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
 
         # hybrid: merge both
         p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
                                 roi_persistence_score=roi_persistence_score,
-                                platformer_mode=platformer_mode)
-        m = self.detect_motion(frame, platformer_mode=platformer_mode)
+                                platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+        m = self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
         if p and m:
             x1 = min(p[0], m[0])
             y1 = min(p[1], m[1])
@@ -183,7 +184,8 @@ class _FrameDetector(AbstractDetector):
                 self.model_type = ""
 
     def _detect_yolo(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
-                     roi_persistence_score: float = 1.0, platformer_mode: bool = False) -> Optional[BoundingBox]:
+                     roi_persistence_score: float = 1.0, platformer_mode: bool = False,
+                     expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
         cv2 = self.cv2
         h, w = frame.shape[:2]
 
@@ -204,9 +206,16 @@ class _FrameDetector(AbstractDetector):
             return None
 
         if platformer_mode:
-            bottomness = boxes_raw[:, 1] / self._model_h
-            # Extreme floor tracking: 100x advantage for floor, effectively ignoring ceiling pareidolia
-            platformer_scores = person_scores * mask * (0.01 + 100.0 * (bottomness ** 4))
+            if expected_floor_y is not None:
+                sy_model = self._model_h / float(h)
+                expected_floor_model = expected_floor_y * sy_model
+                boxes_bottom = boxes_raw[:, 1] + boxes_raw[:, 3] / 2.0
+                dist_to_floor = np.abs(boxes_bottom - expected_floor_model) / float(self._model_h)
+                platformer_scores = person_scores * mask * (0.01 + 100.0 * np.exp(-dist_to_floor * 10.0))
+            else:
+                bottomness = boxes_raw[:, 1] / self._model_h
+                # Extreme floor tracking: 100x advantage for floor, effectively ignoring ceiling pareidolia
+                platformer_scores = person_scores * mask * (0.01 + 100.0 * (bottomness ** 4))
             best_i = int(np.argmax(platformer_scores))
         else:
             best_i = int(np.argmax(person_scores * mask))
@@ -265,7 +274,8 @@ class _FrameDetector(AbstractDetector):
     def detect_person(self, frame: np.ndarray, multi_fusion: bool = False,
                       min_conf: float = _YOLO_CONF_THRESH,
                       roi_persistence_score: float = 1.0,
-                      platformer_mode: bool = False) -> Optional[BoundingBox]:
+                      platformer_mode: bool = False,
+                      expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
         if self._onnx_session is None:
             return None
         if multi_fusion:
@@ -274,9 +284,11 @@ class _FrameDetector(AbstractDetector):
             return _fuse_rois(hits, roi_persistence_score=roi_persistence_score) if hits else None
         return self._detect_yolo(frame, min_conf=min_conf,
                                   roi_persistence_score=roi_persistence_score,
-                                  platformer_mode=platformer_mode)
+                                  platformer_mode=platformer_mode,
+                                  expected_floor_y=expected_floor_y)
 
-    def detect_motion(self, frame: np.ndarray, platformer_mode: bool = False) -> Optional[BoundingBox]:
+    def detect_motion(self, frame: np.ndarray, platformer_mode: bool = False,
+                      expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
         cv2 = self.cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -309,9 +321,14 @@ class _FrameDetector(AbstractDetector):
             if platformer_mode:
                 x, y, w, h = cv2.boundingRect(c)
                 bottom_y = y + h
-                bottomness = bottom_y / frame_h
-                # Extreme floor tracking: massive penalty for ceiling to prevent boss/fx tracking
-                return area * (0.01 + 100.0 * (bottomness ** 4))
+                if expected_floor_y is not None:
+                    import math
+                    dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
+                    return area * (0.01 + 100.0 * math.exp(-dist_to_floor * 10.0))
+                else:
+                    bottomness = bottom_y / frame_h
+                    # Extreme floor tracking: massive penalty for ceiling to prevent boss/fx tracking
+                    return area * (0.01 + 100.0 * (bottomness ** 4))
             return area
 
         c_best = max(contours, key=score_contour)

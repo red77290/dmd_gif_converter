@@ -101,14 +101,16 @@ class TrackingEngine(ITracker):
         self.prev_frame_for_scene = frame
         
         # 2. ROI Detection  (raw bbox from detector, before any face-clipping)
-        raw_roi = None
+        expected_floor_y = self.floor_est.floor_y if self.floor_est is not None else None
+        
         if self.face_priority_mode:
             raw_roi = self.detector.detect(
                 frame, self.cfg.detector,
                 multi_fusion=self.cfg.multi_roi_fusion_enabled and not self.cfg.platformer_mode,
                 min_conf=self.cfg.roi_confidence_min,
                 roi_persistence_score=self.roi_persistence_score if getattr(self.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
-                platformer_mode=self.cfg.platformer_mode
+                platformer_mode=self.cfg.platformer_mode,
+                expected_floor_y=expected_floor_y
             )
         else:
             detect_frame = frame[self.effective_frame_top:self.effective_frame_h, :]
@@ -117,7 +119,8 @@ class TrackingEngine(ITracker):
                 multi_fusion=self.cfg.multi_roi_fusion_enabled and not self.cfg.platformer_mode,
                 min_conf=self.cfg.roi_confidence_min,
                 roi_persistence_score=self.roi_persistence_score if getattr(self.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
-                platformer_mode=self.cfg.platformer_mode
+                platformer_mode=self.cfg.platformer_mode,
+                expected_floor_y=expected_floor_y - self.effective_frame_top if expected_floor_y is not None else None
             )
             if raw_roi is not None and self.effective_frame_top > 0:
                 rx, ry, rw, rh = raw_roi

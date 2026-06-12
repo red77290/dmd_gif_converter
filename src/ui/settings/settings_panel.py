@@ -93,7 +93,7 @@ class SettingsPanel(ctk.CTkFrame):
 
     def _build_colorimetry(self, parent):
         self._custom_header = ctk.CTkLabel(
-            parent, text="🎛️  Colorimetry  (custom mode only)",
+            parent, text="🎛️  Colorimetry",
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#7ec8e3"
         )
         self._custom_header.pack(fill="x", padx=13, pady=(12, 2), anchor="w")
@@ -102,24 +102,83 @@ class SettingsPanel(ctk.CTkFrame):
         
         # Adding sliders via the shared adv_slider (imported from advanced_settings or a new util)
         from src.ui.settings.advanced_settings import adv_slider
-        adv_slider(self._custom_frame, "Contrast",    self.app_state.v_contrast,    0.5,  2.5)
-        adv_slider(self._custom_frame, "Saturation",  self.app_state.v_saturation,  0.0,  4.0)
-        adv_slider(self._custom_frame, "Brightness",  self.app_state.v_brightness, -0.5,  0.5, "{:.3f}")
-        adv_slider(self._custom_frame, "Gamma",       self.app_state.v_gamma,       0.1,  2.5)
-        adv_slider(self._custom_frame, "Sharpen Lum", self.app_state.v_sharpen_lum, 0.0,  3.0)
-        adv_slider(self._custom_frame, "Sharpen Chr", self.app_state.v_sharpen_chr, 0.0,  2.0)
+        self._color_sliders = []
+        self._color_sliders.append(adv_slider(self._custom_frame, "Contrast",    self.app_state.v_contrast,    0.5,  2.5))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Saturation",  self.app_state.v_saturation,  0.0,  4.0))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Brightness",  self.app_state.v_brightness, -0.5,  0.5, "{:.3f}"))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Gamma",       self.app_state.v_gamma,       0.1,  2.5))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Sharpen Lum", self.app_state.v_sharpen_lum, 0.0,  3.0))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Sharpen Chr", self.app_state.v_sharpen_chr, 0.0,  2.0))
+        
+        self._custom_color_cache = {
+            "v_contrast": self.app_state.v_contrast.get(),
+            "v_saturation": self.app_state.v_saturation.get(),
+            "v_brightness": self.app_state.v_brightness.get(),
+            "v_gamma": self.app_state.v_gamma.get(),
+            "v_sharpen_lum": self.app_state.v_sharpen_lum.get(),
+            "v_sharpen_chr": self.app_state.v_sharpen_chr.get(),
+        }
+        self._last_mode = self.app_state.v_mode.get()
+        
+        def _update_colorimetry_state(*_):
+            current_mode = self.app_state.v_mode.get()
+            
+            # Save custom values if leaving custom mode
+            if self._last_mode == "custom" and current_mode != "custom":
+                self._custom_color_cache = {
+                    "v_contrast": self.app_state.v_contrast.get(),
+                    "v_saturation": self.app_state.v_saturation.get(),
+                    "v_brightness": self.app_state.v_brightness.get(),
+                    "v_gamma": self.app_state.v_gamma.get(),
+                    "v_sharpen_lum": self.app_state.v_sharpen_lum.get(),
+                    "v_sharpen_chr": self.app_state.v_sharpen_chr.get(),
+                }
+            
+            # Apply presets
+            _PRESETS = {
+                "pixel_art": (  1.6,      2.2,  -0.03,  0.85,  1.8,   0.5 ),
+                "anime":     (  1.5,      1.9,  -0.02,  0.87,  1.3,   0.3 ),
+                "cinema":    (  1.35,     1.3,   0.00,  0.95,  0.8,   0.2 ),
+            }
+            if current_mode in _PRESETS:
+                p = _PRESETS[current_mode]
+                self.app_state.v_contrast.set(p[0])
+                self.app_state.v_saturation.set(p[1])
+                self.app_state.v_brightness.set(p[2])
+                self.app_state.v_gamma.set(p[3])
+                self.app_state.v_sharpen_lum.set(p[4])
+                self.app_state.v_sharpen_chr.set(p[5])
+            elif current_mode == "custom" and self._last_mode != "custom":
+                c = self._custom_color_cache
+                self.app_state.v_contrast.set(c["v_contrast"])
+                self.app_state.v_saturation.set(c["v_saturation"])
+                self.app_state.v_brightness.set(c["v_brightness"])
+                self.app_state.v_gamma.set(c["v_gamma"])
+                self.app_state.v_sharpen_lum.set(c["v_sharpen_lum"])
+                self.app_state.v_sharpen_chr.set(c["v_sharpen_chr"])
+                
+            self._last_mode = current_mode
+            
+            if self.app_state.v_let_me_handle_it.get():
+                state = "disabled"
+            elif self.app_state.v_auto_color_enabled.get():
+                state = "disabled"
+            elif current_mode != "custom":
+                state = "disabled"
+            else:
+                state = "normal"
+            from src.ui.settings.auto_action_settings import AutoActionSettingsPanel
+            for sl in self._color_sliders:
+                AutoActionSettingsPanel._safe_cfg(sl, state=state)
 
-        self.app_state.v_mode.trace_add("write", self._update_custom_visibility)
-        self._update_custom_visibility()
+        self.app_state.v_mode.trace_add("write", _update_colorimetry_state)
+        self.app_state.v_auto_color_enabled.trace_add("write", _update_colorimetry_state)
+        self.app_state.v_let_me_handle_it.trace_add("write", _update_colorimetry_state)
+        # _update_colorimetry_state() is called in initial setup so no need to call it now,
+        # but we should force a visual update of the disable states
+        _update_colorimetry_state()
+        
 
-    def _update_custom_visibility(self, *_):
-        is_custom = self.app_state.v_mode.get() == "custom"
-        if is_custom:
-            self._custom_header.pack(fill="x", padx=13, pady=(12, 2), anchor="w")
-            self._custom_frame.pack(fill="x")
-        else:
-            self._custom_header.pack_forget()
-            self._custom_frame.pack_forget()
 
     def _on_per_gif_toggle(self, *_):
         is_on = self.app_state.v_per_gif_config.get()
@@ -152,3 +211,8 @@ class SettingsPanel(ctk.CTkFrame):
                 widget.configure(state=state)
             except Exception:
                 pass
+                
+        if not enabled and hasattr(self, 'auto_action_settings'):
+            self.auto_action_settings.refresh_states()
+            # Also refresh local auto_color state
+            self.app_state.v_auto_color_enabled.set(self.app_state.v_auto_color_enabled.get())
