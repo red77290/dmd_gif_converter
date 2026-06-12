@@ -162,12 +162,33 @@ Instead of a simple IF/ELSE decision tree, each frame contributes points to a **
 3. **Movement Variance (`var_x`, `var_y`)**: Does the subject move rapidly horizontally (like a platformer) or stay relatively still (like a talking head)?
 4. **Floor Stability**: Is there a consistent ground level detected by the EMA floor tracker?
 
-The scene profile with the highest total score at the end of the analysis phase dictates the final camera behaviour:
-- **`platformer`**: Enables auto-floor tracking and horizontal bias.
-- **`talking_closeup`**: Disables floor tracking, enables top-crop and face-priority padding.
-- **`action_horizontal`**: Uses standard centering with wider margins.
+The scene profile with the highest total score dictates the final camera behaviour. There are **9 possible scene types** in the system, which you can also manually enforce via the CLI using the `--scene-type` argument:
+
+#### 🎮 Gaming & Action Profiles
+- **`platformer`**: For 2D games with a stable floor (e.g. Mario, Sonic). Enables auto-floor tracking to lock the camera to the ground. The camera pushes down slightly to ensure the platform is always visible, and will not drift upwards during jumps.
+- **`fighting_2d`**: For 1v1 arcade fighters (e.g. Street Fighter). Uses tighter tracking (strength 0.70) and faster camera movements (smoothness 0.80) to follow rapid back-and-forth dashes.
+- **`action_horizontal`**: For side-scrollers or beat 'em ups. Enables auto-vertical bias to keep the floor level consistent while the camera scrolls smoothly left to right.
+- **`action_moving`**: For RPGs or games where the subject moves freely in all directions. Uses standard smooth tracking without locking the floor.
+- **`wide_shot`**: For scenes with small subjects and lots of background. Uses very loose tracking (strength 0.40) and high smoothness (0.90) to prevent the camera from jittering aggressively.
+
+#### 👤 People & Dialogue Profiles
+- **`talking_closeup`**: For anime, vlogs, or dialogue where the face fills the frame. Enables **Face Priority Mode**. The camera ignores the lower body and rigidly locks onto the eye region (top 45% of the head) so the face doesn't bounce around during speech.
+- **`talking_medium`**: For news anchors or waist-up shots. Enables Face Priority Mode, calculating the head as the top 35% of the visible body bounding box.
+- **`full_body_tall`**: For standing characters or tall anime sprites. Enables Face Priority Mode, calculating the head as the top 22% of the body bounding box, ensuring the face is centered rather than cutting them off at the shoulders.
+- **`full_body_medium`**: Standard generic tracking for full-body subjects without Face Priority. Uses tighter tracking margins.
 
 You can inspect the AI's exact decision-making process by looking at the `=== Scene Classification Scoreboard ===` printed in the UI Log Panel for every video processed.
+
+### 🛠️ Manual Override via CLI
+If you want to bypass the Continuous Scoring Matrix and explicitly force one of the 9 profiles, you can use the `--scene-type` argument. This disables the AI analysis phase and immediately applies your chosen profile's tracking rules:
+
+```bash
+# Force the Platformer profile (locks the camera to the floor)
+python3 -m src.engine.conversion.cli gifs_Sonic --scene-type "platformer"
+
+# Force the Face Priority closeup profile
+python3 -m src.engine.conversion.cli input.mp4 --scene-type "talking_closeup"
+```
 
 ---
 
