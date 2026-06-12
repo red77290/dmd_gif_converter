@@ -101,6 +101,17 @@ class ApplicationState(IModel):
                     var.set(val)
                 except Exception:
                     pass
+        
+        # Enforce Smart Auto Crop dependencies since SettingsPanel might not be built yet
+        if getattr(self, "v_action_smart_auto_crop", None) and self.v_action_smart_auto_crop.get():
+            for var_name in ["v_action_auto_scene_type", "v_action_auto_bottom_crop", 
+                             "v_action_auto_top_crop", "v_action_auto_vertical_bias"]:
+                var = getattr(self, var_name, None)
+                if var is not None:
+                    try:
+                        var.set(True)
+                    except Exception:
+                        pass
 
     def _apply_lmh_if_needed(self):
         """Apply 'Let me handle it' var overrides at startup if the flag is True.
