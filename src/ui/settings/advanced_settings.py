@@ -51,6 +51,7 @@ def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
     entry.bind("<FocusIn>",  _on_focus_in)
     entry.bind("<FocusOut>", _commit)
     entry.bind("<Return>",   _commit)
+    sl.entry_widget = entry
     return sl
 
 class AdvancedSettingsPanel(ctk.CTkFrame):
