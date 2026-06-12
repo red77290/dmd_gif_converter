@@ -67,48 +67,52 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Minimum duration of an extracted moment in seconds. |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Maximum duration of an extracted moment in seconds. |
 
-**Advanced parameters** (UI — all default = no change):
+**Advanced parameters** (UI and CLI):
 
-| Parameter | Default | Description |
-|---|---|---|
-| `scroll_enabled` | `True` | `False` = manual crop mode |
-| `zoom` | `1.0` | Scale multiplier before crop (manual mode) |
-| `manual_x` | `0` | Horizontal crop offset px (manual mode) |
-| `manual_y` | `0` | Vertical crop offset px (manual mode) |
-| `hue_shift` | `0.0` | Hue rotation in degrees |
-| `noise_reduction` | `0.0` | hqdn3d strength |
-| `film_grain` | `0` | Additive noise amount |
-| `vignette` | `False` | Edge darkening vignette |
-| `max_duration` | `0.0` | Hard cap on clip length in seconds (`0` = no limit) |
-| `auto_color_enabled` | `False` | 🎨 Smart Color Boost — AI heuristic colorimetry |
-| `auto_action_enabled` | `False` | 🤖 AI cinematic camera — see dedicated section |
-| `action_detector` | `person` | `person` / `motion` / `hybrid` / `center` |
-| `action_intro` | `1.5` | Establishing shot duration in seconds |
-| `action_strength` | `0.65` | Framing tightness around subject |
-| `action_auto_strength` | `False` | Auto strength based on content type |
-| `action_smoothness` | `0.65` | Camera exponential smoothing factor |
-| `action_auto_smoothness`| `False` | Auto smooth based on content type |
-| `action_zoom_max` | `1.8` | Maximum AI zoom factor |
-| `action_padding` | `0.20` | Padding around detected ROI |
-| `bg_sub_enable` | `False` | Replace background with black (maximises subject contrast) |
-| `action_bottom_crop` | `0.0` | Exclude bottom N % of frame (manual, 0 = disabled) |
-| `action_auto_bottom_crop` | `False` | Auto-detect bottom crop from ROI analysis |
-| `action_top_crop` | `0.0` | Exclude top N % of frame (manual, 0 = disabled) |
-| `action_auto_top_crop` | `False` | Auto-detect top crop from ROI analysis |
-| `action_vertical_bias` | `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
-| `action_auto_vertical_bias` | `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
-| `action_scene_type` | `""` | Manually force one of the 9 Continuous Scoring Matrix profiles: `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Overrides auto-detection. |
-| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — engine scans 60 frames and activates the optimal camera profile using a continuous scoring matrix of 9 scene types (e.g. platformer, talking_closeup); resolves the face-priority ↔ floor-tracking contradiction automatically |
-| `dmd_visibility_score_enabled` | `False` | 🔬 DMD Visibility Score — simulates the proposed crop at target DMD resolution and computes a composite score (contrast, edges, pixel occupation). Cancels any zoom that scores < 95 % of the current view. Prevents zooms that make the subject invisible on low-res LED matrices. CPU cost: < 1 ms/frame. |
-| `let_me_handle_it` | `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction + DMD Visibility Score simultaneously and grays out all unrelated settings |
-| `target_width` | `128` | Output width in pixels (multi-panel tiling) |
-| `target_height` | `32` | Output height in pixels (multi-panel tiling) |
-| `text_overlay_enabled` | `False` | 💬 Burn a text label into the output GIF |
-| `text_content` | `""` | Text string to render |
-| `text_font_size` | `8` | Font size in pixels |
-| `text_color` | `white` | Text colour (`white` / `yellow` / `red` / `green` / `blue` / hex) |
-| `text_position` | `bottom_center` | One of 9 anchor positions |
-| `text_font_file` | `HelvetiPixel.ttf` | Font file from `media/fonts/` |
+| Parameter | CLI Flag | Default | Description |
+|---|---|---|---|
+| `prefix` | `--prefix` | `gifs_` | Source folder prefix |
+| `no_scroll` | `--no-scroll` | `False` | `True` = disable automatic scroll (enables manual crop) |
+| `zoom` | `--zoom` | `1.0` | Scale multiplier before crop (manual mode) |
+| `manual_x` | `--manual-x` | `0` | Horizontal crop offset px (manual mode) |
+| `manual_y` | `--manual-y` | `0` | Vertical crop offset px (manual mode) |
+| `hue_shift` | `--hue-shift` | `0.0` | Hue rotation in degrees |
+| `noise_reduction` | `--noise-reduction` | `0.0` | hqdn3d strength |
+| `film_grain` | `--film-grain` | `0` | Additive noise amount |
+| `vignette` | `--vignette` | `False` | Edge darkening vignette |
+| `max_duration` | `--max-duration` | `0.0` | Hard cap on clip length in seconds (`0` = no limit) |
+| `auto_color` | `--auto-color` | `False` | 🎨 Smart Color Boost — AI heuristic colorimetry |
+| `auto_action` | `--auto-action` | `False` | 🤖 AI cinematic camera — see dedicated section |
+| `action_detector` | `--action-detector` | `person` | `person` / `motion` / `hybrid` / `center` |
+| `action_intro` | `--action-intro` | `1.5` | Establishing shot duration in seconds |
+| `action_strength` | `--action-strength` | `0.65` | Framing tightness around subject |
+| `action_smoothness` | `--action-smoothness`| `0.65` | Camera exponential smoothing factor |
+| `action_zoom_max` | `--action-zoom-max` | `1.8` | Maximum AI zoom factor |
+| `action_padding` | `--action-padding` | `0.20` | Padding around detected ROI |
+| `bg_sub_enable` | `--bg-sub-enable` | `False` | Replace background with black (maximises subject contrast) |
+| `action_bottom_crop` | `--action-bottom-crop`| `0.0` | Exclude bottom N % of frame (manual, 0 = disabled) |
+| `action_auto_bottom_crop`| `--action-auto-bottom-crop`| `False` | Auto-detect bottom crop from ROI analysis |
+| `action_top_crop` | `--action-top-crop` | `0.0` | Exclude top N % of frame (manual, 0 = disabled) |
+| `action_auto_top_crop`| `--action-auto-top-crop`| `False` | Auto-detect top crop from ROI analysis |
+| `action_vertical_bias`| `--action-vertical-bias`| `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
+| `action_auto_vertical_bias`| `--action-auto-vertical-bias`| `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
+| `action_scene_type` | `--action-scene-type`| `""` | Manually force one of the 9 Continuous Scoring Matrix profiles: `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Overrides auto-detection. |
+| `action_auto_scene_type`| `--action-auto-scene-type`| `False` | Auto-detect scene type from content (overrides `--action-scene-type`). |
+| `action_smart_auto_crop` | `--smart-auto-crop`| `False` | 🧠 Smart Auto Crop — engine scans 60 frames and activates the optimal camera profile using a continuous scoring matrix of 9 scene types; resolves the face-priority ↔ floor-tracking contradiction automatically |
+| `reject_threshold` | `--reject-threshold`| `0` | Automatically move generated GIFs to the trash if their DMD Visibility Score is strictly below N% (0-100). Default: 0 (disabled). |
+| `dmd_visibility_score_enabled` | `N/A` | `False` | 🔬 DMD Visibility Score — simulates the proposed crop at target DMD resolution. (Implicitly activated by reject_threshold or let_me_handle_it) |
+| `let_me_handle_it` | `--let-me-handle-it`| `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction + DMD Visibility Score simultaneously |
+| `target_width` | `--target-width` | `128` | Output width in pixels (multi-panel tiling) |
+| `target_height` | `--target-height` | `32` | Output height in pixels (multi-panel tiling) |
+| `text_overlay_enabled` | `--text-overlay` | `False` | 💬 Burn a text label into the output GIF |
+| `text_content` | `--text-content` | `""` | Text string to render |
+| `text_font_size` | `--text-font-size` | `8` | Font size in pixels |
+| `text_color` | `--text-color` | `white` | Text colour (`white` / `yellow` / `red` / `green` / `blue` / hex) |
+| `text_position` | `--text-position` | `bottom_center`| One of 9 anchor positions |
+| `text_font_file` | `--text-font-file` | `HelvetiPixel.ttf`| Font file from `media/fonts/` |
+| `text_style` | `--text-style` | `outline` | Text rendering style: `none` / `bold` / `outline` / `shadow` |
+| `text_bg` | `--text-bg` | `False` | Draw a dark semi-transparent background box behind the text |
+| `text_bg_opacity` | `--text-bg-opacity`| `150` | Background box opacity 0-255 |
 
 ### `scroll_cycles` explained
 
