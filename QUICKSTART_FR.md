@@ -50,7 +50,19 @@ Cette commande va télécharger 5 GIFs correspondant à "arcade", puis les conve
 
 ---
 
-## 📝 4. Suivi et Logs (UI & CLI)
+## 🔠 4. Ajouter une superposition de texte rétro
+
+Vous pouvez facilement graver du texte (watermark, nom de joueur, score) directement dans le GIF de sortie. Par défaut, l'outil utilise une police rétro intégrée (`HelvetiPixel.ttf`).
+
+```bash
+python3 -m src.engine.conversion.cli gifs_MonGameplay --text-overlay --text-content "PLAYER 1" --text-color yellow --text-position top_left
+```
+
+*(Note : Dans le CLI, le dossier source `gifs_MonGameplay` doit être spécifié avant d'ajouter les paramètres de texte !)*
+
+---
+
+## 📝 5. Suivi et Logs (UI & CLI)
 
 L'interface graphique intègre désormais un **panneau de logs dynamique** (cliquez sur "📝 Show / Hide Logs").
 Vous y trouverez un menu déroulant pour régler le niveau de verbosité à la volée :
@@ -61,7 +73,7 @@ Si vous utilisez le CLI, vous pouvez obtenir le même niveau de détail complet 
 
 ---
 
-## 🤖 5. Découvrir les AI Iconic Moments
+## 🤖 6. Découvrir les AI Iconic Moments
 
 Vous avez une vidéo de gameplay ou un film de 10 minutes et vous souhaitez extraire les meilleurs segments de 3 secondes pour votre panneau LED sans avoir à tout regarder ?
 

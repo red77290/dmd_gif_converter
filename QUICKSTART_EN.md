@@ -50,7 +50,19 @@ This command will download 5 GIFs related to "arcade", and then automatically co
 
 ---
 
-## 📝 4. Monitoring and Logs (UI & CLI)
+## 🔠 4. Add a retro pixel-art text overlay
+
+You can easily burn text (watermarks, player names, scores) directly into the output GIF. By default, it uses a built-in retro pixel-art font (`HelvetiPixel.ttf`).
+
+```bash
+python3 -m src.engine.conversion.cli gifs_MyGameplay --text-overlay --text-content "PLAYER 1" --text-color yellow --text-position top_left
+```
+
+*(Note: In the CLI, the source folder `gifs_MyGameplay` must be specified before adding overlay parameters!)*
+
+---
+
+## 📝 5. Monitoring and Logs (UI & CLI)
 
 The graphical interface now features a **dynamic log panel** (click on "📝 Show / Hide Logs").
 There you will find a dropdown menu to adjust the verbosity level on the fly:
@@ -61,7 +73,7 @@ If you are using the CLI, you can get the exact same level of detail with the `-
 
 ---
 
-## 🤖 5. Discovering AI Iconic Moments
+## 🤖 6. Discovering AI Iconic Moments
 
 Have a 10-minute long gameplay video or movie and want to extract the absolute best 3-second segments for your LED panel without watching the whole thing? 
 
