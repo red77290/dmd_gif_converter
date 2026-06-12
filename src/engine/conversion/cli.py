@@ -142,6 +142,20 @@ def _build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--action-smoothness", type=float, default=DEFAULT_PARAMS["action_smoothness"], metavar="F")
     ag.add_argument("--action-zoom-max", type=float, default=DEFAULT_PARAMS["action_zoom_max"], metavar="F")
     ag.add_argument("--action-padding", type=float, default=DEFAULT_PARAMS["action_padding"], metavar="F")
+    ag.add_argument("--action-intro", type=float, default=DEFAULT_PARAMS["action_intro"], metavar="F",
+                    help="Establishing shot duration in seconds (default: 1.5).")
+    ag.add_argument("--action-bottom-crop", type=float, default=DEFAULT_PARAMS["action_bottom_crop"], metavar="F",
+                    help="Exclude bottom fraction of frame (manual, 0 = disabled).")
+    ag.add_argument("--action-auto-bottom-crop", action="store_true", default=DEFAULT_PARAMS["action_auto_bottom_crop"],
+                    help="Auto-detect bottom crop from ROI analysis.")
+    ag.add_argument("--action-top-crop", type=float, default=DEFAULT_PARAMS["action_top_crop"], metavar="F",
+                    help="Exclude top fraction of frame (manual, 0 = disabled).")
+    ag.add_argument("--action-auto-top-crop", action="store_true", default=DEFAULT_PARAMS["action_auto_top_crop"],
+                    help="Auto-detect top crop from ROI analysis.")
+    ag.add_argument("--action-vertical-bias", type=float, default=DEFAULT_PARAMS["action_vertical_bias"], metavar="F",
+                    help="Manual camera vertical shift (+1.0 = floor, -1.0 = ceiling).")
+    ag.add_argument("--action-auto-vertical-bias", action="store_true", default=DEFAULT_PARAMS["action_auto_vertical_bias"],
+                    help="Auto floor detect, overrides vertical bias.")
     ag.add_argument(
         "--bg-sub-enable", action="store_true", default=DEFAULT_PARAMS["bg_sub_enable"],
         help="Enable background subtraction (replaces background with black) (default: disabled).",
@@ -286,6 +300,27 @@ def _build_parser() -> argparse.ArgumentParser:
         "--text-bg-opacity", type=int, default=DEFAULT_PARAMS["text_bg_opacity"], metavar="N",
         help=f"Background box opacity 0-100 (default: {DEFAULT_PARAMS['text_bg_opacity']}).",
     )
+
+    # ── Advanced Positioning & Visual Effects ─────────────────────────────────
+    av = p.add_argument_group("Advanced Positioning & Visual Effects")
+    av.add_argument(
+        "--no-scroll", action="store_false", dest="scroll_enabled", default=DEFAULT_PARAMS["scroll_enabled"],
+        help="Disable automatic vertical scroll (enables manual crop mode).",
+    )
+    av.add_argument("--zoom", type=float, default=DEFAULT_PARAMS["zoom"], metavar="F",
+                    help="Scale multiplier before crop (manual mode).")
+    av.add_argument("--manual-x", type=int, default=DEFAULT_PARAMS["manual_x"], metavar="PX",
+                    help="Horizontal crop offset px (manual mode).")
+    av.add_argument("--manual-y", type=int, default=DEFAULT_PARAMS["manual_y"], metavar="PX",
+                    help="Vertical crop offset px (manual mode).")
+    av.add_argument("--hue-shift", type=float, default=DEFAULT_PARAMS["hue_shift"], metavar="F",
+                    help="Hue rotation in degrees.")
+    av.add_argument("--noise-reduction", type=float, default=DEFAULT_PARAMS["noise_reduction"], metavar="F",
+                    help="hqdn3d strength.")
+    av.add_argument("--film-grain", type=int, default=DEFAULT_PARAMS["film_grain"], metavar="N",
+                    help="Additive noise amount.")
+    av.add_argument("--vignette", action="store_true", default=DEFAULT_PARAMS["vignette"],
+                    help="Apply edge darkening vignette.")
 
     return p
 
