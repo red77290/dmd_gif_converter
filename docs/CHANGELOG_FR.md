@@ -27,3 +27,27 @@
 - **🏗️ Refonte Architecturale** : Séparation des scripts monolithiques en un paquet `src/` modulaire (`auto_action`, `converter`, `ui`) pour faciliter le débogage et la maintenance.
 - **🤖 Let me handle it** : Implémentation du système de score de visibilité pour un cadrage optimal.
 - **👁️ DMD Quality Scoring & Gestion Intelligente** : L'interface sépare désormais les fichiers en attente des fichiers convertis. Chaque GIF généré reçoit un Score de Qualité (0-100%). Utilisez l'**Assistant de Nettoyage (Cleanup Assistant)** pour supprimer instantanément les mauvaises conversions !
+
+## Nouveautés de la v4.0.0
+- **🏗️ UI et Moteur Modulaires** : Refonte de l'interface graphique utilisant des Mixins à héritage multiple pour un code plus propre.
+- **🎥 Suivi Fluide** : Correction des tremblements de caméra en lissant les sauts d'anticipation et en préservant le suivi X/Y lorsque le score de visibilité échoue.
+
+## Nouveautés de la v3.1.0
+- **🔍 Recherche de GIFs Étendue** : Augmentation de la limite de quantité de recherche de GIFs à 300.
+- **🔄 Actualisation des Dossiers** : Ajout de la fonctionnalité de rafraîchissement des dossiers pour réanalyser et mettre à jour les fichiers dans l'UI sans redémarrer.
+
+## Nouveautés de la v3.0.0
+- **🌐 Recherche de GIFs Intégrée** : Introduction de la recherche pour télécharger des GIFs depuis DuckDuckGo, Tenor et Giphy directement depuis l'interface.
+- **🚥 Simulation LED** : Ajout de la simulation de pixels LED pour la prévisualisation DMD, avec option pour voir exactement le rendu sur le matériel.
+
+## Nouveautés de la v2.1.0
+- **📐 Recadrage Avancé** : Ajout des fonctionnalités de recadrage automatique pour les limites supérieures et inférieures de la caméra d'action.
+- **⚙️ Configuration Par-GIF** : Implémentation de la configuration indépendante par fichier dans la liste de traitement par lots.
+
+## Nouveautés de la v2.0.0
+- **🪄 Magie du Texte** : Ajout du support pour la superposition de texte directement lors de la conversion GIF.
+- **🎨 Smart Color Boost** : Implémentation du Smart Color Boost pour l'analyse colorimétrique gérée par l'IA, améliorant considérablement les scènes sombres.
+- **👤 Soustraction d'Arrière-plan** : Ajout du support pour supprimer les arrière-plans.
+
+## Nouveautés de la v1.0.0
+- **🚀 Lancement Initial** : Moteur de conversion de base, interface graphique, profils de colorimétrie HUB75, défilement ping-pong, et protections anti-transparence.
