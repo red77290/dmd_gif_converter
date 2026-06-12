@@ -371,16 +371,16 @@ class TrackingEngine(ITracker):
 
         if clip_mode == "full_body_head":
             # Adaptive eye targeting using aspect-ratio formula
-            # Eye center goes down as aspect gets taller (less head proportion)
-            # clamp(0.32 / (aspect + 0.6), 0.08, 0.22)
             eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
+            head_frac = 0.10  # default 10% of body height
             
-            # Allow manual overrides if defined via config sliders
-            manual_eye_offset = getattr(self.cfg, "face_eye_offset", 0.45)
-            # Map slider (0.3-0.6) back to pct of body, but adaptive is preferred
-            # We'll use the adaptive one as the baseline.
+            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
+                if getattr(self.cfg.scene_profile, "face_eye_offset", None) is not None:
+                    eye_target_pct = self.cfg.scene_profile.face_eye_offset
+                if getattr(self.cfg.scene_profile, "face_head_frac", None) is not None:
+                    head_frac = self.cfg.scene_profile.face_head_frac
             
-            roi_h   = max(8, int(rh * 0.10))  # 10% of body height is the eye zone
+            roi_h   = max(8, int(rh * head_frac))
             roi_top = max(0, int(rh * eye_target_pct - roi_h / 2.0))
             return (rx, ry + roi_top, rw, roi_h)
 
