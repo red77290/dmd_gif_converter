@@ -260,27 +260,10 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     # Default is disabled, so this block has zero effect unless explicitly enabled.
     auto_action_enabled = bool(p.get("auto_action_enabled", False))
     if auto_action_enabled:
-        cfg = AutoActionConfig(
-            detector=str(p.get("action_detector", "person") or "person"),
-            strength=float(p.get("action_strength", 0.65)),
-            smoothness=float(p.get("action_smoothness", 0.98)),
-            zoom_max=float(p.get("action_zoom_max", 1.8)),
-            padding=float(p.get("action_padding", 0.20)),
-            intro_duration=float(p.get("action_intro", 1.5)),
-            bg_sub_enable=bool(p.get("bg_sub_enable", False)),
-            bottom_crop_pct=float(p.get("action_bottom_crop", 0.0)),
-            auto_bottom_crop=bool(p.get("action_auto_bottom_crop", False)),
-            top_crop_pct=float(p.get("action_top_crop", 0.0)),
-            auto_top_crop=bool(p.get("action_auto_top_crop", False)),
-            vertical_bias=float(p.get("action_vertical_bias", 0.0)),
-            auto_vertical_bias=bool(p.get("action_auto_vertical_bias", False)),
-            smart_auto_crop=bool(p.get("action_smart_auto_crop", False)),
-            auto_pillarbox_crop=bool(p.get("action_auto_pillarbox", False)),
-            dynamic_scene_detection=bool(p.get("dynamic_scene_detection", False)),
+        cfg = AutoActionConfig.from_params(
+            p,
             start_s=float(start_s) if start_s is not None else None,
-            end_s=float(end_s) if end_s is not None else None,
-            target_width=target_width, # Pass target dimensions to auto_action
-            target_height=target_height, # Pass target dimensions to auto_action
+            end_s=float(end_s) if end_s is not None else None
         )
         ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg, cancel_event=cancel_event)
         if ok_pre and pre_src:
@@ -727,53 +710,11 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         getattr(logger, level)(msg)
         if callback:
             callback(msg, level)
-    action_cfg = AutoActionConfig(
-        detector=str(p.get("detector", "person") or "person"),
-        strength=float(p.get("strength", 0.65)),
-        smoothness=float(p.get("smoothness", 0.98)),
-        zoom_max=float(p.get("zoom_max", 1.8)),
-        padding=float(p.get("padding", 0.20)),
-        intro_duration=float(p.get("intro_duration", 1.5)),
-        bg_sub_enable=bool(p.get("bg_sub_enable", False)),
-        bottom_crop_pct=float(p.get("bottom_crop_pct", 0.0)),
-        auto_bottom_crop=bool(p.get("auto_bottom_crop", False)),
-        top_crop_pct=float(p.get("top_crop_pct", 0.0)),
-        auto_top_crop=bool(p.get("auto_top_crop", False)),
-        vertical_bias=float(p.get("vertical_bias", 0.0)),
-        auto_vertical_bias=bool(p.get("auto_vertical_bias", False)),
-        smart_auto_crop=bool(p.get("smart_auto_crop", False)),
-        auto_pillarbox_crop=bool(p.get("auto_pillarbox_crop", False)),
-        scene_type=str(p.get("scene_type", "")),
-        auto_scene_type=bool(p.get("auto_scene_type", False)),
-        dynamic_scene_detection=bool(p.get("dynamic_scene_detection", False)),
-        target_width=p["target_width"],
-        target_height=p["target_height"],
-    )
+    action_cfg = AutoActionConfig.from_params(p)
 
     def _preprocess(filename):
         src = os.path.join(str(folder_in), filename)
-        cfg = AutoActionConfig(
-            detector=action_cfg.detector,
-            strength=action_cfg.strength,
-            smoothness=action_cfg.smoothness,
-            zoom_max=action_cfg.zoom_max,
-            padding=action_cfg.padding,
-            intro_duration=action_cfg.intro_duration,
-            bg_sub_enable=action_cfg.bg_sub_enable,
-            bottom_crop_pct=action_cfg.bottom_crop_pct,
-            auto_bottom_crop=action_cfg.auto_bottom_crop,
-            top_crop_pct=action_cfg.top_crop_pct,
-            auto_top_crop=action_cfg.auto_top_crop,
-            vertical_bias=action_cfg.vertical_bias,
-            auto_vertical_bias=action_cfg.auto_vertical_bias,
-            smart_auto_crop=action_cfg.smart_auto_crop,
-            auto_pillarbox_crop=action_cfg.auto_pillarbox_crop,
-            scene_type=action_cfg.scene_type,
-            auto_scene_type=action_cfg.auto_scene_type,
-            dynamic_scene_detection=action_cfg.dynamic_scene_detection,
-            target_width=action_cfg.target_width,
-            target_height=action_cfg.target_height,
-        )
+        cfg = action_cfg.copy()
         if cancel_event and cancel_event.is_set():
             return filename, src, None
 

@@ -42,26 +42,7 @@ class FFmpegConverter(IConverter):
         # --- 1. Preprocessing (Auto Action) ---
         if p.get("auto_action_enabled"):
             log(f"[{filename}] Auto action ON: preprocessing video...", "info")
-            cfg = AutoActionConfig()
-            cfg.detector = p.get("action_detector", "person")
-            cfg.smoothness = p.get("action_smoothness", 0.98)
-            cfg.zoom_max = p.get("action_zoom_max", 2.0)
-            cfg.padding = p.get("action_padding", 0.20)
-            cfg.intro_duration = float(p.get("action_intro", 1.5))
-            cfg.bg_sub_enable = p.get("bg_sub_enable", False)
-
-            cfg.bottom_crop_pct = p.get("action_bottom_crop", 0.0)
-            cfg.auto_bottom_crop = p.get("action_auto_bottom_crop", False)
-            cfg.top_crop_pct = p.get("action_top_crop", 0.0)
-            cfg.auto_top_crop = p.get("action_auto_top_crop", False)
-            cfg.vertical_bias = p.get("action_vertical_bias", 0.0)
-            cfg.auto_vertical_bias = p.get("action_auto_vertical_bias", False)
-            cfg.scene_type = p.get("action_scene_type", "")
-            cfg.auto_scene_type = p.get("action_auto_scene_type", False)
-            cfg.smart_auto_crop = p.get("action_smart_auto_crop", False)
-            
-            cfg.target_width = target_width
-            cfg.target_height = target_height
+            cfg = AutoActionConfig.from_params(p)
 
             cfg.start_s = start_s
             cfg.end_s = end_s
