@@ -299,7 +299,8 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
 
     # 2. Fill Ratio -> Closeups / Wide shots
     if fill_ratio >= 0.50:
-        scores[SceneType.TALKING_CLOSEUP] += 3.0
+        if body_aspect <= 1.4:
+            scores[SceneType.TALKING_CLOSEUP] += 3.0
         scores[SceneType.TALKING_MEDIUM] += 1.0
     elif fill_ratio >= 0.25:
         scores[SceneType.TALKING_MEDIUM] += 2.0
