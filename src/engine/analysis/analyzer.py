@@ -71,6 +71,8 @@ class VideoAnalyzer:
                 if _sp is not None:
                     self.scene_profile = _sp
                     self.cfg.scene_type = _sp.scene_type
+                    self.cfg.scene_profile = _sp
+                    self.cfg.face_clip_mode = _sp.face_clip_mode
                     if _sp.platformer_mode:
                         self.cfg.platformer_mode = True
 
