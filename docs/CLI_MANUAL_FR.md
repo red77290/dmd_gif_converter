@@ -1,5 +1,19 @@
 # Manuel CLI & Paramètres
 
+Vous préférez utiliser le script sans interface ? Voici les commandes les plus puissantes.
+*Placez le script à côté de dossiers nommés `gifs_*` (ex: `gifs_Arcade/`)*.
+
+```bash
+# 1. Télécharger des GIFs et les convertir en mode tout-automatique !
+python3 -m src.engine.conversion.cli --search-keyword "arcade" --let-me-handle-it
+
+# 2. Convertir un dossier avec la caméra cinématique par IA
+python3 -m src.engine.conversion.cli gifs_Arcade --auto-action-enabled
+
+# 3. Ajouter un texte en pixel-art avec bordure sur une vidéo
+python3 -m src.engine.conversion.cli input.mp4 --text-overlay --text-content "PLAYER 1" --text-color yellow
+```
+
 ## ⚙️ Paramètres
 
 Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans l'interface**, et via **flags `--arg` en ligne de commande**.

@@ -1,5 +1,19 @@
 # CLI Manual & Parameters
 
+Want to use the tool without the GUI? Here are the most powerful commands.
+*Place the script next to folders named `gifs_*` (e.g. `gifs_Arcade/`)*.
+
+```bash
+# 1. Download GIFs and fully auto-convert them!
+python3 -m src.engine.conversion.cli --search-keyword "arcade" --let-me-handle-it
+
+# 2. Process specific folders with cinematic AI framing
+python3 -m src.engine.conversion.cli gifs_Arcade --auto-action-enabled
+
+# 3. Add a retro pixel-art text overlay to a video
+python3 -m src.engine.conversion.cli input.mp4 --text-overlay --text-content "PLAYER 1" --text-color yellow
+```
+
 ## ⚙️ Parameters
 
 All parameters are available as **sliders/drop-downs in the UI** and as **`--arg` flags on the CLI**.
