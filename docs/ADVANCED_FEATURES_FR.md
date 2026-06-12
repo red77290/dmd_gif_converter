@@ -180,12 +180,33 @@ Plutôt qu'un simple arbre de décision IF/ELSE, chaque image rapporte des point
 3. **Variance de mouvement (`var_x`, `var_y`)** : Le sujet bouge-t-il rapidement à l'horizontale (comme un jeu de plateforme) ou reste-t-il relativement fixe (comme un visage qui parle) ?
 4. **Stabilité du sol** : Y a-t-il un niveau de sol constant détecté par le tracker EMA ?
 
-Le profil de scène avec le score total le plus élevé à la fin de la phase d'analyse dicte le comportement final de la caméra :
-- **`platformer`** : Active le suivi du sol et le décalage horizontal.
-- **`talking_closeup`** : Désactive le suivi du sol, active le crop supérieur et la marge face-priority.
-- **`action_horizontal`** : Utilise un centrage standard avec des marges plus larges.
+Le profil de scène avec le score total le plus élevé dicte le comportement final de la caméra. Il existe **9 types de scènes possibles** dans le système, que vous pouvez également forcer manuellement via la CLI en utilisant l'argument `--scene-type` :
+
+#### 🎮 Profils de Jeu & Action
+- **`platformer`** : Pour les jeux 2D avec un sol stable (ex: Mario, Sonic). Active le suivi automatique du sol pour verrouiller la caméra sur le terrain. La caméra pousse légèrement vers le bas pour s'assurer que la plateforme est toujours visible, et ne dérivera pas vers le haut pendant les sauts.
+- **`fighting_2d`** : Pour les jeux de combat 1v1 (ex: Street Fighter). Utilise un suivi plus serré (force 0.70) et des mouvements de caméra plus rapides (fluidité 0.80) pour suivre les esquives rapides.
+- **`action_horizontal`** : Pour les jeux à défilement horizontal (beat 'em ups). Active le biais vertical automatique pour maintenir le niveau du sol cohérent pendant que la caméra défile vers la droite.
+- **`action_moving`** : Pour les RPG ou les jeux où le sujet se déplace librement dans toutes les directions. Utilise un suivi fluide standard sans verrouiller le sol.
+- **`wide_shot`** : Pour les scènes avec de petits sujets et beaucoup d'arrière-plan. Utilise un suivi très lâche (force 0.40) et une fluidité élevée (0.90) pour éviter que la caméra ne tressaute de manière agressive.
+
+#### 👤 Profils Humains & Dialogue
+- **`talking_closeup`** : Pour les animes, vlogs ou dialogues où le visage remplit le cadre. Active le **Mode Priorité Visage**. La caméra ignore le bas du corps et se verrouille rigidement sur la région des yeux (les 45% supérieurs de la tête) pour que le visage ne rebondisse pas pendant la prise de parole.
+- **`talking_medium`** : Pour les présentateurs de journaux ou les plans taille-tête. Active le Mode Priorité Visage, calculant la tête comme les 35% supérieurs de la boîte englobante du corps visible.
+- **`full_body_tall`** : Pour les personnages debout ou les grands sprites d'anime. Active le Mode Priorité Visage, calculant la tête comme les 22% supérieurs du corps, ce qui garantit que le visage est centré plutôt que de couper le sujet aux épaules.
+- **`full_body_medium`** : Suivi générique standard pour les sujets en pied sans Priorité Visage. Utilise des marges de suivi plus serrées.
 
 Vous pouvez inspecter exactement comment l'IA prend sa décision en consultant le tableau `=== Scene Classification Scoreboard ===` affiché dans le panneau de logs de l'interface pour chaque vidéo traitée.
+
+### 🛠️ Forçage Manuel via CLI
+Si vous souhaitez contourner la Matrice de Score Continue et forcer explicitement l'un des 9 profils, vous pouvez utiliser l'argument `--scene-type`. Cela désactive la phase d'analyse de l'IA et applique immédiatement les règles de suivi du profil choisi :
+
+```bash
+# Force le profil Platformer (verrouille la caméra sur le sol)
+python3 -m src.engine.conversion.cli gifs_Sonic --scene-type "platformer"
+
+# Force le profil Gros plan avec Priorité Visage
+python3 -m src.engine.conversion.cli input.mp4 --scene-type "talking_closeup"
+```
 
 ---
 
