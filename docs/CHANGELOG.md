@@ -27,3 +27,27 @@
 - **🏗️ Under-the-hood Refactoring**: Massive architectural overhaul splitting the monolithic scripts into a modular `src/` package (`auto_action`, `converter`, `ui`) for easier debugging and maintainability.
 - **🤖 Let me handle it**: Now explicitly enforces visibility scoring for optimal framing.
 - **👁️ DMD Quality Scoring & Smart Conversion**: The UI now separates pending files from converted files. Every generated GIF receives a Quality Score (0-100%). Use the **Cleanup Assistant** to instantly trash bad conversions!
+
+## What is New in v4.0.0?
+- **🏗️ Modular UI & Engine**: Refactored the UI application to use Multiple Inheritance Mixins for cleaner logic.
+- **🎥 Smooth Tracking**: Fixed camera tracking jitter by smoothing look-ahead jumps and preserving X/Y tracking when visibility scoring fails.
+
+## What is New in v3.1.0?
+- **🔍 GIF Search Expansion**: Enhanced GIF search quantity limit to 300.
+- **🔄 Folder Refresh**: Added folder refresh functionality to rescan and update files in the UI without restarting.
+
+## What is New in v3.0.0?
+- **🌐 Built-in GIF Search**: Introduce GIF Search functionality to download GIFs from DuckDuckGo, Tenor, and Giphy directly from the UI.
+- **🚥 LED Simulation**: Added LED pixel simulation feature for DMD preview with toggle option to see exactly how it will look on hardware.
+
+## What is New in v2.1.0?
+- **📐 Advanced Crop**: Added auto crop features for top and bottom boundaries in the action camera.
+- **⚙️ Per-GIF Configuration**: Implement Per-GIF configuration feature for independent settings per file in the batch list.
+
+## What is New in v2.0.0?
+- **🪄 Text Magic**: Added support for text overlay directly in GIF conversion.
+- **🎨 Smart Color Boost**: Implemented Smart Color Boost for AI-driven colorimetry analysis, drastically improving dark/night scenes.
+- **👤 Background Subtraction**: Added support to remove backgrounds.
+
+## What is New in v1.0.0?
+- **🚀 Initial Release**: Base converter engine, GUI, HUB75 colorimetry profiles, ping-pong scrolling, and anti-transparency safeguards.
