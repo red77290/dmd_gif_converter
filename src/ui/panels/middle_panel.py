@@ -61,7 +61,7 @@ class MiddlePanel(ctk.CTkFrame):
         self._target_preset_menu = ctk.CTkOptionMenu(
             res_frame,
             variable=self.app_state.v_target_preset,
-            values=["128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "Custom"],
+            values=["128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "256x64 (2x2)", "Custom"],
             command=self._on_target_preset_change,
             height=24
         )
