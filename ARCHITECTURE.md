@@ -701,7 +701,7 @@ sequenceDiagram
 
 ### `AutoActionConfig` (dataclass)
 
-The configuration object passed through the entire Auto Action layer. Every parameter is explicitly typed with a safe default.
+The configuration object passed through the entire Auto Action layer. Every parameter is explicitly typed with a safe default. To prevent spaghetti instantiation, this class acts as the single source of truth for parameter mapping via its factory methods (`from_params` for dictionary inputs and `from_app_state` for UI bindings).
 
 ```python
 @dataclass
@@ -719,6 +719,15 @@ class AutoActionConfig:
     multi_roi_fusion_enabled: bool = True # fuse multiple detections
     dmd_readability_score_enabled: bool = True  # reject blurry camera moves
     # …and 15+ more fields (see config.py for full reference)
+
+    @classmethod
+    def from_params(cls, p: dict, **overrides) -> "AutoActionConfig":
+        ...
+    @classmethod
+    def from_app_state(cls, s, **overrides) -> "AutoActionConfig":
+        ...
+    def to_params_dict(self) -> dict:
+        ...
 ```
 
 ### `CamRect` — `Tuple[float, float, float, float]`

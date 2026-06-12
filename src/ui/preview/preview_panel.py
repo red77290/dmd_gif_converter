@@ -608,31 +608,7 @@ class PreviewPanel(ctk.CTkFrame):
         self._btn_auto.configure(state="disabled", text="⏳ Auto…")
         start_s, end_s = self._get_trim()
         s = self.app_state
-        cfg = AutoActionConfig(
-            detector=s.v_action_detector.get(),
-            strength=float(s.v_action_strength.get()),
-            smoothness=float(s.v_action_smoothness.get()),
-            zoom_max=float(s.v_action_zoom_max.get()),
-            padding=float(s.v_action_padding.get()),
-            intro_duration=float(s.v_action_intro_duration.get()),
-            bg_sub_enable=bool(s.v_action_bg_sub_enable.get()),
-            bottom_crop_pct=float(s.v_action_bottom_crop_pct.get()),
-            auto_bottom_crop=bool(s.v_action_auto_bottom_crop.get()),
-            top_crop_pct=float(s.v_action_top_crop_pct.get()),
-            auto_top_crop=bool(s.v_action_auto_top_crop.get()),
-            vertical_bias=float(s.v_action_vertical_bias.get()),
-            auto_vertical_bias=bool(s.v_action_auto_vertical_bias.get()),
-            scene_type=s.v_action_scene_type.get(),
-            auto_scene_type=bool(s.v_action_auto_scene_type.get()),
-            smart_auto_crop=bool(s.v_action_smart_auto_crop.get()),
-            auto_pillarbox_crop=bool(s.v_action_auto_pillarbox_crop.get()),
-            dmd_visibility_score_enabled=bool(s.v_action_dmd_visibility_score_enabled.get()),
-            dmd_readability_score_enabled=bool(s.v_action_dmd_readability_score_enabled.get()),
-            dynamic_scene_detection=bool(s.v_action_dynamic_scene_detection.get()),
-            auto_detector_fallback=bool(s.v_action_auto_detector_fallback.get()),
-            start_s=start_s, end_s=end_s,
-            target_width=s.v_target_width.get(), target_height=s.v_target_height.get(),
-        )
+        cfg = AutoActionConfig.from_app_state(s, start_s=start_s, end_s=end_s)
         threading.Thread(target=self._generate_auto_preview,
                          args=(src, cfg), daemon=True).start()
 
@@ -936,25 +912,6 @@ class PreviewPanel(ctk.CTkFrame):
             "noise_reduction": s.v_noise_reduction.get(),
             "film_grain":      int(s.v_film_grain.get()),
             "vignette":        s.v_vignette.get(),
-            "auto_action_enabled":           s.v_action_enabled.get(),
-            "action_detector":               s.v_action_detector.get(),
-            "action_strength":               s.v_action_strength.get(),
-            "action_smoothness":             s.v_action_smoothness.get(),
-            "action_zoom_max":               s.v_action_zoom_max.get(),
-            "action_padding":                s.v_action_padding.get(),
-            "action_intro":                  s.v_action_intro_duration.get(),
-            "action_bottom_crop":            s.v_action_bottom_crop_pct.get(),
-            "action_auto_bottom_crop":       s.v_action_auto_bottom_crop.get(),
-            "action_top_crop":               s.v_action_top_crop_pct.get(),
-            "action_auto_top_crop":          s.v_action_auto_top_crop.get(),
-            "action_vertical_bias":          s.v_action_vertical_bias.get(),
-            "action_auto_vertical_bias":     s.v_action_auto_vertical_bias.get(),
-            "action_smart_auto_crop":        s.v_action_smart_auto_crop.get(),
-            "action_auto_pillarbox":         s.v_action_auto_pillarbox_crop.get(),
-            "bg_sub_enable":                 s.v_action_bg_sub_enable.get(),
-            "dynamic_scene_detection":       s.v_action_dynamic_scene_detection.get(),
-            "dmd_visibility_score_enabled":  s.v_action_dmd_visibility_score_enabled.get(),
-            "dmd_readability_score_enabled": s.v_action_dmd_readability_score_enabled.get(),
             "target_width":    s.v_target_width.get(),
             "target_height":   s.v_target_height.get(),
             "text_overlay_enabled": s.v_text_overlay_enabled.get(),
@@ -971,10 +928,19 @@ class PreviewPanel(ctk.CTkFrame):
             "auto_color_enabled": s.v_auto_color_enabled.get(),
             "log_level": getattr(self.winfo_toplevel(), "v_log_level", tk.StringVar(value="INFO")).get(),
         }
+
+        # Inject all auto-action configuration parameters
+        from src.engine.config.auto_action_config import AutoActionConfig
+        action_cfg = AutoActionConfig.from_app_state(s)
+        params.update(action_cfg.to_params_dict())
+        # The main enable flag is not part of AutoActionConfig itself
+        params["auto_action_enabled"] = s.v_action_enabled.get()
         if s.v_let_me_handle_it.get():
             params.update({
                 "auto_color_enabled": True, "auto_action_enabled": True,
                 "action_smart_auto_crop": True, "action_auto_pillarbox": True,
+                "action_auto_scene_type": True, "action_auto_strength": True,
+                "action_auto_smoothness": True, "action_auto_detector_fallback": True,
                 "dmd_visibility_score_enabled": True, "dmd_readability_score_enabled": True,
             })
         return params
