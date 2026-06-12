@@ -313,7 +313,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     # ── Scene classification (auto_scene_type or smart_auto_crop) ────────────
     scene_profile = None
-    _auto_scene = getattr(cfg, "auto_scene_type", False) or getattr(cfg, "smart_auto_crop", False)
+    _auto_scene = getattr(cfg, "auto_scene_type", False)
     if _auto_scene:
         from src.engine.analysis.scene_types import classify_scene
         scene_signals = {
