@@ -79,7 +79,7 @@ class SceneProfile:
     face_priority: bool          # enable face-aware camera positioning
     face_clip_mode: str          # "none" | "closeup" | "full_body_head"
     face_head_frac: float        # head height as fraction of body bbox
-    face_eye_offset: float       # eye center as fraction from top of head
+    face_eye_offset: Optional[float]  # eye center as fraction from top of head
     platformer_mode: bool        # lock camera to stable floor
     auto_vertical_bias: bool     # enable asymmetric floor EMA
     suggested_strength: float    # tracking tightness (0–1)
@@ -108,7 +108,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=True,
         face_clip_mode="full_body_head",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.55,
@@ -120,7 +120,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=True,
         face_clip_mode="full_body_head",
         face_head_frac=0.35,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.55,
@@ -132,7 +132,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.65,
@@ -144,7 +144,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=True,
         auto_vertical_bias=True,
         suggested_strength=0.65,
@@ -156,7 +156,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.70,
@@ -168,7 +168,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=True,
         suggested_strength=0.65,
@@ -180,7 +180,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.40,
@@ -192,7 +192,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.65,
@@ -204,7 +204,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.60,
@@ -216,7 +216,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.0,      # Lock camera to center
@@ -228,7 +228,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.30,     # Slight tracking but mostly centered
@@ -240,7 +240,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=False,
         face_clip_mode="none",
         face_head_frac=0.22,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.0,
@@ -299,7 +299,7 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
 
     # 2. Fill Ratio -> Closeups / Wide shots
     if fill_ratio >= 0.50:
-        if body_aspect <= 1.4:
+        if body_aspect <= 1.4 and body_aspect >= 0.85:
             scores[SceneType.TALKING_CLOSEUP] += 3.0
         scores[SceneType.TALKING_MEDIUM] += 1.0
     elif fill_ratio >= 0.25:
@@ -316,6 +316,13 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.MENU_STATIC] -= 2.0
     elif tall_ratio >= 0.35 and body_aspect > 1.2:
         scores[SceneType.FIGHTING_2D] += 1.0
+        
+    # 3b. Wide Aspect -> Fighting / Action (not a single face)
+    if body_aspect < 0.85:
+        scores[SceneType.TALKING_CLOSEUP] -= 3.0
+        scores[SceneType.ACTION_HORIZONTAL] += 1.0
+        if x_variance >= 0.02:
+            scores[SceneType.FIGHTING_2D] += 2.0
 
     # 4. X-Variance -> Movement / Fighting
     if x_variance >= 0.05:
