@@ -18,6 +18,7 @@ Auto-detection (enabled by ``auto_scene_type`` or ``smart_auto_crop``)::
 
 from dataclasses import dataclass
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class SceneProfile:
     auto_vertical_bias: bool     # enable asymmetric floor EMA
     suggested_strength: float    # tracking tightness (0–1)
     suggested_smoothness: float  # camera smoothing (0–0.98)
-    max_zoom_override: float | None = None # override for cfg.zoom_max
+    max_zoom_override: Optional[float] = None # override for cfg.zoom_max
 
 
 # ── Profile presets (one per scene type) ─────────────────────────────────────
