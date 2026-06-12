@@ -112,16 +112,12 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
         
-        if _platformer:
-            # Platformers: the floor is sacred. Even if the head is cropped (due to jumps or tall bounding boxes), 
-            # keep the camera anchored to the floor to prevent extreme jitter from bounding box height fluctuations.
-            cy = cy_floor
+        # Keep head+hair visible over floor, even in platformer mode.
+        # If the sprite is larger than the screen, prioritize the top of the character.
+        if (cy_floor - crop_h / 2.0) > ideal_top:
+            cy = ideal_top + crop_h / 2.0
         else:
-            # Auto-floor but not platformer: Keep head+hair visible over floor.
-            if (cy_floor - crop_h / 2.0) > ideal_top:
-                cy = ideal_top + crop_h / 2.0
-            else:
-                cy = cy_floor
+            cy = cy_floor
     else:
         # Standard generic tracking (e.g. top-down games like Zelda).
         # Simply apply vertical bias. We do NOT force pin the camera to the top of the bounding box,

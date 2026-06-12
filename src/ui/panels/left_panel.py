@@ -231,10 +231,14 @@ class LeftPanel(ctk.CTkFrame):
         dim_f = ctk.CTkFrame(self._filters_frame, fg_color="transparent")
         dim_f.pack(fill="x")
         
-        self._min_w_entry = ctk.CTkEntry(dim_f, textvariable=self.app_state.v_search_min_w, placeholder_text="Min W", width=55, height=24)
-        self._min_w_entry.pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(dim_f, text="Min res:", font=ctk.CTkFont(size=11), text_color="#888899").pack(side="left", padx=(0, 4))
         
-        self._min_h_entry = ctk.CTkEntry(dim_f, textvariable=self.app_state.v_search_min_h, placeholder_text="Min H", width=55, height=24)
+        self._min_w_entry = ctk.CTkEntry(dim_f, textvariable=self.app_state.v_search_min_w, width=40, height=24)
+        self._min_w_entry.pack(side="left")
+        
+        ctk.CTkLabel(dim_f, text="x", font=ctk.CTkFont(size=11), text_color="#888899").pack(side="left", padx=(2, 2))
+        
+        self._min_h_entry = ctk.CTkEntry(dim_f, textvariable=self.app_state.v_search_min_h, width=40, height=24)
         self._min_h_entry.pack(side="left", padx=(0, 4))
         
         self._ratio_menu = ctk.CTkOptionMenu(
