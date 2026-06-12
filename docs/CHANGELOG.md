@@ -1,6 +1,6 @@
 # DMD GIF Converter — Changelog
 
-## What is New in v6.2.0?
+## What is New in v6.3.0?
 - **📊 Continuous Scoring Matrix**: Scene detection (Auto Action) no longer relies on a rigid waterfall model. It uses a dynamic, continuous scoring matrix to identify the optimal camera profile (e.g., Platformer, Talking Closeup, Action). The scoreboard is fully visible in the UI logs.
 - **🛡️ Auto Detector Fallback (Person → Hybrid)**: When tracking mixed content, if the primary `person` detector fails on a close-up or non-human subject, the engine can now instantly fall back to the `hybrid` detector mid-scene or pre-scan, ensuring a perfect cinematic shot without giving up.
 - **🎯 `FIGHTING_2D` Matrix Fix**: Fixed an issue where the Scoring Matrix heavily biased live-action full-body horizontal motion (like panning in a movie) towards the `fighting_2d` preset instead of `action_moving` or `full_body_tall`.

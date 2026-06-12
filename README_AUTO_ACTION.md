@@ -1,4 +1,4 @@
-# Auto Action Framing (v6.2.0)
+# Auto Action Framing (v6.3.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
@@ -25,7 +25,7 @@ It creates an intermediate video that follows action/person areas at the target 
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
 
-**v6.2.0 improvements:**
+**v6.3.0 improvements:**
 - Continuous Scoring Matrix dynamically selects the optimal camera profile instead of relying on a rigid waterfall model.
 - Complete thread-safety for OpenCV C-level stderr suppression.
 - **Close-up hair detection**: The tracker now detects close-up shots (`roi_h > 40 % of frame height`) and clips the detection zone to skip the top 25 % (hair) and keep the 35 % below (eyes). Prevents camera drift toward forehead/hair on anime-style content.

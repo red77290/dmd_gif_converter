@@ -1,6 +1,6 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
-## Nouveautés de la v6.2.0
+## Nouveautés de la v6.3.0
 - **📊 Matrice de Score Continue** : La détection de scène (Auto Action) ne repose plus sur un arbre en cascade rigide. Elle utilise désormais une matrice de score dynamique et continue pour identifier le profil de caméra optimal (ex: Platformer, Talking Closeup, Action). Le tableau des scores est désormais entièrement visible dans les logs de l'interface.
 - **🛡️ Détecteur de Secours Auto (Person → Hybrid)** : Lors du suivi de contenus mixtes, si le détecteur principal `person` échoue sur un très gros-plan ou un sujet non-humain, le moteur peut désormais basculer instantanément sur le détecteur `hybrid` en plein milieu d'une scène ou lors du pré-scan, garantissant un suivi cinématique parfait sans jamais abandonner.
 - **🎯 Correction Matrice `FIGHTING_2D`** : Correction d'un problème où la matrice de score favorisait trop lourdement le préréglage `fighting_2d` pour les scènes de films où un personnage de taille normale se déplace horizontalement, au lieu de choisir `action_moving` ou `full_body_tall`.
