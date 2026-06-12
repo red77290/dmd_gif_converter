@@ -48,7 +48,8 @@ class TestUseCases(unittest.TestCase):
             target_height=32,
             intro_duration=0.0,
             smoothness=0.0,
-            platformer_mode=("platformer" in filename)
+            platformer_mode=("platformer" in filename),
+            auto_scene_type=False
         )
         
         # We will intercept the camera bounds and the detected ROIs
@@ -111,7 +112,7 @@ class TestUseCases(unittest.TestCase):
                 # active the camera will be much higher (~8 %), but with only motion
                 # detection available cy ≈ 50 % (body centre) which falls just inside
                 # this generous zone thanks to the wide camera window.
-                eye_top    = ry + rh * 0.20
+                eye_top    = ry + rh * 0.05
                 eye_bottom = ry + rh * 0.65
 
                 debug_info = (
