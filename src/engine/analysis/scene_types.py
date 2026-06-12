@@ -312,6 +312,8 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
     if tall_ratio >= 0.70 and body_aspect > 1.4:
         scores[SceneType.FULL_BODY_TALL] += 3.0
         scores[SceneType.FIGHTING_2D] += 0.5
+        scores[SceneType.PLATFORMER] -= 3.0
+        scores[SceneType.MENU_STATIC] -= 2.0
     elif tall_ratio >= 0.35 and body_aspect > 1.2:
         scores[SceneType.FIGHTING_2D] += 1.0
 
