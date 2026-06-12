@@ -274,7 +274,7 @@ class TestSmartAutoCropDecision(unittest.TestCase):
 
         mock_det = MagicMock()
         # ROI tall: ry=0, rh=420 (>> 0.80 * dmd_crop_h=80)
-        rois = [(10 + (i % 20), 0, 80, 420) for i in range(90)]
+        rois = [(10 + (i * 17 % 200), 0, 80, 420) for i in range(90)]
         mock_det.detect_person.side_effect = rois
         mock_det.detect.side_effect = rois
 
@@ -295,7 +295,7 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         cfg = _make_cfg()
 
         mock_det = MagicMock()
-        rois = [(10 + (i % 20), 0, 50, 82) for i in range(90)]
+        rois = [(10 + (i * 17 % 200), 0, 50, 82) for i in range(90)]
         mock_det.detect_person.side_effect = rois  # 82 > 70, aspect 1.64 > 1.4
         mock_det.detect.side_effect = rois
 
@@ -315,7 +315,7 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         cfg = _make_cfg()
 
         mock_det = MagicMock()
-        rois = [(0 + (i % 20), 0, 400, 420) for i in range(90)]
+        rois = [(0 + (i * 17 % 200), 0, 400, 420) for i in range(90)]
         mock_det.detect_person.side_effect = rois  # très tall
         mock_det.detect.side_effect = rois
 
