@@ -118,11 +118,9 @@ def _compute_auto_crop_margins(  # noqa: C901
             roi_heights.append(float(rh))
             roi_widths.append(float(rw))
 
+            roi_bottoms.append(float(ry + rh))
             if rh > dmd_crop_h * _FACE_PRIORITY_H_RATIO:
-                roi_bottoms.append(float(ry + rh * FACE_FRAC))
                 face_priority_count += 1
-            else:
-                roi_bottoms.append(float(ry + rh))
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
@@ -244,10 +242,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
                 _x_centers.append(float(rx + rw / 2.0))
                 _y_centers.append(float(ry + rh / 2.0))
                 _fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
-                if rh > dmd_crop_h * DMD_CROP_H_FACTOR:
-                    _roi_bottoms_fp.append(float(ry + rh * FACE_FRAC))
-                else:
-                    _roi_bottoms_fp.append(float(ry + rh))
+                _roi_bottoms_fp.append(float(ry + rh))
                     
             if check_pillarbox:
                 small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
@@ -389,7 +384,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         pad_bottom_px = frame_h * pad_frac
 
     top_y    = float(np.percentile(arr_tops,    5))  - pad_top_px
-    bottom_y = float(np.percentile(arr_btm_fp, 95))  + pad_bottom_px
+    bottom_y = float(np.percentile(arr_btm_feet, 95))  + pad_bottom_px
     top_y    = max(0.0,          top_y)
     bottom_y = min(float(frame_h), bottom_y)
 
