@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace as _dc_replace
 from typing import Optional
 
 @dataclass
@@ -23,81 +23,38 @@ class AutoActionConfig:
     auto_detector_fallback: bool = False # dynamically switch to hybrid if person fails
     dmd_visibility_score_enabled: bool = False # Enable DMD Visibility Score
     # ── PRIORITY 2 — Temporal Scene Memory ───────────────────────────────────
-    # Sliding window (seconds) of past ROI detections used to interpolate the
-    # camera position when YOLO loses the subject for a few frames.  Set to 0
-    # to disable (matches legacy behaviour).  2–5 s recommended.
     roi_history_window_s: float = 3.0   # seconds of ROI history kept (0 = disabled)
     # ── PRIORITY 3 — Scene Change Detection ──────────────────────────────────
-    # When the HSV histogram difference between two consecutive frames exceeds
-    # scene_change_threshold, the ROI history, camera smoothing, and zoom are
-    # all reset so stale tracking data does not bleed across hard cuts.
-    # Set to 0.0 to disable.
     scene_change_threshold: float = 0.45  # 0..1, higher = less sensitive
     # ── PRIORITY 4 — Micro-detection Rejection ────────────────────────────────
-    # Any detected ROI whose area is smaller than this fraction of the source
-    # frame area is silently discarded.  Prevents zooming onto tiny subjects
-    # (< 2 % of frame) that would become invisible after resize to DMD res.
     min_roi_area_ratio: float = 0.02   # 0..1, 0 = disabled (accept all ROIs)
     # ── PRIORITY 5 — Directional Look-Ahead ──────────────────────────────────
-    # When the ROI centre moves consistently in one direction, offset the camera
-    # slightly in that direction so there is space "in front of" the subject.
-    # lead_factor=0 = disabled (legacy).  0.15–0.35 recommended.
     look_ahead_enabled: bool = True
     look_ahead_factor: float = 0.25   # fraction of crop half-width to offset
     # ── PRIORITY 6 — Multi-ROI Fusion ───────────────────────────────────────
-    # When True, all YOLO person detections above the confidence threshold are
-    # gathered and fused into a single confidence-weighted centroid bounding box.
-    # Prevents the camera from always snapping to the single highest-confidence
-    # subject when multiple people are visible (e.g. a crowd or co-op play).
     multi_roi_fusion_enabled: bool = True
     # ── PRIORITY 7 — Minimum Useful Size After Resize ────────────────────────
-    # Minimum dimension (pixels) a detected subject must occupy in the DMD
-    # output frame.  Any proposed zoom that would render the ROI smaller than
-    # this in BOTH width and height is cancelled and the camera stays at the
-    # current position.  0 = disabled.
     min_subject_dmd_px: int = 4    # pixels in the DMD output (e.g. 128×32)
     # ── Scene Type Classification ────────────────────────────────────────────
-    # Manual scene type selection.  Each scene type implies a full profile
-    # (face clipping, strength, smoothness, floor tracking) — analogous to
-    # how the colorimetry 'mode' implies contrast/saturation/brightness.
-    # Empty string = no manual override (use defaults or auto-detection).
-    # Valid values: see SceneType.ALL in src/engine/analysis/scene_types.py
     scene_type: str = ""
-
-    # When True, the analysis phase auto-detects the scene type from content
-    # (overrides manual scene_type).  Enabled by smart_auto_crop / LMH.
     auto_scene_type: bool = False
-
     # When enabled, classifies the scene dynamically on every camera cut
     dynamic_scene_detection: bool = False
-
     # ── PRIORITY 8 — Smart Platformer Mode ───────────────────────────────────
-    # Optimised for side-scrolling 2-D games: locks vertical tracking to keep
-    # the floor visible at a fixed ratio of the strip height, and widens the
-    # horizontal field of view to reveal more of the level ahead.
     platformer_mode: bool = False
     platformer_floor_ratio: float = 0.80  # fraction of strip height for floor line
     # ── PRIORITY 10 — ROI Confidence System ──────────────────────────────────
-    # Minimum YOLO confidence score required to act on a detection.  Boxes
-    # below this value are silently dropped (treated as no detection).  When
-    # combined with P2 temporal memory the camera holds its last known position
-    # rather than jumping to centre.  0.0 = accept everything (legacy).
     roi_confidence_min: float = 0.0   # [0..1], 0 = disabled
-
     # ── VNext Priority 1 & 8 — Dynamic ROI Confidence & Persistence ──────────
     dynamic_roi_confidence_enabled: bool = True
     roi_persistence_score_enabled: bool = True
-
     # ── VNext Priority 6 — Scroll Direction Memory ───────────────────────────
     scroll_direction_memory_enabled: bool = True
-
     # ── VNext Priority 9 — DMD Readability Predictor ─────────────────────────
     dmd_readability_score_enabled: bool = True
-
     # ── Search Engines API Keys ─────────────────────────────────────────────
     tenor_api_key: str = ""
     giphy_api_key: str = ""
-
     # API backward-compatibility only
     out_w: int = 0
     out_h: int = 0
@@ -105,3 +62,117 @@ class AutoActionConfig:
     end_s: Optional[float] = None
     target_width: int = 128           # Target output width for DMD
     target_height: int = 32          # Target output height for DMD
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Factory & serialisation — SINGLE SOURCE OF TRUTH
+    # ══════════════════════════════════════════════════════════════════════════
+    # Mapping: params-dict key  →  dataclass field name
+    # Keys with mismatched names are listed explicitly below.
+    # All other fields use a standard "action_{field_name}" convention.
+    _PARAMS_KEY_ALIASES: dict = None   # populated in __init_subclass__; see below
+
+    @staticmethod
+    def _build_alias_map():
+        """Return {params_dict_key: field_name} with legacy aliases."""
+        # Legacy aliases where the dict key doesn't match the field name
+        aliases = {
+            "action_intro":          "intro_duration",
+            "action_bottom_crop":    "bottom_crop_pct",
+            "action_top_crop":       "top_crop_pct",
+            "action_auto_pillarbox": "auto_pillarbox_crop",
+        }
+        # Fields that DON'T use the "action_" prefix in the params dict
+        no_prefix = {
+            "bg_sub_enable", "dynamic_scene_detection",
+            "dmd_visibility_score_enabled", "dmd_readability_score_enabled",
+            "target_width", "target_height",
+        }
+        field_names = {f.name for f in fields(AutoActionConfig)
+                       if not f.name.startswith("_")}
+        mapped_fields = set(aliases.values())
+        result = dict(aliases)
+        for name in field_names:
+            if name in mapped_fields:
+                continue  # already handled by an alias
+            if name in no_prefix:
+                result[name] = name
+            else:
+                result[f"action_{name}"] = name
+        return result
+
+    @classmethod
+    def _alias_map(cls):
+        if cls._PARAMS_KEY_ALIASES is None:
+            cls._PARAMS_KEY_ALIASES = cls._build_alias_map()
+        return cls._PARAMS_KEY_ALIASES
+
+    # ── from_params : dict → AutoActionConfig ────────────────────────────────
+    @classmethod
+    def from_params(cls, p: dict, **overrides) -> "AutoActionConfig":
+        """Build an AutoActionConfig from a conversion params dict.
+
+        This is the ONLY place that maps dict keys (action_*) to dataclass
+        fields.  Used by core.py process_file / process_folder and by
+        ffmpeg_converter.py.
+        """
+        _cast = {str: str, int: int, float: float, bool: bool}
+        field_map = {f.name: f for f in fields(cls) if not f.name.startswith("_")}
+        kwargs = {}
+        for pkey, fname in cls._alias_map().items():
+            if fname not in field_map:
+                continue
+            raw = p.get(pkey)
+            if raw is None:
+                continue
+            ft = field_map[fname].type
+            cast_fn = _cast.get(ft)
+            if cast_fn is not None:
+                kwargs[fname] = cast_fn(raw)
+            else:
+                kwargs[fname] = raw
+        kwargs.update(overrides)
+        return cls(**kwargs)
+
+    # ── from_app_state : UI tk-vars → AutoActionConfig ───────────────────────
+    @classmethod
+    def from_app_state(cls, s, **overrides) -> "AutoActionConfig":
+        """Build an AutoActionConfig by reading tk vars from ApplicationState.
+
+        Tries v_action_{field} first, then v_{field}.  Fields without a
+        matching tk var keep their dataclass defaults.
+        """
+        _cast = {str: str, int: int, float: float, bool: bool}
+        kwargs = {}
+        for f in fields(cls):
+            if f.name.startswith("_"):
+                continue
+            for prefix in ("v_action_", "v_"):
+                var = getattr(s, f"{prefix}{f.name}", None)
+                if var is not None and hasattr(var, "get"):
+                    raw = var.get()
+                    cast_fn = _cast.get(f.type)
+                    if cast_fn is not None:
+                        kwargs[f.name] = cast_fn(raw)
+                    else:
+                        kwargs[f.name] = raw
+                    break
+        kwargs.update(overrides)
+        return cls(**kwargs)
+
+    # ── to_params_dict : AutoActionConfig → dict ─────────────────────────────
+    def to_params_dict(self) -> dict:
+        """Export to a params dict with the correct key names.
+
+        Inverse of from_params().  Used by _collect_params() so that
+        new fields are automatically propagated to the conversion engine.
+        """
+        result = {}
+        for pkey, fname in self._alias_map().items():
+            result[pkey] = getattr(self, fname, None)
+        return result
+
+    # ── copy : shallow clone (thread-safe per-file configs) ──────────────────
+    def copy(self, **overrides) -> "AutoActionConfig":
+        """Create a shallow copy, optionally overriding fields."""
+        return _dc_replace(self, **overrides)
+
