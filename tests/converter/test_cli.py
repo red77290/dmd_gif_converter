@@ -45,5 +45,9 @@ class TestCliArgs(unittest.TestCase):
         self.assertTrue(args.text_bg)
         self.assertEqual(args.text_style, "shadow")
 
+    def test_auto_detector_fallback(self):
+        args = self.parser.parse_args(["--action-auto-detector-fallback"])
+        self.assertTrue(args.action_auto_detector_fallback)
+
 if __name__ == "__main__":
     unittest.main()

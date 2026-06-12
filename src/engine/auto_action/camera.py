@@ -84,7 +84,12 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     crop_w = loose_w - strength * (loose_w - tight_w)
 
     # Enforce zoom_max (maximum zoom-in from full frame)
-    min_allowed_w = loose_w / max(1.0, cfg.zoom_max)
+    current_zoom_max = getattr(cfg, "zoom_max", 1.8)
+    if hasattr(cfg, "scene_profile") and cfg.scene_profile is not None:
+        if cfg.scene_profile.max_zoom_override is not None:
+            current_zoom_max = cfg.scene_profile.max_zoom_override
+
+    min_allowed_w = loose_w / max(1.0, current_zoom_max)
     crop_w = max(crop_w, min_allowed_w)
     
     # Ensure we never crop tighter than the person's required bounding box

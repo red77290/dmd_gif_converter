@@ -56,6 +56,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
         max_intro = max(1, int(reader.total_frames * 0.40))
         intro_frames = min(intro_frames, max_intro)
 
+    if hasattr(analyzer, 'best_detector') and analyzer.best_detector:
+        cfg.detector = analyzer.best_detector
+
     # 5. Tracker
     tracker = TrackingEngine(
         reader.fps, reader.frame_w, reader.frame_h,
