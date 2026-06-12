@@ -150,6 +150,25 @@ python auto_action_cli.py input.mp4 --top-crop 0.05 --bottom-crop 0.15
 
 If OpenCV is not installed, the feature is silently skipped and the standard pipeline runs instead — **no crash, no data loss**.
 
+### 🧠 Continuous Scoring Matrix (v6.2.0)
+
+> Replaces the rigid waterfall model to intelligently classify scenes and assign the perfect camera profile.
+
+When **Smart Auto Crop** is enabled, the engine evaluates the first 60 frames of your video against 9 distinct scene profiles (e.g., `talking_closeup`, `platformer`, `action_horizontal`, `tall_character`).
+
+Instead of a simple IF/ELSE decision tree, each frame contributes points to a **Continuous Scoring Matrix** based on:
+1. **Aspect Ratio (`h/w`)**: Is the subject tall and thin, or wide and short?
+2. **Bounding Box Size (`roi_h`)**: Does the subject fill the whole screen, or is it a small sprite?
+3. **Movement Variance (`var_x`, `var_y`)**: Does the subject move rapidly horizontally (like a platformer) or stay relatively still (like a talking head)?
+4. **Floor Stability**: Is there a consistent ground level detected by the EMA floor tracker?
+
+The scene profile with the highest total score at the end of the analysis phase dictates the final camera behaviour:
+- **`platformer`**: Enables auto-floor tracking and horizontal bias.
+- **`talking_closeup`**: Disables floor tracking, enables top-crop and face-priority padding.
+- **`action_horizontal`**: Uses standard centering with wider margins.
+
+You can inspect the AI's exact decision-making process by looking at the `=== Scene Classification Scoreboard ===` printed in the UI Log Panel for every video processed.
+
 ---
 
 ## 🎨 Smart Color Boost — AI heuristic colorimetry
