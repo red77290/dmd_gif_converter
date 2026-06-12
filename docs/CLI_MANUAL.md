@@ -85,6 +85,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `auto_color` | `--auto-color` | `False` | 🎨 Smart Color Boost — AI heuristic colorimetry |
 | `auto_action` | `--auto-action` | `False` | 🤖 AI cinematic camera — see dedicated section |
 | `action_detector` | `--action-detector` | `person` | `person` / `motion` / `hybrid` / `center` |
+| `action_auto_detector_fallback` | `--action-auto-detector-fallback` | `False` | Dynamically switch to hybrid if person detects nothing |
 | `action_intro` | `--action-intro` | `1.5` | Establishing shot duration in seconds |
 | `action_strength` | `--action-strength` | `0.65` | Framing tightness around subject |
 | `action_smoothness` | `--action-smoothness`| `0.65` | Camera exponential smoothing factor |

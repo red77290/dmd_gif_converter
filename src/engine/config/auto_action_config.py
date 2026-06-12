@@ -20,6 +20,7 @@ class AutoActionConfig:
     auto_strength: bool = False        # auto-detect optimal strength based on content type
     auto_pillarbox_crop: bool = False  # auto-detect left/right black bars and constrain horizontal framing
     auto_smoothness: bool = False      # auto-detect optimal smoothness based on content type
+    auto_detector_fallback: bool = False # dynamically switch to hybrid if person fails
     dmd_visibility_score_enabled: bool = False # Enable DMD Visibility Score
     # ── PRIORITY 2 — Temporal Scene Memory ───────────────────────────────────
     # Sliding window (seconds) of past ROI detections used to interpolate the
@@ -67,6 +68,9 @@ class AutoActionConfig:
     # (overrides manual scene_type).  Enabled by smart_auto_crop / LMH.
     auto_scene_type: bool = False
 
+    # When enabled, classifies the scene dynamically on every camera cut
+    dynamic_scene_detection: bool = False
+
     # ── PRIORITY 8 — Smart Platformer Mode ───────────────────────────────────
     # Optimised for side-scrolling 2-D games: locks vertical tracking to keep
     # the floor visible at a fixed ratio of the strip height, and widens the
@@ -89,9 +93,6 @@ class AutoActionConfig:
 
     # ── VNext Priority 9 — DMD Readability Predictor ─────────────────────────
     dmd_readability_score_enabled: bool = True
-
-    # ── VNext Priority 10 — Auto Tuning Dataset Generator ────────────────────
-    auto_tuning_dataset_dir: Optional[str] = None  # None = disabled
 
     # ── Search Engines API Keys ─────────────────────────────────────────────
     tenor_api_key: str = ""
