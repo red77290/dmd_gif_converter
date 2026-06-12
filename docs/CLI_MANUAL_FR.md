@@ -64,47 +64,52 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes. |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes. |
 
-**Paramètres avancés** (interface uniquement — tous défaut = aucun changement) :
+**Paramètres avancés** (UI et CLI) :
 
-| Paramètre | Défaut | Description |
-|---|---|---|
-| `scroll_enabled` | `True` | `False` = mode crop manuel |
-| `zoom` | `1.0` | Multiplicateur de mise à l'échelle avant crop |
-| `manual_x` | `0` | Décalage horizontal du crop en px (mode manuel) |
-| `manual_y` | `0` | Décalage vertical du crop en px (mode manuel) |
-| `hue_shift` | `0.0` | Rotation de teinte en degrés |
-| `noise_reduction` | `0.0` | Force du filtre hqdn3d |
-| `film_grain` | `0` | Quantité de bruit additif |
-| `vignette` | `False` | Assombrissement des bords |
-| `max_duration` | `0.0` | Durée maximale du clip en secondes (`0` = pas de limite) |
-| `auto_color_enabled` | `False` | 🎨 Smart Color Boost — colorimétrie heuristique IA |
-| `auto_action_enabled` | `False` | 🤖 Caméra IA cinématique — voir section dédiée |
-| `action_detector` | `person` | `person` · `motion` · `hybrid` · `center` |
-| `action_intro` | `1.5` | Durée du plan large d'introduction en secondes |
-| `action_strength` | `0.65` | Force de zoom autour du sujet |
-| `action_auto_strength` | `False` | Force automatique basée sur le contenu |
-| `action_smoothness` | `0.65` | Lissage exponentiel de la caméra |
-| `action_auto_smoothness`| `False` | Lissage automatique basé sur le contenu |
-| `action_zoom_max` | `1.8` | Facteur de zoom IA maximum |
-| `action_padding` | `0.20` | Marge autour du ROI détecté |
-| `bg_sub_enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
-| `action_bottom_crop` | `0.0` | Exclut les N % inférieurs du cadre (manuel, 0 = désactivé) |
-| `action_auto_bottom_crop` | `False` | Détecte auto la limite basse du sujet (pieds / sol) |
-| `action_top_crop` | `0.0` | Exclut les N % supérieurs du cadre (manuel, 0 = désactivé) |
-| `action_auto_top_crop` | `False` | Détecte auto la limite haute du sujet (tête / ciel) |
-| `action_vertical_bias` | `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
-| `action_auto_vertical_bias` | `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
-| `action_scene_type` | `""` | Force manuellement l'un des 9 profils de la Matrice Continue : `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Écrase l'auto-détection. |
-| `action_smart_auto_crop` | `False` | 🧠 Smart Auto Crop — moteur analyse 60 images et active le profil de caméra optimal via une matrice de score continue de 9 types de scènes (ex: platformer, talking_closeup) ; résout la contradiction face-priority ↔ floor-tracking |
-| `let_me_handle_it` | `False` | 🚀 Laisse-moi gérer ça — mode tout-automatique : active Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond + DMD Visibility Score et grise tous les réglages non pertinents |
-| `target_width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
-| `target_height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
-| `text_overlay_enabled` | `False` | 💬 Graver un texte dans le GIF de sortie |
-| `text_content` | `""` | Chaîne de texte à afficher |
-| `text_font_size` | `8` | Taille de la police en pixels |
-| `text_color` | `white` | Couleur du texte (`white` / `yellow` / `red` / `green` / `blue` / hex) |
-| `text_position` | `bottom_center` | Une des 9 positions d'ancrage |
-| `text_font_file` | `HelvetiPixel.ttf` | Fichier de police dans `media/fonts/` |
+| Paramètre | Drapeau CLI | Défaut | Description |
+|---|---|---|---|
+| `prefix` | `--prefix` | `gifs_` | Préfixe du dossier source |
+| `no_scroll` | `--no-scroll` | `False` | `True` = désactive le défilement auto (active le mode crop manuel) |
+| `zoom` | `--zoom` | `1.0` | Multiplicateur d'échelle avant recadrage (mode manuel) |
+| `manual_x` | `--manual-x` | `0` | Décalage horizontal du recadrage en px (mode manuel) |
+| `manual_y` | `--manual-y` | `0` | Décalage vertical du recadrage en px (mode manuel) |
+| `hue_shift` | `--hue-shift` | `0.0` | Rotation de la teinte en degrés |
+| `noise_reduction` | `--noise-reduction` | `0.0` | Force hqdn3d |
+| `film_grain` | `--film-grain` | `0` | Quantité de bruit additif |
+| `vignette` | `--vignette` | `False` | Assombrissement des bords |
+| `max_duration` | `--max-duration` | `0.0` | Limite de durée du clip en secondes (`0` = sans limite) |
+| `auto_color` | `--auto-color` | `False` | 🎨 Smart Color Boost — colorimétrie heuristique par IA |
+| `auto_action` | `--auto-action` | `False` | 🤖 Caméra cinématique IA — voir la section dédiée |
+| `action_detector` | `--action-detector` | `person` | `person` / `motion` / `hybrid` / `center` |
+| `action_intro` | `--action-intro` | `1.5` | Durée du plan d'établissement en secondes |
+| `action_strength` | `--action-strength` | `0.65` | Précision du cadrage autour du sujet |
+| `action_smoothness` | `--action-smoothness`| `0.65` | Lissage exponentiel de la caméra |
+| `action_zoom_max` | `--action-zoom-max` | `1.8` | Facteur de zoom IA maximum |
+| `action_padding` | `--action-padding` | `0.20` | Marge autour du ROI détecté |
+| `bg_sub_enable` | `--bg-sub-enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
+| `action_bottom_crop` | `--action-bottom-crop`| `0.0` | Exclut les N % inférieurs du cadre (manuel, 0 = désactivé) |
+| `action_auto_bottom_crop`| `--action-auto-bottom-crop`| `False` | Détecte auto la limite basse du sujet (pieds / sol) |
+| `action_top_crop` | `--action-top-crop` | `0.0` | Exclut les N % supérieurs du cadre (manuel, 0 = désactivé) |
+| `action_auto_top_crop`| `--action-auto-top-crop`| `False` | Détecte auto la limite haute du sujet (tête / ciel) |
+| `action_vertical_bias`| `--action-vertical-bias`| `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
+| `action_auto_vertical_bias`| `--action-auto-vertical-bias`| `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
+| `action_scene_type` | `--action-scene-type`| `""` | Force manuellement l'un des 9 profils de la Matrice Continue : `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Écrase l'auto-détection. |
+| `action_auto_scene_type`| `--action-auto-scene-type`| `False` | Détection automatique du type de scène (écrase `--action-scene-type`). |
+| `action_smart_auto_crop` | `--smart-auto-crop`| `False` | 🧠 Smart Auto Crop — analyse 60 images et active le profil de caméra optimal via une matrice de score continue de 9 scènes ; résout la contradiction face-priority ↔ floor-tracking |
+| `reject_threshold` | `--reject-threshold`| `0` | Déplace automatiquement les GIFs générés vers la corbeille si leur DMD Visibility Score est strictement inférieur à N% (0-100). Défaut : 0 (désactivé). |
+| `dmd_visibility_score_enabled` | `N/A` | `False` | 🔬 DMD Visibility Score — simule le recadrage proposé à la résolution DMD cible. (Implicitement activé par reject_threshold ou let_me_handle_it) |
+| `let_me_handle_it` | `--let-me-handle-it`| `False` | 🚀 Laisse-moi gérer ça — mode tout-automatique : active Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond + DMD Visibility Score simultanément |
+| `target_width` | `--target-width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
+| `target_height` | `--target-height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
+| `text_overlay_enabled` | `--text-overlay` | `False` | 💬 Graver un texte dans le GIF de sortie |
+| `text_content` | `--text-content` | `""` | Chaîne de texte à afficher |
+| `text_font_size` | `--text-font-size` | `8` | Taille de la police en pixels |
+| `text_color` | `--text-color` | `white` | Couleur du texte (`white` / `yellow` / `red` / `green` / `blue` / hex) |
+| `text_position` | `--text-position` | `bottom_center`| Une des 9 positions d'ancrage |
+| `text_font_file` | `--text-font-file` | `HelvetiPixel.ttf`| Fichier de police dans `media/fonts/` |
+| `text_style` | `--text-style` | `outline` | Style de rendu du texte : `none` / `bold` / `outline` / `shadow` |
+| `text_bg` | `--text-bg` | `False` | Dessiner une boîte d'arrière-plan semi-transparente sombre derrière le texte |
+| `text_bg_opacity` | `--text-bg-opacity`| `150` | Opacité de la boîte d'arrière-plan 0-255 |
 
 ### `scroll_cycles` expliqué
 
