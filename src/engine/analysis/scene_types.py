@@ -133,7 +133,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         platformer_mode=True,
         auto_vertical_bias=True,
         suggested_strength=0.65,
-        suggested_smoothness=0.85,
+        suggested_smoothness=0.70,
     ),
     SceneType.FIGHTING_2D: SceneProfile(
         scene_type=SceneType.FIGHTING_2D,

@@ -74,6 +74,16 @@ class ConversionSettingsPanel(ctk.CTkFrame):
             width=180
         )
         self._mode_menu.grid(row=0, column=1, padx=4, sticky="w")
+        
+        def _update_mode_menu_state(*_):
+            if self.app_state.v_let_me_handle_it.get() or self.app_state.v_auto_color_enabled.get():
+                self._mode_menu.configure(state="disabled")
+            else:
+                self._mode_menu.configure(state="normal")
+        
+        self.app_state.v_auto_color_enabled.trace_add("write", _update_mode_menu_state)
+        self.app_state.v_let_me_handle_it.trace_add("write", _update_mode_menu_state)
+        _update_mode_menu_state()
 
         section("⚡  Parallelism")
         slider_row("Workers (CPU)", self.app_state.v_workers, 1, 16, "{:.0f}", " workers", steps=15)
