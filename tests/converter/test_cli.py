@@ -16,7 +16,7 @@ class TestCliArgs(unittest.TestCase):
         args = self.parser.parse_args([])
         self.assertFalse(args.ai_moments)
         self.assertEqual(args.ai_moments_count, 10)
-        self.assertEqual(args.ai_moments_strategy, "Balanced")
+        self.assertEqual(args.ai_moments_strategy, "balanced_v2")
         self.assertEqual(args.ai_moments_dur_min, 2.0)
         self.assertEqual(args.ai_moments_dur_max, 5.0)
 

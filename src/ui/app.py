@@ -22,6 +22,7 @@ from src.ui.panels.left_panel import LeftPanel
 from src.ui.panels.middle_panel import MiddlePanel
 from src.ui.preview.preview_panel import PreviewPanel
 from src.ui.panels.ai_moments_panel import AiMomentsPanel
+from src.ui.panels.ab_testing_panel import ABTestingPanel
 
 class DMDConverterApp(ctk.CTk):
     def __init__(self):
@@ -46,12 +47,19 @@ class DMDConverterApp(ctk.CTk):
 
         self.tab_conversion = self.tabview.add("Conversion")
         self.tab_ai_moments = self.tabview.add("Moments")
+        self.tab_ab_testing = self.tabview.add("A/B Testing")
 
         # ── Moments Tab ───────────────────────────────────────────────────────
         self.tab_ai_moments.grid_columnconfigure(0, weight=1)
         self.tab_ai_moments.grid_rowconfigure(0, weight=1)
         self.ai_moments_panel = AiMomentsPanel(self.tab_ai_moments, self.app_state)
         self.ai_moments_panel.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        # ── A/B Testing Tab ───────────────────────────────────────────────────
+        self.tab_ab_testing.grid_columnconfigure(0, weight=1)
+        self.tab_ab_testing.grid_rowconfigure(0, weight=1)
+        self.ab_testing_panel = ABTestingPanel(self.tab_ab_testing)
+        self.ab_testing_panel.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
         # ── Conversion Tab ────────────────────────────────────────────────────
         self.tab_conversion.grid_columnconfigure(0, weight=1)

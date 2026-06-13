@@ -186,6 +186,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Classify the scene dynamically on every camera cut (requires --action-auto-scene-type).",
     )
     
+    # ── A/B Testing ─────────────────────────────────────────────────────────
+    ab = p.add_argument_group("A/B Testing (Scoring V2)")
+    ab.add_argument(
+        "--ab-test", action="store_true", default=False,
+        help="Run A/B testing to compare scoring strategies on a single video file instead of converting it."
+    )
+    ab.add_argument(
+        "--ab-test-strategies", type=str, default="baseline_v1,balanced_v2",
+        help="Comma-separated list of scoring strategies to test (default: baseline_v1,balanced_v2)."
+    )
+
     # ── AI Moments Extraction ───────────────────────────────────────────────
     am = p.add_argument_group("AI Moments Extraction")
     am.add_argument(
@@ -201,8 +212,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max number of moments to extract per video (default: 10)."
     )
     am.add_argument(
-        "--ai-moments-strategy", type=str, default="Balanced", choices=["Action", "Balanced", "Character"],
-        help="Strategy to prioritize for AI moments (default: Balanced)."
+        "--ai-moments-strategy", type=str, default="balanced_v2",
+        help="Scoring strategy to use for AI moments (default: balanced_v2)."
     )
     am.add_argument(
         "--ai-moments-dur-min", type=float, default=2.0, metavar="F",
@@ -408,6 +419,22 @@ if __name__ == "__main__":
         })
     prefix = args.prefix
 
+    # ── A/B Testing ─────────────────────────────────────────────────────────
+    if args.ab_test:
+        from src.engine.testing.ab_testing_engine import ABTestingEngine
+        if not args.folders or not os.path.isfile(args.folders[0]):
+            logger.error("A/B testing requires a single video file as the argument.")
+            sys.exit(1)
+            
+        video_path = args.folders[0]
+        strategies = [s.strip() for s in args.ab_test_strategies.split(",") if s.strip()]
+        
+        logger.info(f"Running A/B Test on {video_path} using strategies: {strategies}")
+        engine = ABTestingEngine(video_path=video_path, target_w=128, target_h=32)
+        report = engine.run(strategy_names=strategies)
+        report.print_leaderboard()
+        sys.exit(0)
+
     if args.folders:
         source_folders = []
         for f in args.folders:
@@ -574,34 +601,6 @@ if __name__ == "__main__":
 
         process_folder(folder_in, folder_out, params=params, progress_callback=progress_cb)
 
-        # ── Auto-Cleanup Phase ────────────────────────────────────────────────
-        if args.reject_threshold > 0:
-            import json
-            try:
-                from send2trash import send2trash
-            except ImportError:
-                def send2trash(path):
-                    import os
-                    os.remove(path)
-            
-            logger.info(f"=== Auto-Cleanup: Rejecting files scoring < {args.reject_threshold}% ===")
-            rejected_count = 0
-            for f in os.listdir(folder_out):
-                if f.endswith(".gif"):
-                    gif_path = os.path.join(folder_out, f)
-                    score_path = gif_path + ".scores.json"
-                    if os.path.exists(score_path):
-                        try:
-                            with open(score_path, "r", encoding="utf-8") as file:
-                                data = json.load(file)
-                            if data.get("score", 100) < args.reject_threshold:
-                                logger.info(f"[TRASH] {f} — Score: {data.get('score')}%")
-                                send2trash(gif_path)
-                                send2trash(score_path)
-                                rejected_count += 1
-                        except Exception as e:
-                            logger.error(f"Error checking score for {f}: {e}")
-            
-            logger.info(f"=== Auto-Cleanup Complete: Trashed {rejected_count} file(s) ===")
 
-    logger.info("Done.")
+if __name__ == "__main__":
+    main()
