@@ -542,14 +542,17 @@ class AiMomentsPanel(ctk.CTkFrame):
                 var.set("[✓]")
     def _on_ai_analysis_complete(self, results):
         self._ai_results = results
-        self._btn_ai_show_report.configure(state="normal")
-        
-        self._show_ai_report_popup(mode="results")
-        self._populate_results()
         
         # Add moments directly to the conversion queue
+        # This will spawn a thread and show results when finished
         if results:
             self._add_moments_to_queue(results)
+        else:
+            self._btn_ai_show_report.configure(state="normal")
+            self._show_ai_report_popup(mode="results")
+            self._populate_results()
+            if hasattr(self, '_btn_ai_start'):
+                self._btn_ai_start.configure(state="normal")
 
     def _populate_results(self):
         import customtkinter as ctk
@@ -672,6 +675,11 @@ class AiMomentsPanel(ctk.CTkFrame):
             if files:
                 # Publish event → LeftPanel._on_files_added_to_queue inserts them
                 EventBus.publish(EventType.FILES_ADDED_TO_QUEUE, files)
+
+            # Show results and unlock UI now that extraction is done
+            self._btn_ai_show_report.configure(state="normal")
+            self._show_ai_report_popup(mode="results")
+            self._populate_results()
 
             if getattr(self, "_report_popup", None) and self._report_popup.winfo_exists() and hasattr(self, '_ai_progress_lbl'):
                 self._ai_progress_lbl.configure(text=f"Added {len(files)} extracted moments to the Conversion list!")

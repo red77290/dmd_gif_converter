@@ -96,11 +96,11 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_priority=True,
         face_clip_mode="closeup",
         face_head_frac=1.0,
-        face_eye_offset=0.45,
+        face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
-        suggested_strength=0.55,
-        suggested_smoothness=0.85,
+        suggested_strength=0.25,
+        suggested_smoothness=0.96,
         max_zoom_override=1.05,
     ),
     SceneType.FULL_BODY_TALL: SceneProfile(
@@ -111,20 +111,20 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
-        suggested_strength=0.55,
-        suggested_smoothness=0.85,
+        suggested_strength=0.35,
+        suggested_smoothness=0.92,
         max_zoom_override=1.05,
     ),
     SceneType.TALKING_MEDIUM: SceneProfile(
         scene_type=SceneType.TALKING_MEDIUM,
         face_priority=True,
         face_clip_mode="full_body_head",
-        face_head_frac=0.35,
+        face_head_frac=0.22,
         face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
-        suggested_strength=0.55,
-        suggested_smoothness=0.85,
+        suggested_strength=0.30,
+        suggested_smoothness=0.94,
         max_zoom_override=1.5,
     ),
     SceneType.FULL_BODY_MEDIUM: SceneProfile(
@@ -293,18 +293,26 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
             scores[SceneType.PLATFORMER] += 3.0 * (1.0 - floor_var_score/0.25)
             scores[SceneType.ACTION_HORIZONTAL] += 1.0
         else:
-            scores[SceneType.ACTION_HORIZONTAL] += 2.0
+            scores[SceneType.ACTION_HORIZONTAL] += 1.5
             scores[SceneType.FIGHTING_2D] += 1.0
             scores[SceneType.PLATFORMER] -= 2.0
 
     # 2. Fill Ratio -> Closeups / Wide shots
+    is_massive_subject = fill_ratio >= 0.40
     if fill_ratio >= 0.50:
         if body_aspect <= 1.4 and body_aspect >= 0.85:
-            scores[SceneType.TALKING_CLOSEUP] += 3.0
-        scores[SceneType.TALKING_MEDIUM] += 1.0
+            scores[SceneType.TALKING_CLOSEUP] += 5.0
+        scores[SceneType.TALKING_MEDIUM] += 2.0
+        scores[SceneType.PLATFORMER] -= 5.0  # Big subjects are not platformers
+        scores[SceneType.ACTION_HORIZONTAL] -= 5.0
+        scores[SceneType.ACTION_MOVING] -= 5.0
+        scores[SceneType.FIGHTING_2D] -= 3.0
     elif fill_ratio >= 0.25:
         scores[SceneType.TALKING_MEDIUM] += 2.0
         scores[SceneType.FULL_BODY_MEDIUM] += 1.0
+        if fill_ratio >= 0.35:
+            scores[SceneType.PLATFORMER] -= 2.0
+            scores[SceneType.ACTION_HORIZONTAL] -= 2.0
     elif fill_ratio < 0.15:
         scores[SceneType.WIDE_SHOT] += 3.0
 
@@ -333,9 +341,15 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.FIGHTING_2D] += 2.0
         scores[SceneType.ACTION_HORIZONTAL] += 1.5
         scores[SceneType.ACTION_MOVING] += 1.0
-        scores[SceneType.TALKING_CLOSEUP] -= 2.0
+        
+        # If it's a massive subject (like a face filling the screen), 
+        # panning/moving doesn't mean it's suddenly a fighting game!
+        if not is_massive_subject:
+            scores[SceneType.TALKING_CLOSEUP] -= 3.0
+            scores[SceneType.TALKING_MEDIUM] -= 2.0
     else:
         scores[SceneType.TALKING_CLOSEUP] += 1.0
+        scores[SceneType.TALKING_MEDIUM] += 1.0
 
     # 5. Isometric Top-Down: High movement in both X and Y, no stable floor
     if x_variance >= 0.02 and y_variance >= 0.02 and floor_var_score > 0.4:
@@ -345,8 +359,17 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
 
     # 6. Static Menu / Still Scene: Very low movement
     if x_variance < 0.005 and y_variance < 0.005:
-        scores[SceneType.MENU_STATIC] += 3.0
         scores[SceneType.PLATFORMER] -= 3.0
+        if fill_ratio >= 0.4:
+            # Huge static subject -> portrait or closeup, NOT a menu
+            scores[SceneType.TALKING_CLOSEUP] += 2.0
+            scores[SceneType.TALKING_MEDIUM] += 2.0
+            scores[SceneType.MENU_STATIC] -= 2.0
+        elif fill_ratio >= 0.2:
+            scores[SceneType.TALKING_MEDIUM] += 2.0
+            scores[SceneType.MENU_STATIC] += 0.5
+        else:
+            scores[SceneType.MENU_STATIC] += 3.0
 
     # Add small default bias to moving action as the safest fallback
     scores[SceneType.ACTION_MOVING] += 0.5
@@ -377,4 +400,4 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scoreboard_lines.append(f"{marker}{st:<20} : {scores[st]:>5.1f}")
     scoreboard_lines.append("=======================================")
 
-    return SCENE_PROFILES[best_type], scoreboard_lines
+    return SCENE_PROFILES[best_type], scoreboard_lines, scores
