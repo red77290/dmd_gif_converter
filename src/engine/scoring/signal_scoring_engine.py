@@ -316,7 +316,7 @@ class SignalScoringEngine:
         Value of 0.0 = frame identical to previous.
         """
         diff = cv2.absdiff(gray, prev_gray)
-        return float(np.mean(diff)) / 255.0
+        return min(1.0, float(np.mean(diff)) / 40.0)
 
     @staticmethod
     def _compute_optical_flow(
@@ -342,24 +342,16 @@ class SignalScoringEngine:
 
     @staticmethod
     def _compute_entropy(gray: np.ndarray) -> float:
-        """
-        Shannon entropy of the grayscale histogram, normalized to [0, 1].
-        Max entropy for 8-bit = log2(256) ≈ 8.0 bits.
-        """
         hist, _ = np.histogram(gray.ravel(), bins=256, range=(0, 256))
         hist = hist[hist > 0].astype(np.float64)
         hist /= hist.sum()
         entropy = float(-np.sum(hist * np.log2(hist)))
-        return min(1.0, entropy / 8.0)
+        return min(1.0, entropy / 7.0)
 
     @staticmethod
     def _compute_contrast(gray: np.ndarray) -> float:
-        """
-        RMS contrast: standard deviation of grayscale / 128.
-        Normalized to [0, 1]. 1.0 = maximum possible std dev.
-        """
         std = float(np.std(gray.astype(np.float32)))
-        return min(1.0, std / 128.0)
+        return min(1.0, std / 48.0)
 
     @staticmethod
     def _compute_edge_density(gray: np.ndarray, cv2) -> float:
@@ -373,7 +365,8 @@ class SignalScoringEngine:
             total = gray.shape[0] * gray.shape[1]
             if total == 0:
                 return 0.0
-            return float(np.count_nonzero(edges)) / total
+            fraction = float(np.count_nonzero(edges)) / total
+            return min(1.0, fraction * 10.0)
         except Exception:
             return 0.0
 
