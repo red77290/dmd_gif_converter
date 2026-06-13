@@ -7,9 +7,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        frame_top: float = 0.0,
                        face_priority_mode: bool = False,
                        effective_frame_left: int = 0,
-                       effective_frame_w: Optional[int] = None):
+                       effective_frame_w: Optional[int] = None,
+                       effective_frame_top: float = 0.0,
+                       effective_frame_h: Optional[int] = None):
     if effective_frame_w is None:
         effective_frame_w = frame_w
+    if effective_frame_h is None:
+        effective_frame_h = frame_h
     target_ratio = float(cfg.target_width) / cfg.target_height
     _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
     _auto = getattr(cfg, "auto_vertical_bias", False)
@@ -120,7 +124,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # Keep head+hair visible over floor, even in platformer mode.
         # If the sprite is larger than the screen, prioritize the top of the character.
         if (cy_floor - crop_h / 2.0) > ideal_top:
-            cy = ideal_top + crop_h / 2.0
+            # If the bounding box is huge, it's likely tracking a flying platform/enemy
+            # far above the character. In a platformer, we should NOT let this pull
+            # the camera up and lose the floor.
+            if _platformer and total_h > crop_h * 0.8:
+                cy = cy_floor
+            else:
+                cy = ideal_top + crop_h / 2.0
         else:
             cy = cy_floor
     else:

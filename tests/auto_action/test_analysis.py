@@ -24,7 +24,6 @@ from src.engine.analysis.analysis import (
     _smart_auto_crop_decision,
     _FloorEstimator,
 )
-from src.plugins.scorers.dmd_scorers import DMDVisibilityScore, SceneChangeScore
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

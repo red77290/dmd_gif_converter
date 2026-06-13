@@ -28,7 +28,7 @@ class TestAiMomentsEngine(unittest.TestCase):
         mock_cv2_cap.return_value = mock_cap_instance
 
         options = {
-            "moments_count": 3,
+            "count": 3,
             "crit_action": True,
             "crit_epic": True,
             "crit_loopable": True,
@@ -53,10 +53,9 @@ class TestAiMomentsEngine(unittest.TestCase):
         self.assertIsInstance(moment, AiMoment)
         
         # Validate scores
-        self.assertTrue(0 <= moment.scores["Action"] <= 100)
-        self.assertTrue(0 <= moment.scores["Epic"] <= 100)
-        self.assertTrue(0 <= moment.scores["Loopable"] <= 100)
-        self.assertTrue(0 <= moment.scores["DMD Visibility"] <= 100)
+        self.assertTrue(0 <= moment.scores.get("Frame Avg", 0) <= 100)
+        self.assertTrue(0 <= moment.scores.get("Stability", 0) <= 100)
+        self.assertTrue(0 <= moment.scores.get("Legibility", 0) <= 100)
         self.assertTrue(0 <= moment.overall_score <= 100)
         
         # Check non-overlap
