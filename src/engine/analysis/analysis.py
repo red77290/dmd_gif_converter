@@ -308,19 +308,21 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     # ── Scene classification (auto_scene_type or smart_auto_crop) ────────────
     scene_profile = None
+    scene_scores = {}
+    scene_signals = {
+        "tall_ratio":      tall_ratio,
+        "fill_ratio":      median_fill,
+        "body_aspect":     body_aspect,
+        "floor_in_lower":  floor_in_lower,
+        "floor_var_score": floor_var_score,
+        "x_variance":      x_var,
+        "y_variance":      y_var,
+    }
+    
     _auto_scene = getattr(cfg, "auto_scene_type", False)
     if _auto_scene:
         from src.engine.analysis.scene_types import classify_scene
-        scene_signals = {
-            "tall_ratio":      tall_ratio,
-            "fill_ratio":      median_fill,
-            "body_aspect":     body_aspect,
-            "floor_in_lower":  floor_in_lower,
-            "floor_var_score": floor_var_score,
-            "x_variance":      x_var,
-            "y_variance":      y_var,
-        }
-        scene_profile, scoreboard_lines = classify_scene(scene_signals)
+        scene_profile, scoreboard_lines, scene_scores = classify_scene(scene_signals)
     else:
         scoreboard_lines = []
 
@@ -329,6 +331,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     auto_top    = False
     auto_floor  = False
 
+    decision_codes = {}
+    
     if scene_profile is not None:
         # Scene profile drives crop/tracking decisions
         auto_floor  = scene_profile.auto_vertical_bias
@@ -340,32 +344,35 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         suggested_strength   = scene_profile.suggested_strength
         suggested_smoothness = scene_profile.suggested_smoothness
         reasons.append(f"SCENE={scene_profile.scene_type} → face_clip={scene_profile.face_clip_mode} floor={scene_profile.auto_vertical_bias}")
+        decision_codes["driver"] = "scene_profile"
+        
     elif tall_ratio > TALL_FACTOR:
         auto_bottom = True
         auto_floor  = False
         auto_top    = True
-        # Anime / Movies: large sprites, cinematic feel.
-        # Less strength (looser framing), more smoothness (slower panning).
         suggested_strength = 0.55
         suggested_smoothness = 0.85
         reasons.append(f"GROUP 1 — tall-char {tall_ratio*100:.0f}% of DMD window → bottom-crop+face-priority ✓ / top-crop ✓ (narrows to head) / floor-track ✗ (contradictory)")
+        decision_codes["driver"] = "tall_subject"
+        
     elif floor_in_lower and floor_var_score <= FLOOR_VAR_MAX:
         auto_floor  = True
         auto_top    = False
         auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
         stability   = "stable" if floor_var_score < 0.10 else "dynamic"
-        # Video games (Platformers): fast movement, smoother tracking preferred
         suggested_strength = 0.65
         suggested_smoothness = 0.85
         reasons.append(f"GROUP 2 — floor@{median_bottom/frame_h*100:.0f}% var={floor_var_score*100:.0f}% ({stability}) → floor-tracking ✓ / top-crop ✗ (redundant)")
+        decision_codes["driver"] = "floor_tracking"
+        
     else:
         auto_floor  = False
         auto_top    = top_space > TOP_SPACE_THRESH
         auto_bottom = (bottom_gap > BOTTOM_GAP_THRESH) or auto_top
-        # Video games (Top-down, RPGs, generic action): smoother tracking preferred
         suggested_strength = 0.65
         suggested_smoothness = 0.85
         reasons.append(f"GROUP 3 — no trackable floor")
+        decision_codes["driver"] = "fallback"
 
     face_priority = scene_profile.face_priority if scene_profile is not None else (tall_ratio > TALL_FACTOR)
     aspect        = body_aspect
@@ -400,13 +407,16 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         raw_left = float(np.median(frame_lefts))
         raw_right = float(np.median(frame_rights))
         
-        # Only apply if it's a significant black bar (e.g., > 5% of screen width)
-        # We ADD a small margin (e.g. 2.5%) to the crop to "bite" slightly into the active image
-        # and ensure absolutely no black edge (or its compression artifacts) remains visible.
         if raw_left > 0.05:
             left_pct = _clamp(raw_left + 0.025, 0.0, 0.4)
-        if raw_right < 0.95:
+            decision_codes["pillarbox"] = "detected"
+        elif raw_right < 0.95:
             right_pct = _clamp((1.0 - raw_right) + 0.025, 0.0, 0.4)
+            decision_codes["pillarbox"] = "detected"
+        else:
+            decision_codes["pillarbox"] = "none"
+    else:
+        decision_codes["pillarbox"] = "disabled"
 
     return {
         "best_detector":      best_detector,
@@ -419,9 +429,12 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         "right_pct":          right_pct,
         "face_priority":      face_priority,
         "reasons":            reasons,
+        "decision_codes":     decision_codes,
         "suggested_strength": suggested_strength,
         "suggested_smoothness": suggested_smoothness,
         "scene_profile":      scene_profile,
+        "scene_scores":       scene_scores,
+        "scene_signals":      scene_signals,
         "scoreboard_lines":   scoreboard_lines,
     }
 

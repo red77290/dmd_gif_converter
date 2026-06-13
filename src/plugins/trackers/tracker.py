@@ -1,10 +1,13 @@
 import collections
 import os
+import logging
 from typing import Deque, Tuple, Optional
 import numpy as np
 import cv2
 
 from src.engine.scoring.dmd_readability_engine import DmdReadabilityEngine
+
+logger = logging.getLogger(__name__)
 
 class SceneChangeScore:
     """Detects cuts and hard scene transitions."""
@@ -277,7 +280,13 @@ class TrackingEngine(ITracker):
                     "y_variance":      float(np.var(y_centers)) / max(1.0, float(self.cam_frame_h)**2),
                 }
                 
-                new_profile, _ = classify_scene(scene_signals)
+                new_profile, _, _ = classify_scene(scene_signals)
+                if getattr(self.cfg, "scene_type", None) != new_profile.scene_type:
+                    old_scene = getattr(self.cfg, "scene_type", "Unknown")
+                    logger.info(f"[DYNAMIC] Camera cut detected! Scene changed dynamically from '{old_scene}' to '{new_profile.scene_type}'")
+                    # Send a formatted UI log directly to stdout so it gets picked up by the UI console
+                    print(f"16:00:00 [INFO   ] [UI] [DYNAMIC] Camera cut! Scene changed: {old_scene} -> {new_profile.scene_type}")
+                
                 self.cfg.scene_profile = new_profile
                 self.cfg.scene_type = new_profile.scene_type
 
@@ -384,15 +393,20 @@ class TrackingEngine(ITracker):
             clip_mode = "closeup" if aspect <= 1.4 else "full_body_head"
 
         if clip_mode == "closeup":
-            # Face / head close-up — bbox IS the face.
-            # Skip top 25 % (hair) and keep eye region (35 %).
-            hair_skip = int(rh * 0.25)
-            face_h    = max(8, int(rh * 0.35))
+            # Face / head close-up. Aspect is usually ~1.0.
+            # We want the lowest eye to fall in the 2nd line from the bottom (y=16 to y=24).
+            # This requires cy to be slightly above the eyes, around 50% of the bounding box.
+            hair_skip = int(rh * 0.35)
+            face_h    = max(8, int(rh * 0.30))
             return (rx, ry + hair_skip, rw, face_h)
 
         if clip_mode == "full_body_head":
-            # Adaptive eye targeting using aspect-ratio formula
-            eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
+            # Linear aspect ratio formula tuned for anime characters to ensure
+            # the lowest eye is placed just BELOW the middle line of the screen:
+            # - Standing full body (aspect 2.5) -> targets 10% (head level)
+            # - Bust / shoulders (aspect 1.0) -> targets 50% (slightly above eyes)
+            # - Tilted head (aspect 0.6) -> targets 60% (drops to catch tilted eye)
+            eye_target_pct = min(0.65, max(0.08, 0.77 - 0.27 * aspect))
             head_frac = 0.10  # default 10% of body height
             
             if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
