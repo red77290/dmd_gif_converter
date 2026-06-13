@@ -1,0 +1,46 @@
+{
+  "task_id": "AE371",
+  "file_info": {
+    "filename": "closeup_face.gif",
+    "video_width": 496,
+    "video_height": 278,
+    "duration_frames": 18
+  },
+  "camera_params": {
+    "strength": {
+      "value": 0.65,
+      "reason": "Standard default strength."
+    },
+    "smoothness": {
+      "value": 0.0,
+      "reason": "Standard default smoothness."
+    }
+  },
+  "raw_signals": {},
+  "decisions": {
+    "face_priority": {
+      "value": false,
+      "reason": "Standard subject, no portrait mode required."
+    },
+    "auto_vertical_bias": {
+      "value": false,
+      "reason": "No trackable floor detected."
+    },
+    "auto_bottom_crop": {
+      "value": false,
+      "reason": "Screen is filled."
+    },
+    "auto_top_crop": {
+      "value": false,
+      "reason": "Screen is filled at the top."
+    },
+    "pillarbox": {
+      "value": "L:0px",
+      "reason": "No intrusive black borders detected."
+    }
+  },
+  "auto_crop_margins": {
+    "top_pct": 0.0,
+    "bottom_pct": 0.0
+  }
+}
