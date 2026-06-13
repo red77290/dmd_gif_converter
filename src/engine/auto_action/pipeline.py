@@ -180,10 +180,14 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
     plat_tag = " plat" if cfg.platformer_mode else ""
     scene_tag = f" scene={analyzer.scene_profile.scene_type}" if analyzer.scene_profile else ""
     
+    from src.engine.auto_action.decision_logger import AutoActionDecisionLogger
+    
     msg_lines = []
-    if hasattr(analyzer, 'scoreboard') and analyzer.scoreboard:
-        msg_lines.extend(analyzer.scoreboard)
-    if hasattr(analyzer, 'smart_reasons') and analyzer.smart_reasons:
+    
+    if hasattr(analyzer, "decision_codes"):
+        table_str = AutoActionDecisionLogger.process_decisions(src_path, cfg, analyzer, reader)
+        msg_lines.append(table_str)
+    elif hasattr(analyzer, 'smart_reasons') and analyzer.smart_reasons:
         for reason in analyzer.smart_reasons:
             msg_lines.append(f"Auto Crop Decision: {reason}")
             

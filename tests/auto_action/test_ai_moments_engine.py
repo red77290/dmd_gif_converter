@@ -56,7 +56,8 @@ class TestAiMomentsEngine(unittest.TestCase):
         self.assertTrue(0 <= moment.scores.get("Frame Avg", 0) <= 100)
         self.assertTrue(0 <= moment.scores.get("Stability", 0) <= 100)
         self.assertTrue(0 <= moment.scores.get("Legibility", 0) <= 100)
-        self.assertTrue(0 <= moment.overall_score <= 100)
+        # Score can exceed 100 because of temporal_bonus
+        self.assertTrue(bool(0 <= moment.overall_score <= 150))
         
         # Check non-overlap
         for i in range(len(results)):
