@@ -12,7 +12,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.plugins.scorers.dmd_scorers import DMDVisibilityScore, SceneChangeScore
 from src.engine.auto_action.camera import _build_camera_rect, _smooth, _apply_look_ahead
 from src.engine.config.auto_action_config import AutoActionConfig
 

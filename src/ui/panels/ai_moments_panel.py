@@ -383,11 +383,10 @@ class AiMomentsPanel(ctk.CTkFrame):
         
         self._ai_task_vars = {}
         tasks = [
-            "Scene Detection",
-            "Subject Detection",
-            "Motion Analysis",
-            "DMD Analysis",
-            "Ranking Moments"
+            "Signal Extraction",
+            "Scoring Windows",
+            "Ranking Moments",
+            "Done"
         ]
         for t in tasks:
             var = tk.StringVar(value="[ ]")
@@ -497,7 +496,7 @@ class AiMomentsPanel(ctk.CTkFrame):
             var.set("[ ]")
             
         options = {
-            "moments_count": int(self.app_state.v_ai_moments_count.get()),
+            "count": int(self.app_state.v_ai_moments_count.get()),
             "crit_action": self.app_state.v_ai_crit_action.get(),
             "crit_epic": self.app_state.v_ai_crit_epic.get(),
             "crit_character": self.app_state.v_ai_crit_character.get(),
@@ -598,6 +597,22 @@ class AiMomentsPanel(ctk.CTkFrame):
             metrics_text = " | ".join([f"{k}: {int(v)}" for k, v in m.scores.items()])
             ctk.CTkLabel(metrics_frame, text=metrics_text, font=ctk.CTkFont(size=11), text_color="gray").pack(side="left")
 
+        # Add a copy button at the bottom
+        def _copy_to_clipboard():
+            lines = ["=== AI Moments Report ==="]
+            for i, m in enumerate(self._ai_results):
+                lines.append(f"Moment #{i+1} [{format_time(m.start_time)} → {format_time(m.end_time)}] Score: {int(m.overall_score)}")
+                metrics_text = " | ".join([f"{k}: {int(v)}" for k, v in m.scores.items()])
+                lines.append(f"  {metrics_text}")
+            self.clipboard_clear()
+            self.clipboard_append("\n".join(lines))
+            self.update()
+            
+        copy_btn = ctk.CTkButton(self._ai_results_scroll, text="Copy Report to Clipboard", 
+                                 command=_copy_to_clipboard, fg_color="#333333", hover_color="#444444", width=200)
+        copy_btn.pack(pady=15)
+        self._ai_result_widgets.append(copy_btn)
+
     def _add_moments_to_queue(self, results):
         from pathlib import Path
         import threading
@@ -632,13 +647,12 @@ class AiMomentsPanel(ctk.CTkFrame):
                     out_name = f"{base_name}_M{i+1}{ext}"
                 out_path = tmp_dir / out_name
                 
-                # Use ffmpeg to cut the moment
+                # Use ffmpeg to cut the moment (no -c copy to allow frame-accurate cutting)
                 cmd = [
                     "ffmpeg", "-y",
-                    "-ss", str(m.start_time),
                     "-i", src_path,
-                    "-to", str(m.end_time - m.start_time),
-                    "-c", "copy",
+                    "-ss", str(m.start_time),
+                    "-t", str(m.end_time - m.start_time),
                     str(out_path)
                 ]
                 

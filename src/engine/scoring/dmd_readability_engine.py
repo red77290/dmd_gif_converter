@@ -208,13 +208,13 @@ class DmdReadabilityEngine:
             return frame
         x, y, w, h = roi
         fh, fw = frame.shape[:2]
-        x = max(0, x)
-        y = max(0, y)
-        x2 = min(fw, x + w)
-        y2 = min(fh, y + h)
-        if x2 <= x or y2 <= y:
+        x_int = max(0, int(round(x)))
+        y_int = max(0, int(round(y)))
+        x2_int = min(fw, int(round(x + w)))
+        y2_int = min(fh, int(round(y + h)))
+        if x2_int <= x_int or y2_int <= y_int:
             return frame
-        return frame[y:y2, x:x2]
+        return frame[y_int:y2_int, x_int:x2_int]
 
     def _simulate_conversion(
         self,

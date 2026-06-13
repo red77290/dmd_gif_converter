@@ -1,0 +1,537 @@
+src/engine/analysis/analyzer.py              |   4 +-
+ src/engine/analysis/scene_types.py           |  20 +-
+ src/engine/auto_action/camera.py             |  14 +-
+ src/engine/conversion/cli.py                 |  63 ++++---
+ src/engine/conversion/core.py                |   9 +-
+ src/engine/conversion/quality.py             | 184 -------------------
+ src/engine/scoring/dmd_readability_engine.py |  12 +-
+ src/plugins/scorers/ai_moments.py            | 262 ++++++++-------------------
+ src/plugins/scorers/dmd_scorers.py           | 145 ---------------
+ src/plugins/trackers/tracker.py              | 103 ++++++-----
+ src/ui/app.py                                |   8 +
+ src/ui/panels/ai_moments_panel.py            |  34 +++-
+ src/ui/preview/preview_panel.py              |  12 +-
+ tests/auto_action/test_ai_moments_engine.py  |   9 +-
+ tests/auto_action/test_analysis.py           |   1 -
+ tests/auto_action/test_camera.py             |   1 -
+ tests/auto_action/test_config.py             |   1 -
+ tests/auto_action/test_detector.py           |   1 -
+ tests/auto_action/test_pipeline.py           |   1 -
+ tests/converter/test_cli.py                  |   2 +-
+ tests/converter/test_quality_score.py        | 100 ----------
+ tests/engine/analysis/test_analyzers.py      |  38 +---
+ 22 files changed, 253 insertions(+), 771 deletions(-)
+
+--- Changes ---
+
+src/engine/analysis/analyzer.py
+  @@ -61,9 +61,9 @@ class VideoAnalyzer:
+  -                if _auto_str and "suggested_strength" in _decision:
+  +                if (_auto_str or _smart) and "suggested_strength" in _decision:
+                       self.cfg.strength = _decision["suggested_strength"]
+  -                if _auto_sm and "suggested_smoothness" in _decision:
+  +                if (_auto_sm or _smart) and "suggested_smoothness" in _decision:
+                       self.cfg.smoothness = _decision["suggested_smoothness"]
+   
+                   # Apply scene profile to cfg when auto_scene_type is active
+  +2 -2
+
+src/engine/analysis/scene_types.py
+  @@ -134,7 +134,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
+  -        auto_vertical_bias=False,
+  +        auto_vertical_bias=True,
+           suggested_strength=0.65,
+           suggested_smoothness=0.85,
+           max_zoom_override=1.5,
+  @@ -158,7 +158,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
+  -        auto_vertical_bias=False,
+  +        auto_vertical_bias=True,
+           suggested_strength=0.70,
+           suggested_smoothness=0.80,
+           max_zoom_override=1.05,
+  @@ -182,7 +182,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
+  -        auto_vertical_bias=False,
+  +        auto_vertical_bias=True,
+           suggested_strength=0.40,
+           suggested_smoothness=0.90,
+           max_zoom_override=2.0,
+  @@ -194,7 +194,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
+  -        auto_vertical_bias=False,
+  +        auto_vertical_bias=True,
+           suggested_strength=0.65,
+           suggested_smoothness=0.85,
+           max_zoom_override=1.6,
+  @@ -206,7 +206,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
+  -        auto_vertical_bias=False,
+  +        auto_vertical_bias=True,
+           suggested_strength=0.60,
+           suggested_smoothness=0.80,
+           max_zoom_override=1.3,
+  @@ -309,11 +309,15 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
+  -    if tall_ratio >= 0.70 and body_aspect > 1.4:
+  +    if tall_ratio >= 0.60 and body_aspect > 1.4:
+           scores[SceneType.FULL_BODY_TALL] += 3.0
+           scores[SceneType.FIGHTING_2D] += 0.5
+           scores[SceneType.PLATFORMER] -= 3.0
+           scores[SceneType.MENU_STATIC] -= 2.0
+  +        
+  +    if body_aspect > 1.6:
+  +        # Very tall bodies are humans/anime characters, not platformer sprites
+  +        scores[SceneType.PLATFORMER] -= 3.0
+       elif tall_ratio >= 0.35 and body_aspect > 1.2:
+           scores[SceneType.FIGHTING_2D] += 1.0
+           
+  @@ -332,7 +336,6 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
+  -        scores[SceneType.PLATFORMER] += 1.0
+   
+       # 5. Isometric Top-Down: High movement in both X and Y, no stable floor
+       if x_variance >= 0.02 and y_variance >= 0.02 and floor_var_score > 0.4:
+  @@ -340,9 +343,10 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
+  -    # 6. Static Menu: Very low movement
+  +    # 6. Static Menu / Still Scene: Very low movement
+       if x_variance < 0.005 and y_variance < 0.005:
+           scores[SceneType.MENU_STATIC] += 3.0
+  +        scores[SceneType.PLATFORMER] -= 3.0
+   
+       # Add small default bias to moving action as the safest fallback
+       scores[SceneType.ACTION_MOVING] += 0.5
+  +12 -8
+
+src/engine/auto_action/camera.py
+  @@ -7,9 +7,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
+  -                       effective_frame_w: Optional[int] = None):
+  +                       effective_frame_w: Optional[int] = None,
+  +                       effective_frame_top: float = 0.0,
+  +                       effective_frame_h: Optional[int] = None):
+       if effective_frame_w is None:
+           effective_frame_w = frame_w
+  +    if effective_frame_h is None:
+  +        effective_frame_h = frame_h
+       target_ratio = float(cfg.target_width) / cfg.target_height
+       _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
+       _auto = getattr(cfg, "auto_vertical_bias", False)
+  @@ -120,7 +124,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
+  -            cy = ideal_top + crop_h / 2.0
+  +            # If the bounding box is huge, it's likely tracking a flying platform/enemy
+  +            # far above the character. In a platformer, we should NOT let this pull
+  +            # the camera up and lose the floor.
+  +            if _platformer and total_h > crop_h * 0.8:
+  +                cy = cy_floor
+  +            else:
+  +                cy = ideal_top + crop_h / 2.0
+           else:
+               cy = cy_floor
+       else:
+  +12 -2
+
+src/engine/conversion/cli.py
+  @@ -186,6 +186,17 @@ def _build_parser() -> argparse.ArgumentParser:
+  +    # ── A/B Testing ─────────────────────────────────────────────────────────
+  +    ab = p.add_argument_group("A/B Testing (Scoring V2)")
+  +    ab.add_argument(
+  +        "--ab-test", action="store_true", default=False,
+  +        help="Run A/B testing to compare scoring strategies on a single video file instead of converting it."
+  +    )
+  +    ab.add_argument(
+  +        "--ab-test-strategies", type=str, default="baseline_v1,balanced_v2",
+  +        help="Comma-separated list of scoring strategies to test (default: baseline_v1,balanced_v2)."
+  +    )
+  +
+       # ── AI Moments Extraction ───────────────────────────────────────────────
+       am = p.add_argument_group("AI Moments Extraction")
+       am.add_argument(
+  @@ -201,8 +212,8 @@ def _build_parser() -> argparse.ArgumentParser:
+  -        "--ai-moments-strategy", type=str, default="Balanced", choices=["Action", "Balanced", "Character"],
+  -        help="Strategy to prioritize for AI moments (default: Balanced)."
+  +        "--ai-moments-strategy", type=str, default="balanced_v2",
+  +        help="Scoring strategy to use for AI moments (default: balanced_v2)."
+       )
+       am.add_argument(
+           "--ai-moments-dur-min", type=float, default=2.0, metavar="F",
+  @@ -408,6 +419,22 @@ if __name__ == "__main__":
+  +    # ── A/B Testing ─────────────────────────────────────────────────────────
+  +    if args.ab_test:
+  +        from src.engine.testing.ab_testing_engine import ABTestingEngine
+  +        if not args.folders or not os.path.isfile(args.folders[0]):
+  +            logger.error("A/B testing requires a single video file as the argument.")
+  +            sys.exit(1)
+  +            
+  +        video_path = args.folders[0]
+  +        strategies = [s.strip() for s in args.ab_test_strategies.split(",") if s.strip()]
+  +        
+  +        logger.info(f"Running A/B Test on {video_path} using strategies: {strategies}")
+  +        engine = ABTestingEngine(video_path=video_path, target_w=128, target_h=32)
+  +        report = engine.run(strategy_names=strategies)
+  +        report.print_leaderboard()
+  +        sys.exit(0)
+  +
+       if args.folders:
+           source_folders = []
+           for f in args.folders:
+  @@ -574,34 +601,6 @@ if __name__ == "__main__":
+  -        # ── Auto-Cleanup Phase ────────────────────────────────────────────────
+  -        if args.reject_threshold > 0:
+  -            import json
+  -            try:
+  -                from send2trash import send2trash
+  -            except ImportError:
+  -                def send2trash(path):
+  -                    import os
+  -                    os.remove(path)
+  -            
+  -            logger.info(f"=== Auto-Cleanup: Rejecting files scoring < {args.reject_threshold}% ===")
+  -            rejected_count = 0
+  -            for f in os.listdir(folder_out):
+  -                if f.endswith(".gif"):
+  -                    gif_path = os.path.join(folder_out, f)
+  -                    score_path = gif_path + ".scores.json"
+  -                    if os.path.exists(score_path):
+  -                        try:
+  -                            with open(score_path, "r", encoding="utf-8") as file:
+  -                                data = json.load(file)
+  -                            if data.get("score", 100) < args.reject_threshold:
+  -                                logger.info(f"[TRASH] {f} — Score: {data.get('score')}%")
+  -                                send2trash(gif_path)
+  -                                send2trash(score_path)
+  -                                rejected_count += 1
+  -                        except Exception as e:
+  -                            logger.error(f"Error checking score for {f}: {e}")
+  -            
+  -            logger.info(f"=== Auto-Cleanup Complete: Trashed {rejected_count} file(s) ===")
+   
+  -    logger.info("Done.")
+  +if __name__ == "__main__":
+  +    main()
+  +31 -32
+
+src/engine/conversion/core.py
+  @@ -15,7 +15,6 @@ try:
+  -from src.engine.conversion.quality import evaluate_gif_quality
+   logger = logging.getLogger(__name__)
+   
+   
+  @@ -629,12 +628,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
+  -    # Evaluate DMD Quality
+  -    q_result = evaluate_gif_quality(out_path)
+  -    score = q_result["score"]
+  -    color = q_result["color"]
+  -    log(f"[QUALITY] {filename} — Score: {score}% {color} | Reasons: {', '.join(q_result['reasons'])}")
+  -
+  +    # Quality evaluation is now performed pre-conversion by Scoring V2 engines (AiMoments).
+  +    # Post-conversion evaluate_gif_quality() has been removed as it is obsolete.
+       log(f"[OK    ] {filename}")
+       return True, f"[OK] {filename}"
+   
+  +2 -7
+
+src/engine/conversion/quality.py
+  @@ -1,184 +0,0 @@
+  -import cv2
+  -import numpy as np
+  -import os
+  -import json
+  -
+  -def evaluate_gif_quality(gif_path: str) -> dict:
+  -    """
+  -    Evaluates the quality of a converted DMD GIF.
+  -    Returns a dict with score (0-100), rating, and reasons.
+  -    """
+  -    if not os.path.exists(gif_path):
+  -        return _fallback_result("File not found")
+  -
+  -    cap = cv2.VideoCapture(gif_path)
+  -    if not cap.isOpened():
+  -        return _fallback_result("Could not open GIF")
+  -
+  -    scores = []
+  -    reasons_set = set()
+  -    
+  -    # Evaluate up to 10 frames sampled evenly
+  -    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 10)
+  -    step = max(1, total_frames // 10)
+  -    
+  -    for i in range(0, total_frames, step):
+  -        cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
+  -        ret, frame = cap.read()
+  -        if not ret or frame is None:
+  -            break
+  -            
+  -        score_info = _evaluate_dmd_frame(frame)
+  -        scores.append(score_info["score"])
+  -        for r in score_info["reasons"]:
+  -            reasons_set.add(r)
+  -            
+  -    cap.release()
+  -    
+  -    if not scores:
+  -        return _fallback_result("No readable frames")
+  -        
+  -    final_score = int(np.mean(scores) * 100.0)
+  -    
+  -    # Evaluate GIF duration and frame count to penalize unreadable/too fast GIFs
+  -    try:
+  -        from PIL import Image
+  -        with Image.open(gif_path) as img:
+  -            real_frames = getattr(img, "n_frames", 1)
+  -            duration_ms = 0
+  -            for i in range(real_frames):
+  -                img.seek(i)
+  -                duration_ms += img.info.get("duration", 100)
+  -    except Exception:
+  -        real_frames = total_frames
+  -        duration_ms = real_frames * 100
+  -        
+  -    if real_frames <= 2:
+  -        final_score = int(final_score * 0.2)
+  -        reasons_set.add("Not enough frames")
+  -    elif duration_ms < 400:
+  -        final_score = int(final_score * 0.4)
+  -        reasons_set.add("Animation too short/fast")
+  -
+  -    final_score = max(0, min(100, final_score))
+  -    
+  -    rating, color = _get_rating(final_score)
+  -    
+  -    reasons = list(reasons_set)
+  -    if not reasons:
+  -        reasons.append("Average conversion")
+  -        
+  -    result = {
+  -        "score": final_score,
+  -        "rating": rating,
+  -        "color": color,
+  -        "reasons": reasons
+  -    }
+  -    
+  -    # Save to sidecar
+  -    _save_score_sidecar(gif_path, result)
+  -    
+  -    return result
+  -
+  -def _evaluate_dmd_frame(dmd_frame: np.ndarray) -> dict:
+  -    if dmd_frame is None or dmd_frame.size == 0:
+  -        return {"score": 0.0, "reasons": ["Empty frame"]}
+  -
+  -    gray_dmd = cv2.cvtColor(dmd_frame, cv2.COLOR_BGR2GRAY)
+  -    _, thresh = cv2.threshold(gray_dmd, 10, 255, cv2.THRESH_BINARY)
+  -    
+  -    total_pixels = dmd_frame.shape[0] * dmd_frame.shape[1]
+  -    non_black_pixels = np.sum(thresh > 0)
+  -    non_black_ratio = non_black_pixels / total_pixels if total_pixels > 0 else 0.0
+  -
+  -    sobelx = cv2.Sobel(gray_dmd, cv2.CV_64F, 1, 0, ksize=3)
+  -    sobely = cv2.Sobel(gray_dmd, cv2.CV_64F, 0, 1, ksize=3)
+  -    gradient_magnitude = np.sqrt(sobelx**2 + sobely**2)
+  -    mean_gradient = np.mean(gradient_magnitude)
+  -
+  -    coords = np.argwhere(thresh > 0)
+  -    if coords.size > 0:
+  ... (84 lines truncated)
+  +0 -184
+
+src/engine/scoring/dmd_readability_engine.py
+  @@ -208,13 +208,13 @@ class DmdReadabilityEngine:
+  -        x = max(0, x)
+  -        y = max(0, y)
+  -        x2 = min(fw, x + w)
+  -        y2 = min(fh, y + h)
+  -        if x2 <= x or y2 <= y:
+  +        x_int = max(0, int(round(x)))
+  +        y_int = max(0, int(round(y)))
+  +        x2_int = min(fw, int(round(x + w)))
+  +        y2_int = min(fh, int(round(y + h)))
+  +        if x2_int <= x_int or y2_int <= y_int:
+               return frame
+  -        return frame[y:y2, x:x2]
+  +        return frame[y_int:y2_int, x_int:x2_int]
+   
+       def _simulate_conversion(
+           self,
+  +6 -6
+
+src/plugins/scorers/ai_moments.py
+  @@ -7,11 +7,10 @@ import logging
+  -# Suppress [mp3float @ ...] / Header missing messages before any VideoCapture
+  -os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "loglevel;quiet")
+  -os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
+  -
+   from src.engine.auto_action.reader import _quiet_c_stderr
+  +from src.engine.scoring.signal_scoring_engine import SignalScoringEngine
+  +from src.engine.scoring.final_scoring_engine import FinalScoringEngine
+  +from src.engine.scoring.quality_evaluator import QualityEvaluator
+   
+   logger = logging.getLogger(__name__)
+   
+  @@ -31,14 +30,21 @@ class AiMomentsEngine:
+  -        # Detector for Character feature
+  -        self.detector = None
+  -        if self.options.get("crit_character", False):
+  -            try:
+  -                from src.engine.auto_action.detector import DetectorFactory
+  -                self.detector = DetectorFactory.create()
+  -            except ImportError:
+  -                logger.warning("YOLO detector not available, Character criteria will be skipped.")
+  +        # Initialize Scoring V2 components
+  +        try:
+  +            from src.plugins.detectors.detector import _FrameDetector
+  +            detector = _FrameDetector()
+  +        except Exception:
+  +            detector = None
+  +            
+  +        use_optical_flow = self.options.get("crit_action", False)
+  +        self.signal_engine = SignalScoringEngine(detector=detector, optical_flow=use_optical_flow)
+  +        
+  +        # Determine strategy from options (default: balanced_v2)
+  +        strategy_name = self.options.get("scoring_strategy", "balanced_v2")
+  +        self.final_engine = FinalScoringEngine(strategy_name)
+  +        
+  +        self.quality_evaluator = QualityEvaluator()
+   
+       def cancel(self):
+           self._cancel = True
+  @@ -73,29 +79,16 @@ class AiMomentsEngine:
+  -        # Evaluate multiple window durations between min and max (step 0.5s)
+           window_durations = np.arange(dur_min, dur_max + 0.1, 0.5).tolist()
+           if not window_durations:
+               window_durations = [dur_min]
+               
+           window_frames_list = [max(1, int(wd * analyze_fps)) for wd in window_durations]
+           
+  -        # Extract features frame by frame
+  -        # We will collect metrics for each analyzed frame
+  -        metrics = []
+  -        
+  -        # Progress mapping
+  -        # 0-50% : Reading & frame-level extraction
+  -        # 50-70% : Window aggregation (Motion, Subject)
+  -        # 70-90% : DMD Simulation / Loopable
+  -        # 90-100% : Ranking
+  -        
+  -        self.progress_cb("Scene Detection", 0.0)
+  +        # 1. Extract Signals
+  +        self.progress_cb("Signal Extraction", 0.0)
+           
+  -        prev_gray = None
+  -        prev_hist = None
+  -        
+  -        # Read frames
+  +        signals = []
+           idx = 0
+           while not self._cancel:
+               ret, frame = cap.read()
+  @@ -103,181 +96,83 @@ class AiMomentsEngine:
+  -                # Downscale for performance
+  +                # Downscale for performance during analysis
+                   small = cv2.resize(frame, (320, 180))
+  -                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+  -                
+  -                # 1. Action (Optical Flow)
+  -                flow_mag = 0.0
+  -                if prev_gray is not None and self.options.get("crit_action", False):
+  -                    # Simplified motion: absolute difference for speed, or Farneback
+  -                    diff = cv2.absdiff(gray, prev_gray)
+  -                    flow_mag = np.mean(diff)
+                   
+  -                # 2. Epic (Brightness variance / Scene cut)
+  -                epic_val = 0.0
+  -                if prev_gray is not None and self.options.get("crit_epic", False):
+  -                    hist = cv2.calcHist([gray], [0], None, [16], [0, 256])
+  -                    if prev_hist is not None:
+  -                        # Bhattacharyya distance for scene cut
+  -                        epic_val = cv2.compareHist(prev_hist, hist, cv2.HISTCMP_BHATTACHARYYA)
+  -                    prev_hist = hist
+  -                else:
+  -                    if self.options.get("crit_epic", False):
+  -                        prev_hist = cv2.calcHist([gray], [0], None, [16], [0, 256])
+  -
+  -                # 3. Character (YOLO boxes area)
+  -                char_val = 0.0
+  -                if self.detector is not None and self.options.get("crit_character", False):
+  -                    # For performance, maybe run YOLO on even smaller frame or every N frames
+  -                    try:
+  -                        box = self.detector.detect_person(small, multi_fusion=True)
+  -                        if box is not None:
+  -                            char_val = (box.w * box.h) / (320 * 180) # normalize by frame area
+  -                    except Exception:
+  -                        pass
+  -                        
+  -                metrics.append({
+  -                    "frame_idx": idx,
+  -                    "time": idx / fps,
+  -                    "action": flow_mag,
+  -                    "epic": epic_val,
+  -                    "char": char_val,
+  -                    "gray_frame": gray # store for loop/dmd later
+  -                })
+  +                # Use Layer 1 pure measurement
+  +                sig = self.signal_engine.score_frame(small, frame_idx=idx)
+                   
+  -                prev_gray = gray
+  +                # We store the time manually for moment creation
+  +                sig_with_time = (sig, idx / fps)
+  +                signals.append(sig_with_time)
+                   
+               idx += 1
+               if idx % (fps * 5) == 0:
+  -                self.progress_cb("Scene Detection", 0.5 * (idx / total_frames))
+  +                self.progress_cb("Signal Extraction", 0.4 * (idx / total_frames))
+                   
+           cap.release()
+           
+  -        if not metrics or self._cancel:
+  +        if not signals or self._cancel:
+               return []
+               
+  -        self.progress_cb("Subject Detection", 0.5)
+  -        self.progress_cb("Motion Analysis", 0.6)
+  +        self.progress_cb("Scoring Windows", 0.5)
+           
+  -        # Aggregate into sliding windows of varying durations
+  +        # 2. Score sliding windows
+           moments = []
+           step = max(1, int(analyze_fps * 1.0)) # 1 second slide
+           
+  -        for start_i in range(0, len(metrics), step):
+  +        total_windows = (len(signals) // step) * len(window_frames_list)
+  +        windows_processed = 0
+  +
+  +        for start_i in range(0, len(signals), step):
+               for wf in window_frames_list:
+                   end_i = start_i + wf
+  -                if end_i > len(metrics):
+  +                if end_i > len(signals):
+                       continue
+                       
+  -                window = metrics[start_i:end_i]
+  +                window = signals[start_i:end_i]
+  +                window_sigs = [s[0] for s in window]
+                   
+  -                w_action = np.mean([m["action"] for m in window])
+  -                w_epic = np.max([m["epic"] for m in window]) # Scene cut usually spikes
+  -                w_char = np.mean([m["char"] for m in window])
+  +                # Evaluate individual frames with Layer 2
+  +                final_scores = self.final_engine.score_sequence(window_sigs)
+                   
+  -                # 4. Loopable (MSE between first and last frame of window)
+  -                w_loop = 0.0
+  -                if self.options.get("crit_loopable", False):
+  -                    f1 = window[0]["gray_frame"]
+  -                    f2 = window[-1]["gray_frame"]
+  -                    mse = np.mean((f1 - f2) ** 2)
+  -                    # Lower MSE is better, invert it (max expected ~ 10000)
+  -                    w_loop = max(0, 1.0 - (mse / 5000.0))
+  ... (125 lines truncated)
+  @@ -288,8 +183,11 @@ class AiMomentsEngine:
+  -        count = int(self.options.get("moments_count", 10))
+  -        final_results = final_results[:count]
+  +        limit = int(self.options.get("count", 5))
+  +        final_results = final_results[:limit]
+  +        
+  +        # Sort chronologically for display
+  +        final_results.sort(key=lambda x: x.start_time)
+           
+  -        self.progress_cb("Ranking Moments", 1.0)
+
+... (more changes truncated)
+  +79 -182
+[full diff: rtk git diff --no-compact]
