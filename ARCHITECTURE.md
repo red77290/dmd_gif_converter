@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v6.3.0)
+# DMD GIF Converter — Technical Architecture (v7.0.0)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -73,6 +73,13 @@ dmd_gif_converter/
 │   │   ├── camera.py                 ← _build_camera_rect, _smooth, _crop_frame
 │   │   └── analysis.py               ← _FloorEstimator, scoring functions
 │   │
+│   ├── scoring/                      # Scoring V2 Engine
+│   │   ├── interfaces.py             ← ISignalScorer, IQualityEvaluator
+│   │   ├── signal_scoring_engine.py  ← Temporal signal extraction (Contrast, Entropy)
+│   │   ├── quality_evaluator.py      ← Spatial quality evaluation
+│   │   ├── dmd_readability_engine.py ← DMD-specific readability heuristic
+│   │   └── final_scoring_engine.py   ← Strategy-based weight aggregation
+│   │
 │   ├── converter/                    # FFmpeg conversion engine
 │   │   ├── interfaces.py             ← IConverter, IMetadataExtractor, IQualityScorer, IBatchOrchestrator (ABC)
 │   │   ├── core.py                   ← process_file(), process_folder() (public API)
@@ -130,6 +137,10 @@ The system is divided into **three independent layers**, each with its own set o
 │  Layer         TrackingEngine (ITracker) ← DetectorFactory → _FrameDetector (IDetector)
 │  (AI/CV)       VideoAnalyzer             Renderer (IRenderer)           │
 │                VideoReader               FFmpegWriter                    │
+├────────────────────────────────────▼───────────────────────────────────┤
+│  Scoring V2    SignalScoringEngine (Temporal: contrast, motion, edges)  │
+│  Layer         QualityEvaluator (Spatial: composition, clutter)         │
+│                FinalScoringEngine (Strategy: Action, Balanced, etc.)    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -302,8 +313,23 @@ classDiagram
         +create()$ IDetector
     }
 
+    class FrameTrackingContext {
+        <<dataclass>>
+        +frame: ndarray
+        +cam_prev: CamRect
+        +raw_roi: BoundingBox
+        +face_roi: BoundingBox
+        +cam_now: CamRect
+    }
+
+    class ITrackerStage {
+        <<interface>>
+        +process(context: FrameTrackingContext, engine: TrackingEngine) void
+    }
+
     class TrackingEngine {
         -detector: IDetector
+        -stages: List~ITrackerStage~
         -roi_history: Deque
         -floor_est: _FloorEstimator
         -scroll_vx: float
@@ -312,8 +338,8 @@ classDiagram
         +process_frame(...) CamRect
         +last_roi BoundingBox
         +cam_full_view CamRect
+        +_clip_to_face_roi(raw_roi) BoundingBox
     }
-
     class Renderer {
         -frame_w: int
         -frame_h: int
@@ -391,6 +417,8 @@ classDiagram
     TrackingEngine --> IDetector : uses (via factory)
     TrackingEngine --> _FloorEstimator : owns
     TrackingEngine --> AutoActionConfig : reads
+    TrackingEngine "1" *-- "many" ITrackerStage : pipeline
+    ITrackerStage ..> FrameTrackingContext : modifies
     preprocess_video_for_dmd --> VideoReader : creates
     preprocess_video_for_dmd --> VideoAnalyzer : creates
     preprocess_video_for_dmd --> TrackingEngine : creates
@@ -633,32 +661,32 @@ sequenceDiagram
     VA->>VA: Set face_priority_mode based on winning profile
 ```
 
-### 6.5 AI Iconic Moments Analysis
+### 6.5 AI Iconic Moments Analysis (Scoring V2)
 
-Runs a multi-metric analysis across the entire video (subsampled at 2 FPS) to discover the best moments based on Action, Epic (scene cuts), Character presence, Loopability, and DMD visibility.
+Runs a multi-metric analysis across the entire video (subsampled at 2 FPS) using the pure mathematical modules of **Scoring V2** to discover the best moments based on Action, Contrast, Edge Density, Entropy, and Character presence.
 When invoked from the UI or via CLI (`--ai-moments`), the engine extracts these moments to a temporary folder using FFmpeg, which is then fed into the standard Conversion pipeline.
 
 ```mermaid
 sequenceDiagram
     participant CLI/UI as CLI Wrapper / AiMomentsPanel
     participant ENG as AiMomentsEngine
-    participant CAP as VideoCapture
-    participant DET as YoloDetector
-    participant FF as FFmpeg
+    participant SIG as SignalScoringEngine
+    participant QE as QualityEvaluator
+    participant FIN as FinalScoringEngine
 
     CLI/UI->>ENG: run() [in background thread]
     loop Every Nth frame (2 FPS)
-        ENG->>CAP: read()
-        CAP-->>ENG: frame
-        ENG->>ENG: Action Score (Optical Flow)
-        ENG->>ENG: Epic Score (Histogram/Bhattacharyya)
-        ENG->>DET: detect_person()
-        DET-->>ENG: Character Score (Area size)
+        ENG->>SIG: push_frame(frame)
+        SIG->>SIG: Compute Contrast, Entropy, Edge Density, Motion
+        ENG->>QE: evaluate_frame(frame, bbox)
+        QE-->>ENG: Spatial Score (Readability)
     end
+    ENG->>SIG: get_sequence_scores()
+    SIG-->>ENG: List[FrameScores]
     ENG->>ENG: Aggregate metrics into sliding windows
-    ENG->>ENG: Loopable Score (MSE start/end frames)
-    ENG->>ENG: DMD Score (Contrast std dev)
-    ENG->>ENG: Normalize & apply Strategy Weights
+    ENG->>FIN: score_sequence(windows, strategy="Balanced")
+    FIN->>FIN: Apply strategy weights (e.g. Action=0.5, Subject=0.3)
+    FIN-->>ENG: Ranked Windows
     ENG->>ENG: Non-Maximum Suppression (prevent overlaps)
     ENG-->>CLI/UI: List[AiMoment]
     
@@ -974,4 +1002,4 @@ class MyPanelMixin(IPanel):
 
 ---
 
-*Last updated: v6.3.0 — June 2026*
+*Last updated: v7.0.0 — June 2026*

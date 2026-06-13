@@ -1,5 +1,12 @@
 # DMD GIF Converter — Changelog
 
+## What is New in v7.0.0?
+- **🧠 Scoring V2 Engine**: A complete rewrite of the mathematical scoring system. AI Moments now evaluates pure Temporal Signals (Contrast, Entropy, Edge Density, Motion) and Spatial Composition (Readability, Clutter) separately, then applies dynamic strategy weights (`Action`, `Balanced`, `Character`). This massively improves the reliability of extracted moments.
+- **🔬 A/B Testing Runner**: Added a dedicated `ab_runner.py` CLI and A/B Testing UI Panel to directly compare Scoring V1 against Scoring V2 on entire video folders. Generates detailed markdown reports.
+- **👁️ Cinematic Rule-of-Thirds Framing**: Refined the Auto Action tracker math for close-ups. It now ignores the top 35% of the bounding box (hair/forehead) and specifically targets the next 30% (eyes), perfectly aligning the subject's eyeline with the vertical center of the DMD matrix.
+- **🏗️ Tracker Pipeline Architecture**: The monolithic `TrackingEngine.process_frame()` method was completely refactored into a cleanly decoupled Pipeline pattern (Chain of Responsibility) utilizing 12 modular stages (`DetectionStage`, `FaceClippingStage`, `HistorySynthesisStage`, etc.) connected by a strongly typed `FrameTrackingContext`.
+- **📝 Dynamic Log Tags**: The engine now emits real-time `[DYNAMIC]` log tags, allowing users to monitor camera cuts and Continuous Scoring Matrix profile transitions directly in the UI Log Panel.
+
 ## What is New in v6.3.0?
 - **📊 Continuous Scoring Matrix**: Scene detection (Auto Action) no longer relies on a rigid waterfall model. It uses a dynamic, continuous scoring matrix to identify the optimal camera profile (e.g., Platformer, Talking Closeup, Action). The scoreboard is fully visible in the UI logs.
 - **🛡️ Auto Detector Fallback (Person → Hybrid)**: When tracking mixed content, if the primary `person` detector fails on a close-up or non-human subject, the engine can now instantly fall back to the `hybrid` detector mid-scene or pre-scan, ensuring a perfect cinematic shot without giving up.
