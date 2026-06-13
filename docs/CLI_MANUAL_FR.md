@@ -54,6 +54,8 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `log-level` | `--log-level` | `WARNING` | Définit le niveau de log (DEBUG, INFO, WARNING, ERROR). Par défaut WARNING (affiche la barre de progression). |
 | `verbose` | `--verbose` / `-v` | `False` | Alias pour `--log-level DEBUG`. Affiche les logs détaillés de FFMPEG. |
 
+> **Note :** Les balises `[DYNAMIC]` dans les logs affichent en temps réel les changements de plan caméra, les transitions de profil (ex: `scene_change_detected`), et les ajustements de cadrage effectués par le moteur Auto Action.
+
 ### Extraction AI Moments
 
 | Paramètre | Flag | Défaut | Description |
@@ -64,6 +66,14 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`). |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes. |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes. |
+
+### A/B Testing Engine (Validation Scoring V2)
+
+Pour valider et tester le moteur de Scoring localement, utilisez le nouveau lanceur A/B Testing :
+```bash
+python3 -m src.engine.testing.ab_runner tests/videos/
+```
+Cela exécutera le pipeline de prétraitement Auto Action sur toutes les vidéos du dossier cible, et générera un rapport Markdown détaillé (`report.md`) comparant le Scoring V1 et le Scoring V2 côte à côte.
 
 **Paramètres avancés** (UI et CLI) :
 

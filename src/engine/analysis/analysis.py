@@ -410,10 +410,10 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         if raw_left > 0.05:
             left_pct = _clamp(raw_left + 0.025, 0.0, 0.4)
             decision_codes["pillarbox"] = "detected"
-        elif raw_right < 0.95:
+        if raw_right < 0.95:
             right_pct = _clamp((1.0 - raw_right) + 0.025, 0.0, 0.4)
             decision_codes["pillarbox"] = "detected"
-        else:
+        if raw_left <= 0.05 and raw_right >= 0.95:
             decision_codes["pillarbox"] = "none"
     else:
         decision_codes["pillarbox"] = "disabled"

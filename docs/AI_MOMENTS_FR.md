@@ -4,15 +4,19 @@
 
 DMD GIF Converter inclut une fonctionnalité avancée **AI Moments** conçue pour analyser automatiquement les longues vidéos et extraire les meilleurs moments pour vos écrans physiques DMD.
 
-## Comment ça marche
+## Comment ça marche (Moteur Scoring V2)
 
-Le moteur AI Moments effectue une analyse en plusieurs passes sur votre vidéo :
+Le moteur AI Moments effectue une analyse en plusieurs passes sur votre vidéo en utilisant le **Moteur Scoring V2**, qui sépare l'évaluation en domaines Temporels et Spatiaux :
 
-1. **Détection de scènes** : Identifie les coupures et changements de plan pour éviter les sauts de caméra.
-2. **Détection de sujets** : Utilise l'IA (basé sur YOLO ou ONNX) pour trouver les visages, les personnes et les objets.
-3. **Analyse de mouvement** : Évalue la quantité d'action dans la scène.
-4. **Prédiction de la qualité DMD** : Simule la mise à l'échelle 128x32 et évalue le contraste, la lisibilité et l'encombrement.
-5. **Classement** : Classe les scènes en fonction de l'action, de la visibilité et de la durée.
+1. **Détection de scènes** : Identifie les coupures et changements de plan via corrélation d'histogrammes pour éviter les sauts de caméra.
+2. **Signaux Temporels** : Calcule des signaux purement mathématiques pour chaque image :
+   - *Contraste* : Différence entre les zones claires et sombres.
+   - *Entropie* : Complexité visuelle de l'image.
+   - *Densité des contours* : Netteté et détails (gradient de Sobel).
+   - *Mouvement* : Intensité du flux optique (Optical Flow).
+3. **Évaluateur Spatial** : Évalue la lisibilité DMD, l'encombrement et la composition (utilise YOLO pour la détection du sujet).
+4. **Pondération Stratégique** : Applique dynamiquement des poids en fonction de la stratégie choisie (`Action`, `Balanced`, `Character`).
+5. **Suppression des Non-Maxima (NMS)** : Classe les séquences et extrait les meilleurs moments sans chevauchement.
 
 ## Utilisation dans l'interface
 

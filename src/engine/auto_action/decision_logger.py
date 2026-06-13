@@ -142,8 +142,19 @@ class AutoActionDecisionLogger:
         tc_str = f"ACTIVE ({getattr(analyzer, 'tcp', 0.0):.1%})" if tc_val else "INACTIVE"
         msg_lines.append(fmt_row("Top Crop", tc_val, tc_str, "auto_top_crop"))
         
-        pb_val = (analyzer.effective_frame_left > 0)
-        pb_str = f"ACTIVE (Left: {analyzer.effective_frame_left}px)" if pb_val else "INACTIVE"
+        right_px = analyzer.frame_w - analyzer.effective_frame_left - analyzer.effective_frame_w
+        pb_left = analyzer.effective_frame_left > 0
+        pb_right = right_px > 0
+        pb_val = pb_left or pb_right
+        if pb_val:
+            parts = []
+            if pb_left:
+                parts.append(f"Left: {analyzer.effective_frame_left}px")
+            if pb_right:
+                parts.append(f"Right: {right_px}px")
+            pb_str = f"ACTIVE ({', '.join(parts)})"
+        else:
+            pb_str = "INACTIVE"
         msg_lines.append(fmt_row("Pillarbox Crop", pb_val, pb_str, "pillarbox"))
 
         msg_lines.append(f"------------------------------------------------------------")

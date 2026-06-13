@@ -57,6 +57,8 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `log-level` | `--log-level` | `WARNING` | Sets the logging level (DEBUG, INFO, WARNING, ERROR). Default is WARNING (shows progress bar). |
 | `verbose` | `--verbose` / `-v` | `False` | Alias for `--log-level DEBUG`. Shows detailed FFMPEG processing logs. |
 
+> **Note:** The `[DYNAMIC]` tags in the logs display real-time camera cuts, profile transitions (e.g., `scene_change_detected`), and framing adjustments from the Auto Action Engine.
+
 ### AI Moments Extraction
 
 | Parameter | Flag | Default | Description |
@@ -67,6 +69,14 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Strategy to prioritize (`Action`, `Balanced`, `Character`). |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Minimum duration of an extracted moment in seconds. |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Maximum duration of an extracted moment in seconds. |
+
+### A/B Testing Engine (Scoring V2 Validation)
+
+To validate and test the Scoring Engine locally, use the new A/B Testing runner:
+```bash
+python3 -m src.engine.testing.ab_runner tests/videos/
+```
+This will run the Auto Action preprocessing pipeline on all videos in the target folder, and output a detailed Markdown report (`report.md`) that compares Scoring V1 vs Scoring V2 side-by-side.
 
 **Advanced parameters** (UI and CLI):
 
