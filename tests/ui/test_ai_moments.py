@@ -94,7 +94,7 @@ class TestTogglePlaySelection(unittest.TestCase):
 
 
 class TestOnAiAnalysisComplete(unittest.TestCase):
-    def test_enables_report_button(self):
+    def test_adds_moments_to_queue(self):
         p = _make()
         p._btn_ai_show_report = MagicMock()
         p._ai_results = []
@@ -103,7 +103,7 @@ class TestOnAiAnalysisComplete(unittest.TestCase):
         p._populate_results = MagicMock()
         result = [MagicMock()]
         p._on_ai_analysis_complete(result)
-        p._btn_ai_show_report.configure.assert_called_with(state="normal")
+        p._add_moments_to_queue.assert_called_with(result)
         self.assertEqual(p._ai_results, result)
 
     def test_no_results_noop_queue(self):

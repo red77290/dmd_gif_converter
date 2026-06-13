@@ -55,6 +55,9 @@ class VideoAnalyzer:
                     self.scoreboard           = _decision.get("scoreboard_lines", [])
                     _smart_crop_margins  = (_decision["top_pct"], _decision["bottom_pct"])
                     _smart_face_priority = _decision.get("face_priority", False)
+                    self.decision_codes       = _decision.get("decision_codes", {})
+                    self.scene_signals        = _decision.get("scene_signals", {})
+                    self.scene_scores         = _decision.get("scene_scores", {})
                     
                 if _auto_pillarbox and "left_pct" in _decision and "right_pct" in _decision:
                     self.effective_frame_left = int(self.frame_w * _decision["left_pct"])
