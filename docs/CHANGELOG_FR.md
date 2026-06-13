@@ -1,5 +1,12 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## Nouveautés de la v7.0.0
+- **🧠 Moteur Scoring V2** : Une réécriture complète du système de score mathématique. AI Moments évalue désormais les signaux temporels purs (Contraste, Entropie, Densité des contours, Mouvement) séparément de la composition spatiale (Lisibilité, Encombrement), puis applique des poids stratégiques dynamiques (`Action`, `Balanced`, `Character`). Cela améliore massivement la fiabilité des moments extraits.
+- **🔬 Lanceur A/B Testing** : Ajout d'une interface CLI dédiée `ab_runner.py` et d'un panneau UI A/B Testing pour comparer directement le Scoring V1 et le Scoring V2 sur des dossiers vidéo complets. Génère des rapports Markdown détaillés.
+- **👁️ Cadrage Cinématique Règle des Tiers** : Affinement des mathématiques du tracker Auto Action pour les gros plans. Il ignore désormais les 35% supérieurs de la boîte de détection (cheveux/front) et cible spécifiquement les 30% suivants (yeux), alignant parfaitement la ligne de regard du sujet avec le centre vertical de la matrice DMD.
+- **🏗️ Architecture Pipeline du Tracker** : La méthode monolithique `TrackingEngine.process_frame()` a été entièrement refondue vers un modèle Pipeline (Chaîne de Responsabilité) parfaitement découplé. Elle exploite 12 étapes modulaires indépendantes (`DetectionStage`, `FaceClippingStage`, `LookAheadStage`, etc.) interconnectées par un contexte fortement typé (`FrameTrackingContext`).
+- **📝 Balises de Log Dynamiques** : Le moteur émet maintenant des balises de log `[DYNAMIC]` en temps réel, permettant aux utilisateurs de surveiller les coupes de caméra et les transitions de profil de la Matrice de Score Continue directement dans le panneau de logs de l'interface.
+
 ## Nouveautés de la v6.3.0
 - **📊 Matrice de Score Continue** : La détection de scène (Auto Action) ne repose plus sur un arbre en cascade rigide. Elle utilise désormais une matrice de score dynamique et continue pour identifier le profil de caméra optimal (ex: Platformer, Talking Closeup, Action). Le tableau des scores est désormais entièrement visible dans les logs de l'interface.
 - **🛡️ Détecteur de Secours Auto (Person → Hybrid)** : Lors du suivi de contenus mixtes, si le détecteur principal `person` échoue sur un très gros-plan ou un sujet non-humain, le moteur peut désormais basculer instantanément sur le détecteur `hybrid` en plein milieu d'une scène ou lors du pré-scan, garantissant un suivi cinématique parfait sans jamais abandonner.

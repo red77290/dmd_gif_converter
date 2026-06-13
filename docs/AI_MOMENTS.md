@@ -4,15 +4,19 @@
 
 DMD GIF Converter includes an advanced **AI Moments** feature designed to automatically analyze long videos and extract the best moments for your physical DMD displays. 
 
-## How it works
+## How it works (Scoring V2 Engine)
 
-The AI Moments engine runs a multi-pass analysis on your video:
+The AI Moments engine runs a multi-pass analysis on your video using the **Scoring V2 Engine**, which splits evaluation into Temporal and Spatial domains:
 
-1. **Scene Detection**: Identifies cuts and scene changes to avoid tracking across camera cuts.
-2. **Subject Detection**: Uses AI (YOLO-based or ONNX) to find faces, people, and objects.
-3. **Motion Analysis**: Evaluates how much action is happening.
-4. **DMD Quality Prediction**: Simulates the 128x32 downscaling and evaluates contrast, readability, and clutter.
-5. **Ranking**: Ranks the scenes based on action, visibility, and length.
+1. **Scene Detection**: Identifies cuts and scene changes using histogram correlation to avoid tracking across camera cuts.
+2. **Temporal Signals**: Computes pure mathematical signals for each frame:
+   - *Contrast*: Difference between bright and dark areas.
+   - *Entropy*: Visual complexity of the frame.
+   - *Edge Density*: Sharpness and details (Sobel gradient).
+   - *Motion*: Optical flow intensity.
+3. **Spatial Evaluator**: Evaluates DMD readability, clutter, and composition (using YOLO for subject detection).
+4. **Strategy Weighting**: Dynamically applies weights based on the chosen strategy (`Action`, `Balanced`, `Character`).
+5. **Non-Maximum Suppression (NMS)**: Ranks the sequences and extracts the top non-overlapping moments.
 
 ## Usage in the UI
 

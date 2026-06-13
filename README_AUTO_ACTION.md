@@ -1,4 +1,4 @@
-# Auto Action Framing (v6.3.0)
+# Auto Action Framing (v7.0.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
@@ -24,6 +24,12 @@ It creates an intermediate video that follows action/person areas at the target 
 **v5.0.0 architectural improvements:**
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
+
+**v7.0.0 improvements:**
+- **Tracker Pipeline Architecture**: The monolithic `TrackingEngine` was completely refactored into a modular Pipeline pattern (Chain of Responsibility) using 12 discrete, testable stages (e.g., `DetectionStage`, `FaceClippingStage`, `LookAheadStage`).
+- **Eye framing math**: Close-up tracking logic refined to ignore the top 35% (hair) and target the next 30% (eyes) of the bounding box. This guarantees the lowest eye perfectly targets the horizontal midline for optimal cinematic rule-of-thirds on the DMD.
+- **Dynamic Logging**: Added real-time `[DYNAMIC]` logs tracking every camera cut and continuous scoring profile activation.
+- **Scene classification fix**: Relaxed `action_horizontal` thresholds (`fill_ratio > 0.1`) to prevent wide fight scenes from being misclassified as `talking_closeup` (which caused abrupt decapitation zooms).
 
 **v6.3.0 improvements:**
 - Continuous Scoring Matrix dynamically selects the optimal camera profile instead of relying on a rigid waterfall model.

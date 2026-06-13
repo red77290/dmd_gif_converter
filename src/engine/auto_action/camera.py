@@ -49,7 +49,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cx = effective_frame_left + effective_frame_w / 2.0
         cy = (frame_top + frame_h) / 2.0
         crop_w = float(effective_frame_w)
-        crop_h = float(frame_w) / target_ratio
+        crop_h = crop_w / target_ratio
         cy = _apply_bias(cy, crop_h)
         return cx, cy, crop_w, crop_h
 
