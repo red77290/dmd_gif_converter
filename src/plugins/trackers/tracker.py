@@ -4,14 +4,33 @@ from typing import Deque, Tuple, Optional
 import numpy as np
 import cv2
 
+from src.engine.scoring.dmd_readability_engine import DmdReadabilityEngine
+
+class SceneChangeScore:
+    """Detects cuts and hard scene transitions."""
+    @staticmethod
+    def compute(frame_a: np.ndarray, frame_b: np.ndarray) -> float:
+        import cv2
+        try:
+            if frame_a is None or frame_b is None:
+                return 1.0
+            small_a = cv2.resize(frame_a, (64, 32), interpolation=cv2.INTER_AREA)
+            small_b = cv2.resize(frame_b, (64, 32), interpolation=cv2.INTER_AREA)
+            hsv_a = cv2.cvtColor(small_a, cv2.COLOR_BGR2HSV)
+            hsv_b = cv2.cvtColor(small_b, cv2.COLOR_BGR2HSV)
+            scores = []
+            for ch in (0, 2):   # H, V
+                hist_a = cv2.calcHist([hsv_a], [ch], None, [32], [0, 256])
+                hist_b = cv2.calcHist([hsv_b], [ch], None, [32], [0, 256])
+                cv2.normalize(hist_a, hist_a)
+                cv2.normalize(hist_b, hist_b)
+                scores.append(cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL))
+            return max(0.0, min(1.0, float(np.mean(scores))))
+        except Exception:
+            return 1.0
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.plugins.detectors.detector import _FrameDetector, DetectorFactory
 from src.engine.auto_action.camera import _build_camera_rect, _apply_look_ahead
-from src.plugins.scorers.dmd_scorers import (
-    SceneChangeScore,
-    DMDVisibilityScore,
-    DMDReadabilityScore,
-)
 from src.engine.analysis.analysis import _FloorEstimator
 from src.engine.auto_action.interfaces import ITracker, BoundingBox, CamRect
 from src.engine.auto_action.renderer import Renderer  # Used for crop_frame_static in scoring
@@ -44,11 +63,19 @@ class TrackingEngine(ITracker):
             self.cam_frame_h = self.effective_frame_h
             self.cam_frame_top = float(self.effective_frame_top)
 
+        # DMD Readability Evaluator (replaces legacy DMDVisibilityScore/DMDReadabilityScore)
+        self.readability_engine = DmdReadabilityEngine(
+            target_w=self.cfg.target_width,
+            target_h=self.cfg.target_height
+        )
+
         self._cam_full_view: CamRect = _build_camera_rect(
             self.frame_w, self.cam_frame_h, None, self.cfg,
             frame_top=self.cam_frame_top,
             effective_frame_left=self.effective_frame_left,
-            effective_frame_w=self.effective_frame_w
+            effective_frame_w=self.effective_frame_w,
+            effective_frame_top=float(self.effective_frame_top),
+            effective_frame_h=self.effective_frame_h
         )
         self._last_roi: Optional[BoundingBox] = None
         
@@ -178,7 +205,18 @@ class TrackingEngine(ITracker):
         # 6. Floor Estimation (uses original unclipped roi)
         floor_y_est: Optional[float] = None
         if self.floor_est is not None:
-            roi_bottom = float(raw_roi[1] + raw_roi[3]) if raw_roi is not None else None
+            roi_bottom = None
+            if raw_roi is not None:
+                rx, ry, rw, rh = raw_roi
+                self._platformer = getattr(self.cfg, "platformer_mode", False)
+                if self._platformer:
+                    # Cap perceived character height to prevent thick scrolling ground 
+                    # from pulling the floor estimate down
+                    max_char_h = self.effective_frame_h * 0.25
+                    effective_rh = min(float(rh), max_char_h)
+                    roi_bottom = ry + effective_rh
+                else:
+                    roi_bottom = float(ry + rh)
             floor_y_est = self.floor_est.update(roi_bottom)
 
         # 7. Temporal History Synthesis (uses original unclipped roi)
@@ -256,52 +294,35 @@ class TrackingEngine(ITracker):
             floor_y_est=floor_y_est, frame_top=self.cam_frame_top,
             face_priority_mode=self.face_priority_mode,
             effective_frame_left=self.effective_frame_left,
-            effective_frame_w=self.effective_frame_w
+            effective_frame_w=self.effective_frame_w,
+            effective_frame_top=float(self.effective_frame_top),
+            effective_frame_h=self.effective_frame_h
         )
 
         # 9. Score Validation Loop
         cam_now = cam_now_proposed
         if self.cfg.dmd_visibility_score_enabled or getattr(self.cfg, 'dmd_readability_score_enabled', True):
-            def get_sub_rect(c_rect, r_roi):
-                if r_roi is None: return None
-                cx, cy, cw, ch = c_rect
-                sx = r_roi[0] - (cx - cw/2.0)
-                sy = r_roi[1] - (cy - ch/2.0)
-                _scale = out_w / cw if cw > 0 else 1.0
-                return (int(sx*_scale), int(sy*_scale), int(r_roi[2]*_scale), int(r_roi[3]*_scale))
+            # We use DmdReadabilityEngine to evaluate the predicted readability
+            # of the frame if cropped to cam_prev vs cam_now_proposed.
+            read_prev_score = self.readability_engine.evaluate(frame, roi=cam_prev).overall / 100.0
+            read_prop_score = self.readability_engine.evaluate(frame, roi=cam_now_proposed).overall / 100.0
 
-            sub_rect_prev = get_sub_rect(cam_prev, raw_roi)
-            sub_rect_prop = get_sub_rect(cam_now_proposed, raw_roi)
-
-            cropped_prev = Renderer.crop_frame_static(frame, cam_prev)
-            dmd_prev_frame = cv2.resize(cropped_prev, (self.cfg.target_width, self.cfg.target_height), interpolation=cv2.INTER_LANCZOS4)
-            vis_prev = DMDVisibilityScore.compute(dmd_prev_frame, sub_rect_prev) if self.cfg.dmd_visibility_score_enabled else 1.0
-            read_prev = DMDReadabilityScore.compute(dmd_prev_frame) if getattr(self.cfg, 'dmd_readability_score_enabled', True) else 1.0
-
-            cropped_proposed = Renderer.crop_frame_static(frame, cam_now_proposed)
-            dmd_proposed_frame = cv2.resize(cropped_proposed, (self.cfg.target_width, self.cfg.target_height), interpolation=cv2.INTER_LANCZOS4)
-            vis_proposed = DMDVisibilityScore.compute(dmd_proposed_frame, sub_rect_prop) if self.cfg.dmd_visibility_score_enabled else 1.0
-            read_proposed = DMDReadabilityScore.compute(dmd_proposed_frame) if getattr(self.cfg, 'dmd_readability_score_enabled', True) else 1.0
-
-            if self.cfg.dmd_visibility_score_enabled and getattr(self.cfg, 'dmd_readability_score_enabled', True):
-                score_prev = vis_prev * 0.5 + read_prev * 0.5
-                score_proposed = vis_proposed * 0.5 + read_proposed * 0.5
-            elif getattr(self.cfg, 'dmd_readability_score_enabled', True):
-                score_prev = read_prev
-                score_proposed = read_proposed
-            else:
-                score_prev = vis_prev
-                score_proposed = vis_proposed
-
-            if score_proposed < score_prev * 0.95:
+            # Provide a slight momentum bonus to the previous camera position to avoid jitter
+            if read_prop_score < read_prev_score * 0.95:
+                # Proposed camera framing is significantly less readable than the previous one.
+                # Hold the previous camera size/position but track the new subject if possible.
+                # (Keep previous width/height, but use proposed x/y if it fits).
+                # For simplicity, we just reject the new size.
                 cam_now = (cam_now_proposed[0], cam_now_proposed[1], cam_prev[2], cam_prev[3])
 
             if getattr(self.cfg, 'auto_tuning_dataset_dir', None) is not None:
                 _ds_dir = self.cfg.auto_tuning_dataset_dir
                 os.makedirs(_ds_dir, exist_ok=True)
+                cropped_proposed = Renderer.crop_frame_static(frame, cam_now)
+                dmd_proposed_frame = cv2.resize(cropped_proposed, (self.cfg.target_width, self.cfg.target_height), interpolation=cv2.INTER_LANCZOS4)
                 cv2.imwrite(os.path.join(_ds_dir, f"frame_{src_idx:04d}_dmd.png"), dmd_proposed_frame)
                 with open(os.path.join(_ds_dir, "scores.csv"), "a") as f:
-                    f.write(f"{src_idx},{vis_proposed:.3f},{read_proposed:.3f},{self.roi_persistence_score:.3f}\n")
+                    f.write(f"{src_idx},{read_prop_score:.3f},{read_prop_score:.3f},{self.roi_persistence_score:.3f}\n")
 
         # 10. Look-Ahead and Momentum (uses original unclipped roi)
         curr_roi_cx: Optional[float] = None

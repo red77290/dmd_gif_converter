@@ -61,9 +61,9 @@ class VideoAnalyzer:
                     self.effective_frame_w = int(self.frame_w * (1.0 - _decision["right_pct"])) - self.effective_frame_left
                 
                 # Apply dynamic strength and smoothness based on content type analysis
-                if _auto_str and "suggested_strength" in _decision:
+                if (_auto_str or _smart) and "suggested_strength" in _decision:
                     self.cfg.strength = _decision["suggested_strength"]
-                if _auto_sm and "suggested_smoothness" in _decision:
+                if (_auto_sm or _smart) and "suggested_smoothness" in _decision:
                     self.cfg.smoothness = _decision["suggested_smoothness"]
 
                 # Apply scene profile to cfg when auto_scene_type is active

@@ -15,7 +15,6 @@ try:
 except Exception:
     _analyze_and_compensate = None
 from src.engine.conversion.ffmpeg_utils import _check_drawtext, _apply_text_overlay_pillow, snap_to_clean_fps, get_metadata
-from src.engine.conversion.quality import evaluate_gif_quality
 logger = logging.getLogger(__name__)
 
 
@@ -629,12 +628,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         else:
             log(f"[TEXT  ] {filename} — Pillow text overlay failed: {txt_msg}", "warning")
 
-    # Evaluate DMD Quality
-    q_result = evaluate_gif_quality(out_path)
-    score = q_result["score"]
-    color = q_result["color"]
-    log(f"[QUALITY] {filename} — Score: {score}% {color} | Reasons: {', '.join(q_result['reasons'])}")
-
+    # Quality evaluation is now performed pre-conversion by Scoring V2 engines (AiMoments).
+    # Post-conversion evaluate_gif_quality() has been removed as it is obsolete.
     log(f"[OK    ] {filename}")
     return True, f"[OK] {filename}"
 

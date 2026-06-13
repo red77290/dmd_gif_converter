@@ -134,7 +134,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_head_frac=0.22,
         face_eye_offset=None,
         platformer_mode=False,
-        auto_vertical_bias=False,
+        auto_vertical_bias=True,
         suggested_strength=0.65,
         suggested_smoothness=0.85,
         max_zoom_override=1.5,
@@ -158,7 +158,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_head_frac=0.22,
         face_eye_offset=None,
         platformer_mode=False,
-        auto_vertical_bias=False,
+        auto_vertical_bias=True,
         suggested_strength=0.70,
         suggested_smoothness=0.80,
         max_zoom_override=1.05,
@@ -182,7 +182,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_head_frac=0.22,
         face_eye_offset=None,
         platformer_mode=False,
-        auto_vertical_bias=False,
+        auto_vertical_bias=True,
         suggested_strength=0.40,
         suggested_smoothness=0.90,
         max_zoom_override=2.0,
@@ -194,7 +194,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_head_frac=0.22,
         face_eye_offset=None,
         platformer_mode=False,
-        auto_vertical_bias=False,
+        auto_vertical_bias=True,
         suggested_strength=0.65,
         suggested_smoothness=0.85,
         max_zoom_override=1.6,
@@ -206,7 +206,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_head_frac=0.22,
         face_eye_offset=None,
         platformer_mode=False,
-        auto_vertical_bias=False,
+        auto_vertical_bias=True,
         suggested_strength=0.60,
         suggested_smoothness=0.80,
         max_zoom_override=1.3,
@@ -309,11 +309,15 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.WIDE_SHOT] += 3.0
 
     # 3. Tall Ratio + Aspect -> Full body / Fighting
-    if tall_ratio >= 0.70 and body_aspect > 1.4:
+    if tall_ratio >= 0.60 and body_aspect > 1.4:
         scores[SceneType.FULL_BODY_TALL] += 3.0
         scores[SceneType.FIGHTING_2D] += 0.5
         scores[SceneType.PLATFORMER] -= 3.0
         scores[SceneType.MENU_STATIC] -= 2.0
+        
+    if body_aspect > 1.6:
+        # Very tall bodies are humans/anime characters, not platformer sprites
+        scores[SceneType.PLATFORMER] -= 3.0
     elif tall_ratio >= 0.35 and body_aspect > 1.2:
         scores[SceneType.FIGHTING_2D] += 1.0
         
@@ -332,7 +336,6 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.TALKING_CLOSEUP] -= 2.0
     else:
         scores[SceneType.TALKING_CLOSEUP] += 1.0
-        scores[SceneType.PLATFORMER] += 1.0
 
     # 5. Isometric Top-Down: High movement in both X and Y, no stable floor
     if x_variance >= 0.02 and y_variance >= 0.02 and floor_var_score > 0.4:
@@ -340,9 +343,10 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.TOP_DOWN_ISOMETRIC] += 3.0
         scores[SceneType.PLATFORMER] -= 2.0
 
-    # 6. Static Menu: Very low movement
+    # 6. Static Menu / Still Scene: Very low movement
     if x_variance < 0.005 and y_variance < 0.005:
         scores[SceneType.MENU_STATIC] += 3.0
+        scores[SceneType.PLATFORMER] -= 3.0
 
     # Add small default bias to moving action as the safest fallback
     scores[SceneType.ACTION_MOVING] += 0.5

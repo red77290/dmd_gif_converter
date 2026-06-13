@@ -364,17 +364,19 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _compute_led_sim_display_size(self):
         try:
-            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
+            w = int(self.app_state.v_target_width.get())
+            h = int(self.app_state.v_target_height.get())
         except Exception:
             w, h = 128, 32
-        scale = LED_SIM_SCALE
+        scale = int(LED_SIM_SCALE)
         while w * scale > LED_SIM_MAX_W and scale > 2:
             scale -= 1
-        return w * scale, h * scale, scale
+        return int(w * scale), int(h * scale), scale
 
     def _get_final_canvas_size(self):
         try:
-            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
+            w = int(self.app_state.v_target_width.get())
+            h = int(self.app_state.v_target_height.get())
         except Exception:
             w, h = 128, 32
         led = getattr(self.app_state, "v_led_sim", None)
@@ -816,6 +818,8 @@ class PreviewPanel(ctk.CTkFrame):
                 return
             self.after(0, lambda: self._on_dmd_ready(pil_frames, delays, tmpdir, out_gif))
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             _m = str(exc)
             self.after(0, lambda _msg=_m, _td=tmpdir: self._on_dmd_fail(_msg, _td))
 
