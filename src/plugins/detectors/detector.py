@@ -71,7 +71,7 @@ def _fuse_rois(hits: list, roi_persistence_score: float = 1.0) -> Optional[Bound
     wh  = sum(_weight(s, r) * r[3] for s, r in hits) / total_w
     x   = int(wcx - ww / 2.0)
     y   = int(wcy - wh / 2.0)
-    return (max(0, x), max(0, y), int(ww), int(wh))
+    return BoundingBox(max(0, x), max(0, y), int(ww), int(wh))
 
 
 class AbstractDetector(IDetector):
@@ -121,7 +121,7 @@ class AbstractDetector(IDetector):
             y1 = min(p[1], m[1])
             x2 = max(p[0] + p[2], m[0] + m[2])
             y2 = max(p[1] + p[3], m[1] + m[3])
-            return (x1, y1, x2 - x1, y2 - y1)
+            return BoundingBox(x1, y1, x2 - x1, y2 - y1)
         return p or m
 
 
@@ -211,11 +211,31 @@ class _FrameDetector(AbstractDetector):
                 expected_floor_model = expected_floor_y * sy_model
                 boxes_bottom = boxes_raw[:, 1] + boxes_raw[:, 3] / 2.0
                 dist_to_floor = np.abs(boxes_bottom - expected_floor_model) / float(self._model_h)
+                
+                # Reject ONLY hard ceiling pareidolia: detections whose TOP is above the
+                # established floor_y AND whose bottom is far from the floor.
+                # This lets Mario jump freely (his bottom follows the arc), but blocks
+                # a ceiling block that is fully above the floor line.
+                boxes_top = boxes_raw[:, 1] - boxes_raw[:, 3] / 2.0
+                is_above_floor = boxes_top < expected_floor_model
+                is_far_from_floor = dist_to_floor > 0.60
+                ceiling_block = is_above_floor & is_far_from_floor
+                mask = mask & ~ceiling_block
+                
                 platformer_scores = person_scores * mask * (0.01 + 100.0 * np.exp(-dist_to_floor * 10.0))
             else:
-                bottomness = boxes_raw[:, 1] / self._model_h
-                # Extreme floor tracking: 100x advantage for floor, effectively ignoring ceiling pareidolia
-                platformer_scores = person_scores * mask * (0.01 + 100.0 * (bottomness ** 4))
+                # Initial floor discovery: only bias toward bottom half, do NOT hard-reject.
+                # boxes_raw[:, 1] is the CENTER y in model coords — a box at the very top
+                # of the screen has center ~0.0, one at the very bottom ~1.0.
+                center_y_norm = boxes_raw[:, 1] / self._model_h
+                # Strong bias toward low-center detections (boxes near the bottom of screen)
+                # but never fully zero out boxes at the top — Mario could start a jump on frame 1.
+                floor_bias = (0.1 + center_y_norm) ** 4   # ~0.0001 at top, ~1.3 at bottom
+                platformer_scores = person_scores * mask * floor_bias * 100.0
+                
+            if not np.any(mask):
+                return None
+                
             best_i = int(np.argmax(platformer_scores))
         else:
             best_i = int(np.argmax(person_scores * mask))
@@ -233,7 +253,7 @@ class _FrameDetector(AbstractDetector):
         bh = min(bh, h - y)
         if bw < 8 or bh < 8:
             return None
-        return (x, y, bw, bh)
+        return BoundingBox(x, y, bw, bh)
 
     def _detect_yolo_multi(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
                             roi_persistence_score: float = 1.0) -> List:
@@ -267,7 +287,7 @@ class _FrameDetector(AbstractDetector):
             bw = min(bw, w - x)
             bh = min(bh, h - y)
             if bw >= 8 and bh >= 8:
-                results.append((score, (x, y, bw, bh)))
+                results.append((score, BoundingBox(x, y, bw, bh)))
         results.sort(key=lambda t: t[0], reverse=True)
         return results
 
@@ -336,7 +356,7 @@ class _FrameDetector(AbstractDetector):
             return None
 
         x, y, w, h = cv2.boundingRect(c_best)
-        return (int(x), int(y), int(w), int(h))
+        return BoundingBox(int(x), int(y), int(w), int(h))
 
 
 class DetectorFactory:

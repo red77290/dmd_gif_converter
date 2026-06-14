@@ -93,8 +93,8 @@ class TestTrackerCloseUpClip(unittest.TestCase):
     def test_closeup_clips_to_eye_region(self):
         """
         Face close-up: bbox (rw=540, rh=460) → aspect 0.85 <= 1.4.
-        Clip skips hair (top 25 %) and keeps eye region (next 35 %).
-        Expected: ry_new = 0 + 115, rh_new = 161.
+        Clip skips hair (top 25 %) and keeps eye region (35 %).
+        Expected: ry_new = 0 + 161, rh_new = 138.
         """
         original = (50, 0, 540, 460)   # wide face bbox, aspect ≈ 0.85
         result = self._get_processed_roi(original, frame_h=480)
@@ -104,14 +104,14 @@ class TestTrackerCloseUpClip(unittest.TestCase):
         orig_rh = 460
 
         # Check hair was skipped
-        expected_skip = int(orig_rh * 0.35)
-        expected_h    = max(8, int(orig_rh * 0.30))
+        expected_skip = int(orig_rh * 0.25)
+        expected_h    = max(8, int(orig_rh * 0.35))
 
         self.assertEqual(ry, 0 + expected_skip,
-                         f"ry should skip top 35 % of original bbox. "
+                         f"ry should skip top 25 % of original bbox. "
                          f"Got {ry}, expected {0 + expected_skip}")
         self.assertEqual(rh, expected_h,
-                         f"rh should be 30 % of original bbox. "
+                         f"rh should be 35 % of original bbox. "
                          f"Got {rh}, expected {expected_h}")
 
     def test_closeup_is_not_top_28_percent(self):
@@ -121,11 +121,11 @@ class TestTrackerCloseUpClip(unittest.TestCase):
         rx, ry, rh_clip = result[0], result[1], result[3]
 
         old_clip_h = max(8, int(460 * 0.28))  # old formula: 128 px (hair)
-        new_clip_h = max(8, int(460 * 0.30))  # new formula: 138 px (eyes)
+        new_clip_h = max(8, int(460 * 0.35))  # new formula: 161 px (eyes)
 
         # The clipped height should match the face-close-up formula
         self.assertEqual(rh_clip, new_clip_h,
-                         "Face close-up should use 30 % clip height, not 28 %")
+                         "Face close-up should use 35 % clip height, not 28 %")
         # And ry must be shifted down (hair skipped)
         self.assertGreater(ry, 0,
                            "ry must be > 0 (hair at top should be skipped)")
@@ -144,7 +144,7 @@ class TestTrackerCloseUpClip(unittest.TestCase):
 
         # New adaptive formula:
         aspect = 300 / 80.0
-        eye_target_pct = min(0.65, max(0.08, 0.77 - 0.27 * aspect))
+        eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
         expected_h = max(8, int(300 * 0.10))
         roi_top = max(0, int(300 * eye_target_pct - expected_h / 2.0))
 
@@ -207,8 +207,8 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         """
         result = self._get_roi((50, 0, 200, 200), frame_h=480)
         self.assertIsNotNone(result)
-        expected_skip = int(200 * 0.35)   # 70
-        expected_h    = max(8, int(200 * 0.30))  # 60
+        expected_skip = int(200 * 0.25)   # 50
+        expected_h    = max(8, int(200 * 0.35))  # 70
         self.assertEqual(result[1], expected_skip, "ry should be hair-skip for square bbox")
         self.assertEqual(result[3], expected_h,    "rh should be eye region for square bbox")
 
@@ -221,7 +221,7 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         self.assertIsNotNone(result)
 
         aspect = 300 / 60.0
-        eye_target_pct = min(0.65, max(0.08, 0.77 - 0.27 * aspect))
+        eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
         expected_h = max(8, int(300 * 0.10))
         roi_top = max(0, int(300 * eye_target_pct - expected_h / 2.0))
 
@@ -233,8 +233,8 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         # rw=100, rh=140 → aspect exactly 1.4
         result = self._get_roi((50, 0, 100, 140), frame_h=480)
         self.assertIsNotNone(result)
-        expected_skip = int(140 * 0.35)
-        expected_h    = max(8, int(140 * 0.30))
+        expected_skip = int(140 * 0.25)
+        expected_h    = max(8, int(140 * 0.35))
         self.assertEqual(result[1], expected_skip)
         self.assertEqual(result[3], expected_h)
 
@@ -245,7 +245,7 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         self.assertIsNotNone(result)
 
         aspect = 150 / 100.0
-        eye_target_pct = min(0.65, max(0.08, 0.77 - 0.27 * aspect))
+        eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
         expected_h = max(8, int(150 * 0.10))
         roi_top = max(0, int(150 * eye_target_pct - expected_h / 2.0))
 
@@ -255,4 +255,3 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

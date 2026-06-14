@@ -1,9 +1,28 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V7.0.0] - 2026-06-13
+
+### Modifié
+- **🚀 Correction du profil `FIGHTING_2D`** : Restauration de `fighting_2d` avec l'activation de `platformer_mode=True` pour éliminer le bug d'ancrage de la caméra. Les jeux de combat restent désormais cloués au sol comme les jeux de plateforme.
+- **🚀 Résolution du bug de ciblage de plateforme** : Le profil `platformer` ignore désormais les blocs flottants (fausses détections géantes), tandis que le profil `fighting_2d` décale naturellement la caméra vers le haut pour garantir que la tête des personnages géants reste visible. La matrice de scoring différencie désormais parfaitement les deux genres.
+- **🚀 Protection contre les faux plafonds** : YOLO ne peut plus confondre les blocs du plafond avec le joueur. Le détecteur rejette désormais les détections dans les 40% supérieurs de l'écran lors de l'initialisation du sol, et ignore les sauts verticaux impossibles (>50% de l'écran).
+- **🚀 Faux positifs `WIDE_SHOT` corrigés** : Les jeux avec une caméra de suivi parfaite (variance quasi-nulle) ne sont plus pénalisés et pris à tort pour des plans larges cinématiques ou des menus statiques.
+
+## [7.0.0] - Architecture & Performances (Refonte V7)
+- **🚀 Correction de la classification des gros plans Anime** : Les gros plans animés et dynamiques (comme dans `visage_anime_1.gif`) étaient incorrectement classés en `TOP_DOWN_ISOMETRIC`. Nous avons introduit un sol effectif (`effective_floor_in_lower`) pour éviter que les sujets géants ne déclenchent de fausses pénalités de sol, assoupli les critères d'aspect ratio pour les très grands sujets gros plans, et pénalisé inconditionnellement `TOP_DOWN_ISOMETRIC` lorsque le sujet occupe plus de 30% de l'image.
+- **🚀 Résolution du crash UnboundLocalError de repli** : Correction d'une exception lors du scan de vidéos sans aucune détection, causée par l'utilisation de la variable `_auto_scene` avant sa définition.
+- **🚀 Découplage des importations circulaires** : Importation paresseuse (lazy import) de `available_detectors` dans le fichier `src/engine/auto_action/__init__.py` pour permettre le lancement isolé de tests unitaires sur des modules précis sans erreurs de dépendances circulaires.
+- **🚀 Correction de la Dérive Letterbox** : Intégration des limites de rognage de la letterbox directement dans les propriétés de la fenêtre de suivi du moteur de tracking, empêchant la caméra de dériver dans les bandes noires (résolvant la coupure des yeux sur des personnages comme Doc/Marty dans Retour vers le Futur).
+- **🚀 Bouton de Mode de Contenu Toujours Actif** : Le menu déroulant du "Mode de contenu" reste désormais utilisable même lorsque le Smart Color Boost (mode IA auto-colorimétrie) ou "Laisse-moi gérer ça" (Let me handle it) est activé. Cela permet à l'utilisateur de spécifier le genre du contenu (par exemple, anime) pour adapter le recadrage automatique des visages, tout en bénéficiant de l'optimisation colorimétrique automatique.
+- **🏗️ Typage Strict** : Remplacement des tuples primitifs par `NamedTuple` (`CamRect`, `BoundingBox`) pour éviter les erreurs d'indexation.
+- **🏗️ Composition UI** : Suppression des Mixins (anti-pattern God Object) au profit d'une Composition stricte des panneaux graphiques.
+- **⚡ Pipeline E/S Asynchrone** : Refonte de `preprocess_video_for_dmd` utilisant des `queue.Queue` Producteur/Consommateur, parallélisant OpenCV, YOLO, et FFmpeg dans des threads séparés.
+- **🧠 FPS Configurable (IA)** : La résolution temporelle du scoring dans `ai_moments.py` n'est plus fixée à 2.0 FPS, grâce au nouveau paramètre configurable `analyze_fps`.
+
 ## Nouveautés de la v7.0.0
 - **🧠 Moteur Scoring V2** : Une réécriture complète du système de score mathématique. AI Moments évalue désormais les signaux temporels purs (Contraste, Entropie, Densité des contours, Mouvement) séparément de la composition spatiale (Lisibilité, Encombrement), puis applique des poids stratégiques dynamiques (`Action`, `Balanced`, `Character`). Cela améliore massivement la fiabilité des moments extraits.
 - **🔬 Lanceur A/B Testing** : Ajout d'une interface CLI dédiée `ab_runner.py` et d'un panneau UI A/B Testing pour comparer directement le Scoring V1 et le Scoring V2 sur des dossiers vidéo complets. Génère des rapports Markdown détaillés.
-- **👁️ Cadrage Cinématique Règle des Tiers** : Affinement des mathématiques du tracker Auto Action pour les gros plans. Il ignore désormais les 35% supérieurs de la boîte de détection (cheveux/front) et cible spécifiquement les 30% suivants (yeux), alignant parfaitement la ligne de regard du sujet avec le centre vertical de la matrice DMD.
+- **👁️ Cadrage Cinématique Règle des Tiers** : Affinement des mathématiques du tracker Auto Action pour les gros plans. Il ignore désormais les 25% supérieurs de la boîte de détection (cheveux/front) et cible spécifiquement les 35% suivants (visage). Nous avons également restauré la limite de sécurité verticale (`cy = min(cy, y + 0.25 * crop_h)`) dans le constructeur de caméra, empêchant le cadrage de descendre sous le regard et de commencer au niveau du nez, garantissant un cadrage optimal sur les matrices d'affichage ultra-courtes en 4:1.
 - **🏗️ Architecture Pipeline du Tracker** : La méthode monolithique `TrackingEngine.process_frame()` a été entièrement refondue vers un modèle Pipeline (Chaîne de Responsabilité) parfaitement découplé. Elle exploite 12 étapes modulaires indépendantes (`DetectionStage`, `FaceClippingStage`, `LookAheadStage`, etc.) interconnectées par un contexte fortement typé (`FrameTrackingContext`).
 - **📝 Balises de Log Dynamiques** : Le moteur émet maintenant des balises de log `[DYNAMIC]` en temps réel, permettant aux utilisateurs de surveiller les coupes de caméra et les transitions de profil de la Matrice de Score Continue directement dans le panneau de logs de l'interface.
 

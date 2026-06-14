@@ -186,15 +186,15 @@ Le profil de scène avec le score total le plus élevé dicte le comportement fi
 - **`platformer`** : Pour les jeux 2D avec un sol stable (ex: Mario, Sonic). Active le suivi automatique du sol pour verrouiller la caméra sur le terrain.
 - **`top_down_isometric`** : Pour Zelda, Pokémon et les jeux isométriques. Se concentre sur le suivi horizontal et vertical sans contrainte de gravité. Le zoom est restreint pour préserver le contexte.
 - **`first_person`** : Pour Doom, Minecraft et l'action centrée. Verrouille fermement la caméra au centre et empêche le zoom pour éviter de couper le HUD ou les armes.
-- **`fighting_2d`** : Pour les jeux de combat 1v1 (ex: Street Fighter). Utilise un suivi plus serré (force 0.70) et des mouvements de caméra plus rapides (fluidité 0.80) pour suivre les esquives rapides.
+
 - **`action_horizontal`** : Pour les jeux à défilement horizontal (beat 'em ups). Active le biais vertical automatique pour maintenir le niveau du sol cohérent pendant que la caméra défile vers la droite.
 - **`action_moving`** : Pour les RPG ou les jeux où le sujet se déplace librement dans toutes les directions. Utilise un suivi fluide standard sans verrouiller le sol.
 - **`wide_shot`** : Pour les scènes avec de petits sujets et beaucoup d'arrière-plan. Utilise un suivi très lâche (force 0.40) et une fluidité élevée (0.90) pour éviter que la caméra ne tressaute de manière agressive.
 - **`menu_static`** : Pour les écrans titres, les menus et les scènes très statiques. Verrouille la caméra et lisse fortement les micro-mouvements pour garder l'écran stable.
 
 #### 👤 Profils Humains & Dialogue
-- **`talking_closeup`** : Pour les animes, vlogs ou dialogues où le visage remplit le cadre. Active le **Mode Priorité Visage**. La caméra ignore le bas du corps et se verrouille rigidement sur la région des yeux (les 45% supérieurs de la tête) pour que le visage ne rebondisse pas pendant la prise de parole.
-- **`talking_medium`** : Pour les présentateurs de journaux ou les plans taille-tête. Active le Mode Priorité Visage, calculant la tête comme les 35% supérieurs de la boîte englobante du corps visible.
+- **`talking_closeup`** : Pour les animes, vlogs ou dialogues où le visage remplit le cadre. Active le **Mode Priorité Visage**. La caméra ignore le bas du corps et se verrouille rigidement sur la région des yeux (en sautant les 25% supérieurs pour les cheveux, et en ciblant les 35% suivants pour le visage) pour que le visage ne rebondisse pas pendant la prise de parole.
+- **`talking_medium`** : Pour les présentateurs de journaux ou les plans taille-tête. Active le Mode Priorité Visage, calculant la tête comme les 22% supérieurs de la boîte englobante du corps visible.
 - **`full_body_tall`** : Pour les personnages debout ou les grands sprites d'anime. Active le Mode Priorité Visage, calculant la tête comme les 22% supérieurs du corps, ce qui garantit que le visage est centré plutôt que de couper le sujet aux épaules.
 - **`full_body_medium`** : Suivi générique standard pour les sujets en pied sans Priorité Visage. Utilise des marges de suivi plus serrées.
 

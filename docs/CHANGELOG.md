@@ -1,9 +1,24 @@
 # DMD GIF Converter — Changelog
 
+## [7.0.0] - Architecture & Performances (V7)
+- **🚀 Fixed Anime Close-up Classification**: Falsely classified anime and close-up action scenes (like `visage_anime_1.gif`) as `TOP_DOWN_ISOMETRIC`. We introduced an `effective_floor_in_lower` concept so massive subjects don't trigger "floor found" penalties, relaxed the closeup aspect ratio guard for very large subjects, and unconditionally penalized `TOP_DOWN_ISOMETRIC` when the subject occupies more than 30% of the frame.
+- **🚀 Fixed Fallback UnboundLocalError**: Fixed a crash where the `_auto_scene` variable was used before definition if the scan detected no targets.
+- **🚀 Decoupled Circular Imports**: Exposed `available_detectors` lazily in `src/engine/auto_action/__init__.py` to allow direct, isolated test execution of individual modules without circular package dependency errors.
+- **🚀 Fixed Letterbox Drifting**: Integrated active letterbox cropping boundaries directly into the tracking engine's frame window properties, preventing the camera from panning into black bars (resolving the eye cutoff on characters like Doc/Marty in Back to the Future).
+- **🚀 Kept Content Mode Menu Enabled**: The "Content mode" dropdown remains enabled when "Smart Color Boost" / "Let me handle it" is active, allowing users to specify the content genre (e.g. anime) for the auto-action framing engine while keeping color parameters fully automatic.
+- **🚀 Fixed `FIGHTING_2D` Scene Profile**: Restored `fighting_2d` and added `platformer_mode=True` to eliminate the flooring bug that previously caused fighting games to lose the floor. 
+- **🚀 Fixed Platformer Flooring Bug**: The `platformer` profile now explicitly ignores floating blocks (which falsely created huge bounding boxes), while the `fighting_2d` profile natively shifts the camera up to protect huge character heads. The two genres are now perfectly differentiated in the scoring matrix.
+- **🚀 Fixed Ceiling Pareidolia**: YOLO's tendency to mistake ceiling blocks for players in platformers is now blocked. The detector actively rejects tracking boxes in the upper 40% of the screen when establishing an initial floor, and rejects sudden 50% vertical jumps when a floor is already established.
+- **🚀 Fixed `WIDE_SHOT` False Positives**: Game characters that are perfectly centered by a follow-camera (having near-zero variance) are no longer misclassified as cinematic wide shots or static menus.
+- **🏗️ Strict Type Safety**: Replaced primitive tuples with `NamedTuple` (`CamRect`, `BoundingBox`) to prevent cognitive errors with index positional access.
+- **🏗️ Component Composition**: Fully removed UI Mixins (God Object anti-pattern) in favor of strict Composition across all interface panels.
+- **⚡ Async I/O Pipeline**: Overhauled the `preprocess_video_for_dmd` pipeline to use a `queue.Queue` Producer/Consumer model, running OpenCV, YOLO, and FFmpeg in dedicated threads.
+- **🧠 Configurable AI FPS**: The `ai_moments.py` temporal scoring is no longer hardcoded to 2.0 FPS, allowing finer temporal resolution adjustments via the new `analyze_fps` parameter.
+
 ## What is New in v7.0.0?
 - **🧠 Scoring V2 Engine**: A complete rewrite of the mathematical scoring system. AI Moments now evaluates pure Temporal Signals (Contrast, Entropy, Edge Density, Motion) and Spatial Composition (Readability, Clutter) separately, then applies dynamic strategy weights (`Action`, `Balanced`, `Character`). This massively improves the reliability of extracted moments.
 - **🔬 A/B Testing Runner**: Added a dedicated `ab_runner.py` CLI and A/B Testing UI Panel to directly compare Scoring V1 against Scoring V2 on entire video folders. Generates detailed markdown reports.
-- **👁️ Cinematic Rule-of-Thirds Framing**: Refined the Auto Action tracker math for close-ups. It now ignores the top 35% of the bounding box (hair/forehead) and specifically targets the next 30% (eyes), perfectly aligning the subject's eyeline with the vertical center of the DMD matrix.
+- **👁️ Cinematic Rule-of-Thirds Framing**: Refined the Auto Action tracker math for close-ups. It now ignores the top 25% of the bounding box (hair/forehead) and targets the next 35% (face region). We also restored the vertical eye safety cap (`cy = min(cy, y + 0.25 * crop_h)`) in the camera builder. This prevents the camera from cropping below the eyes and starting at the nose, keeping both eyes and mouth beautifully framed even on extra-short 4:1 display matrices.
 - **🏗️ Tracker Pipeline Architecture**: The monolithic `TrackingEngine.process_frame()` method was completely refactored into a cleanly decoupled Pipeline pattern (Chain of Responsibility) utilizing 12 modular stages (`DetectionStage`, `FaceClippingStage`, `HistorySynthesisStage`, etc.) connected by a strongly typed `FrameTrackingContext`.
 - **📝 Dynamic Log Tags**: The engine now emits real-time `[DYNAMIC]` log tags, allowing users to monitor camera cuts and Continuous Scoring Matrix profile transitions directly in the UI Log Panel.
 

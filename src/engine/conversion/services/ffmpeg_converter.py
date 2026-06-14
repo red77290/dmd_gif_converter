@@ -7,7 +7,8 @@ from typing import Dict, Any, Optional, Tuple
 
 from ..interfaces import IConverter
 from ..ffmpeg_utils import get_metadata, snap_to_clean_fps, _check_drawtext
-from ...auto_action import AutoActionConfig, preprocess_video_for_dmd
+from ...auto_action import AutoActionConfig
+from ...auto_action.pipeline import preprocess_video_for_dmd
 from .pillow_overlay import PillowOverlayService
 try:
     from ..colorimetry import analyze_and_compensate as _analyze_and_compensate
@@ -84,11 +85,22 @@ class FFmpegConverter(IConverter):
             bri, gam = p["brightness"], p["gamma"]
             slum, schr = p["sharpen_lum"], p["sharpen_chr"]
         else:
-            if _analyze_and_compensate is not None:
-                cont, sat, bri, gam, slum, schr, dither_mode = _analyze_and_compensate(original_src, p["fps_max"], mode)
-                if p["dither"] != "none":
-                    p["dither"] = dither_mode
-                log(f"[{filename}] Auto-color ({mode}): C={cont:.2f} S={sat:.2f} B={bri:.2f} G={gam:.2f}", "debug")
+            if p.get("auto_color_enabled", False) and _analyze_and_compensate is not None:
+                ok_c, color_params, color_msg = _analyze_and_compensate(original_src)
+                if ok_c:
+                    cont = color_params["contrast"]
+                    sat = color_params["saturation"]
+                    bri = color_params["brightness"]
+                    gam = color_params["gamma"]
+                    slum = color_params["sharpen_lum"]
+                    schr = color_params["sharpen_chr"]
+                    dither_mode = color_params["dither"]
+                    if p["dither"] != "none":
+                        p["dither"] = dither_mode
+                    log(f"[{filename}] {color_msg}", "debug")
+                else:
+                    from .core import _PRESETS
+                    cont, sat, bri, gam, slum, schr, _ = _PRESETS.get(mode, _PRESETS["pixel_art"])
             else:
                 from .core import _PRESETS
                 cont, sat, bri, gam, slum, schr, _ = _PRESETS.get(mode, _PRESETS["pixel_art"])

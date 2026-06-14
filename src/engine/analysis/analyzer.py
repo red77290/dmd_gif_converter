@@ -42,8 +42,9 @@ class VideoAnalyzer:
         _auto_sm = getattr(self.cfg, "auto_smoothness", False)
         _smart = getattr(self.cfg, "smart_auto_crop", False)
         _auto_pillarbox = getattr(self.cfg, "auto_pillarbox_crop", False)
+        _auto_scene = getattr(self.cfg, "auto_scene_type", False)
         
-        if _smart or _auto_str or _auto_sm or _auto_pillarbox:
+        if _smart or _auto_str or _auto_sm or _auto_pillarbox or _auto_scene:
             try:
                 _decision = _smart_auto_crop_decision(cap, self.cfg, self.frame_w, self.frame_h)
                 
@@ -84,11 +85,13 @@ class VideoAnalyzer:
                     self.smart_reasons = [f"smart scan error ({_e!r}) → all manual"]
 
         self.face_priority_mode = False
+        if _smart_crop_margins is not None:
+            self.face_priority_mode = _smart_face_priority
+
         if _auto_bc or _auto_tc:
             try:
                 if _smart_crop_margins is not None:
                     computed_top, computed_bottom = _smart_crop_margins
-                    self.face_priority_mode = _smart_face_priority
                 else:
                     detector_for_scan = _FrameDetector()
                     computed_top, computed_bottom, self.face_priority_mode = \
