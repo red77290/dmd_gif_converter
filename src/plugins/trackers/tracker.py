@@ -99,6 +99,17 @@ class DetectionStage(ITrackerStage):
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         expected_floor_y = engine.floor_est.floor_y if engine.floor_est is not None else None
         
+        subsample = getattr(engine.cfg, 'subsample_frames', 3)
+        run_detector = (
+            subsample <= 1 or
+            engine.frames_since_scene_change <= 1 or
+            engine.frames_since_scene_change % subsample == 0
+        )
+
+        if not run_detector:
+            context.raw_roi = getattr(engine, "_last_yolo_roi", None)
+            return
+
         if engine.face_priority_mode:
             context.raw_roi = engine.detector.detect(
                 context.frame, engine.current_detector,
@@ -121,6 +132,8 @@ class DetectionStage(ITrackerStage):
             if context.raw_roi is not None and engine.effective_frame_top > 0:
                 rx, ry, rw, rh = context.raw_roi
                 context.raw_roi = BoundingBox(rx, ry + engine.effective_frame_top, rw, rh)
+
+        engine._last_yolo_roi = context.raw_roi
 
 
 class PersistenceStage(ITrackerStage):
@@ -239,8 +252,9 @@ class SceneClassificationStage(ITrackerStage):
                 new_profile, _, _ = classify_scene(scene_signals)
                 if getattr(engine.cfg, "scene_type", None) != new_profile.scene_type:
                     old_scene = getattr(engine.cfg, "scene_type", "Unknown")
-                    logger.info(f"[DYNAMIC] Camera cut detected! Scene changed dynamically from '{old_scene}' to '{new_profile.scene_type}'")
-                    print(f"16:00:00 [INFO   ] [UI] [DYNAMIC] Camera cut! Scene changed: {old_scene} -> {new_profile.scene_type}")
+                    logger.debug(f"[DYNAMIC] Camera cut detected! Scene changed dynamically from '{old_scene}' to '{new_profile.scene_type}'")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        print(f"16:00:00 [DEBUG  ] [UI] [DYNAMIC] Camera cut! Scene changed: {old_scene} -> {new_profile.scene_type}")
                 
                 engine.cfg.scene_profile = new_profile
                 engine.cfg.scene_type = new_profile.scene_type

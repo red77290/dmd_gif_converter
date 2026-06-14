@@ -121,6 +121,11 @@ class SettingsPanel(ctk.CTkFrame):
         self._last_mode = self.app_state.v_mode.get()
         
         def _update_colorimetry_state(*_):
+            try:
+                if not self.winfo_exists():
+                    return
+            except Exception:
+                return
             current_mode = self.app_state.v_mode.get()
             
             # Save custom values if leaving custom mode
@@ -181,6 +186,11 @@ class SettingsPanel(ctk.CTkFrame):
 
 
     def _on_per_gif_toggle(self, *_):
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
         is_on = self.app_state.v_per_gif_config.get()
         if is_on:
             self.app_state.per_gif_global_snapshot = self.app_state.snapshot()
@@ -193,6 +203,11 @@ class SettingsPanel(ctk.CTkFrame):
                 self._per_gif_status_lbl.configure(text='')
 
     def _on_let_me_handle_toggle(self, *_):
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
         enabled = self.app_state.v_let_me_handle_it.get()
         if enabled:
             self.app_state.v_auto_color_enabled.set(True)
@@ -204,6 +219,7 @@ class SettingsPanel(ctk.CTkFrame):
             self.app_state.v_action_auto_strength.set(True)
             self.app_state.v_action_auto_smoothness.set(True)
             self.app_state.v_action_auto_pillarbox_crop.set(True)
+            self.app_state.v_action_dynamic_scene_detection.set(False)
             self.app_state.v_action_zoom_max.set(2.0)
         state = 'disabled' if enabled else 'normal'
         for widget in self.app_state.lmh_widgets:

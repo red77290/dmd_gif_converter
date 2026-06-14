@@ -11,22 +11,40 @@ from src.engine.analysis.analyzer import VideoAnalyzer
 from src.plugins.trackers.tracker import TrackingEngine
 from .renderer import Renderer
 
-def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=None):
+def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel_event=None, callback=None, trim_start=None, trim_end=None, **kwargs):
     """Create an auto-framed temporary MP4 and return (ok, out_path, message)."""
     try:
         import cv2
     except Exception:
         return False, None, "OpenCV not installed (install opencv-python to enable auto action framing)."
 
+    if cfg is None:
+        cfg = AutoActionConfig()
+    elif callable(cfg):
+        callback = cfg
+        cfg = AutoActionConfig()
+
+    if trim_start is not None:
+        cfg.start_s = trim_start
+    if trim_end is not None:
+        cfg.end_s = trim_end
+
+    filename = os.path.basename(src_path)
+    def log(msg, level="info"):
+        if callback:
+            callback(msg, level)
+
     if cfg.detector.lower() not in available_detectors():
         cfg.detector = "person"
 
+    log("Opening video reader...", "debug")
     # 1. Reader
     reader = VideoReader(src_path)
     ok, msg = reader.open()
     if not ok:
         return False, None, msg
 
+    log("Analyzing video content (smart crop/scene detection)...", "debug")
     # 2. Analyzer
     analyzer = VideoAnalyzer(reader.frame_w, reader.frame_h, cfg)
     analyzer.analyze(reader.cap)
@@ -235,6 +253,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig, cancel_event=
                 pipe_alive[0] = False
                 break
             frame_idx += 1
+            if callback and (frame_idx == 1 or frame_idx % 25 == 0):
+                tot = reader.total_frames or "?"
+                log(f"Tracking targets: frame {frame_idx}/{tot}", "debug")
     finally:
         pipe_alive[0] = False
         writer_ok, stderr_hint = writer.close()

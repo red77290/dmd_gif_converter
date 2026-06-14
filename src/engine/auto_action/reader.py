@@ -78,7 +78,9 @@ class VideoReader:
                     self._gif_pre_tmpdir = None
 
         with _quiet_c_stderr():
-            self.cap = cv2.VideoCapture(self.src_path)
+            self.cap = cv2.VideoCapture(self.src_path, cv2.CAP_FFMPEG)
+            if self.cap is None or not self.cap.isOpened():
+                self.cap = cv2.VideoCapture(self.src_path)
         if not self.cap.isOpened():
             self.release()
             return False, "Could not open source for action preprocessing."

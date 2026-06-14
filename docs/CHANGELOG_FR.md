@@ -3,6 +3,7 @@
 ## [V7.0.0] - 2026-06-13
 
 ### Modifié
+- **🚀 Optimisation de l'UX des conversions parallèles** : Résolution d'un problème d'affichage où les conversions en parallèle (dossier ou liste) semblaient s'exécuter de manière séquentielle, car le prétraitement OpenCV/YOLO s'exécutait en arrière-plan sans retour visuel. Ajout de rapports de progression image par image via un callback dans `preprocess_video_for_dmd` et correction d'une incohérence de signature dans `ConversionController`.
 - **🚀 Correction du profil `FIGHTING_2D`** : Restauration de `fighting_2d` avec l'activation de `platformer_mode=True` pour éliminer le bug d'ancrage de la caméra. Les jeux de combat restent désormais cloués au sol comme les jeux de plateforme.
 - **🚀 Résolution du bug de ciblage de plateforme** : Le profil `platformer` ignore désormais les blocs flottants (fausses détections géantes), tandis que le profil `fighting_2d` décale naturellement la caméra vers le haut pour garantir que la tête des personnages géants reste visible. La matrice de scoring différencie désormais parfaitement les deux genres.
 - **🚀 Protection contre les faux plafonds** : YOLO ne peut plus confondre les blocs du plafond avec le joueur. Le détecteur rejette désormais les détections dans les 40% supérieurs de l'écran lors de l'initialisation du sol, et ignore les sauts verticaux impossibles (>50% de l'écran).

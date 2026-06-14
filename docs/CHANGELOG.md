@@ -1,6 +1,7 @@
 # DMD GIF Converter — Changelog
 
 ## [7.0.0] - Architecture & Performances (V7)
+- **🚀 Fixed Parallel Conversion UX**: Resolved a visualization bottleneck where parallel folder/queue conversions appeared to execute sequentially because the heavy OpenCV/YOLO video preprocessing ran silently without emitting progress reports. Added progressive frame-by-frame callback updates to `preprocess_video_for_dmd` and fixed a keyword parameter signature mismatch in `ConversionController`.
 - **🚀 Fixed Anime Close-up Classification**: Falsely classified anime and close-up action scenes (like `visage_anime_1.gif`) as `TOP_DOWN_ISOMETRIC`. We introduced an `effective_floor_in_lower` concept so massive subjects don't trigger "floor found" penalties, relaxed the closeup aspect ratio guard for very large subjects, and unconditionally penalized `TOP_DOWN_ISOMETRIC` when the subject occupies more than 30% of the frame.
 - **🚀 Fixed Fallback UnboundLocalError**: Fixed a crash where the `_auto_scene` variable was used before definition if the scan detected no targets.
 - **🚀 Decoupled Circular Imports**: Exposed `available_detectors` lazily in `src/engine/auto_action/__init__.py` to allow direct, isolated test execution of individual modules without circular package dependency errors.
