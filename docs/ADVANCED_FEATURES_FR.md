@@ -168,7 +168,7 @@ pip install opencv-python   # ou : pip install -r requirements_ui.txt
 
 Si OpenCV n'est pas installé, la fonctionnalité est silencieusement ignorée et le pipeline standard s'exécute à la place — **pas de crash, pas de perte de données**.
 
-### 🧠 Matrice de Score Continue (v6.2.0)
+### 🧠 Matrice de Score Continue (v6.3.0)
 
 > Remplace le modèle en cascade rigide pour classifier intelligemment les scènes et assigner le profil de caméra parfait.
 
