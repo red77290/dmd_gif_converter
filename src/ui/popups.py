@@ -55,15 +55,22 @@ def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
     entry.bind("<FocusOut>", _on_focus_out)
 
     def _var_changed(*_):
-        if not _editing[0]:
-            entry_sv.set(_lbl_txt())
+        try:
+            if entry.winfo_exists() and not _editing[0]:
+                entry_sv.set(_lbl_txt())
+        except Exception:
+            pass
             
     var.trace_add("write", _var_changed)
     
     if auto_var is not None:
         def _toggle_slider(*_):
-            state = "disabled" if auto_var.get() else "normal"
-            sl.configure(state=state)
+            try:
+                if sl.winfo_exists():
+                    state = "disabled" if auto_var.get() else "normal"
+                    sl.configure(state=state)
+            except Exception:
+                pass
         auto_var.trace_add("write", _toggle_slider)
         
     return sl
@@ -201,12 +208,15 @@ class TextOverlayPopup(ctk.CTkToplevel):
             width=60, anchor="e", font=ctk.CTkFont(size=11),
         )
         self._text_bg_opacity_lbl.grid(row=0, column=2, padx=(4, 4))
-        self._app_state.v_text_bg_opacity.trace_add(
-            "write",
-            lambda *_: self._text_bg_opacity_lbl.configure(
-                text="%d %%" % self._app_state.v_text_bg_opacity.get()
-            ),
-        )
+        def _update_opacity_lbl(*_):
+            try:
+                if self.winfo_exists() and self._text_bg_opacity_lbl.winfo_exists():
+                    self._text_bg_opacity_lbl.configure(
+                        text="%d %%" % self._app_state.v_text_bg_opacity.get()
+                    )
+            except Exception:
+                pass
+        self._app_state.v_text_bg_opacity.trace_add("write", _update_opacity_lbl)
         self._on_text_bg_toggle()
 
         close_btn = ctk.CTkButton(self, text="Close", command=self.destroy, width=100)

@@ -172,6 +172,7 @@ DEFAULT_PARAMS = {
     "action_smoothness":   0.98,       # 0..0.98 camera smoothing
     "action_zoom_max":     2.0,        # max dynamic zoom factor (hard limit)
     "action_padding":      0.20,       # ROI padding before aspect crop
+    "action_subsample_frames": 3,      # Run YOLO every N frames
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
     "bg_sub_enable":       False,      # enable background subtraction (replaces background with black)
     # ── Crop & vertical bias (individual manual/auto controls) ────────────
@@ -265,7 +266,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             start_s=float(start_s) if start_s is not None else None,
             end_s=float(end_s) if end_s is not None else None
         )
-        ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg, cancel_event=cancel_event)
+        ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg, cancel_event=cancel_event, callback=callback)
         if ok_pre and pre_src:
             src_path = pre_src
             temp_pre_src = os.path.dirname(pre_src)
@@ -719,7 +720,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         if cancel_event and cancel_event.is_set():
             return filename, src, None
 
-        ok, pre_src, msg = preprocess_video_for_dmd(src, cfg, cancel_event=cancel_event)
+        ok, pre_src, msg = preprocess_video_for_dmd(src, cfg, cancel_event=cancel_event, callback=log)
         if ok and pre_src:
             log(f"[ACTION ] {filename} — {msg}")
             return filename, pre_src, os.path.dirname(pre_src)

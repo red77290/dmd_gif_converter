@@ -392,6 +392,8 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _update_dmd_canvas_size(self, *_):
         try:
+            if not self.winfo_exists() or not self._dmd_canvas.winfo_exists():
+                return
             w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
         except Exception:
             return
@@ -616,7 +618,10 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _generate_auto_preview(self, src, cfg):
         try:
-            ok, out_mp4, msg = preprocess_video_for_dmd(src, cfg)
+            ok, out_mp4, msg = preprocess_video_for_dmd(
+                src, cfg,
+                callback=lambda m, lv="info": self.after(0, lambda: self._log(m, lv))
+            )
             if not ok or not out_mp4:
                 self.after(0, lambda: self._on_auto_fail(msg))
                 return
@@ -743,6 +748,17 @@ class PreviewPanel(ctk.CTkFrame):
                                      anchor="ne", tags="refresh_tag")
         params = self._collect_params()
         start_s, end_s = self._get_trim()
+        
+        # Bypass YOLO tracking if the Auto Action preview has already generated the intermediate video
+        if params.get("auto_action_enabled") and getattr(self, "_auto_tmpdir", None):
+            cached_mp4 = os.path.join(self._auto_tmpdir, "action_pre.mp4")
+            if os.path.isfile(cached_mp4):
+                src = cached_mp4
+                params["auto_action_enabled"] = False
+                start_s = None  # The intermediate video is already trimmed
+                end_s = None
+                self._log("⚡ Bypassing YOLO analysis (using cached Auto Action video).", "info")
+
         led = getattr(self.app_state, "v_led_sim", None)
         led_on = led.get() if led else False
         if led_on:
@@ -1254,7 +1270,9 @@ class PreviewPanel(ctk.CTkFrame):
             {"busy": busy})
 
     def _log(self, message: str, level: str = "info"):
-        logger.info(message) if level == "info" else logger.warning(message)
+        lvl = {"debug": logging.DEBUG, "info": logging.INFO,
+               "warning": logging.WARNING, "error": logging.ERROR}.get(level.lower(), logging.INFO)
+        logger.log(lvl, message)
         EventBus.publish(EventType.CONVERSION_PROGRESS,
                          {"log": message, "level": level})
 

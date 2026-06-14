@@ -55,7 +55,7 @@ class FFmpegConverter(IConverter):
                 else:
                     cfg.end_s = min(cfg.end_s, (cfg.start_s or 0.0) + _cap_dur)
 
-            ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg)
+            ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg, callback=log)
             if not ok_pre or not pre_src:
                 log(f"[{filename}] Auto action failed: {pre_msg}", "warning")
             else:

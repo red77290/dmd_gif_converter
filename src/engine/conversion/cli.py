@@ -146,6 +146,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--action-smoothness", type=float, default=DEFAULT_PARAMS["action_smoothness"], metavar="F")
     ag.add_argument("--action-zoom-max", type=float, default=DEFAULT_PARAMS["action_zoom_max"], metavar="F")
     ag.add_argument("--action-padding", type=float, default=DEFAULT_PARAMS["action_padding"], metavar="F")
+    ag.add_argument("--action-subsample-frames", type=int, default=DEFAULT_PARAMS["action_subsample_frames"], metavar="N",
+                    help="Run YOLO every N frames (1 = every frame, 3 = fast, 5 = very fast)")
     ag.add_argument("--action-intro", type=float, default=DEFAULT_PARAMS["action_intro"], metavar="F",
                     help="Establishing shot duration in seconds (default: 1.5).")
     ag.add_argument("--action-bottom-crop", type=float, default=DEFAULT_PARAMS["action_bottom_crop"], metavar="F",
@@ -221,7 +223,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     am.add_argument(
         "--ai-moments-dur-max", type=float, default=5.0, metavar="F",
-        help="Maximum duration of an extracted moment in seconds (default: 5.0)."
+        help="Maximum duration for a single moment in seconds (default: 5.0)."
+    )
+    am.add_argument(
+        "--ai-moments-analyze-fps", type=float, default=5.0, metavar="F",
+        help="Analyze video at N frames per second to speed up YOLO (default: 5.0)."
     )
     
     # ── Automation (Magic Mode) ──────────────────────────────────────────
@@ -521,6 +527,7 @@ if __name__ == "__main__":
                         "w_dmd": 100.0,
                         "dur_min": args.ai_moments_dur_min,
                         "dur_max": args.ai_moments_dur_max,
+                        "analyze_fps": args.ai_moments_analyze_fps,
                         "auto_framing": args.auto_action,
                         "opt_dmd": True
                     }

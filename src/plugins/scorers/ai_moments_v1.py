@@ -52,7 +52,9 @@ class AiMomentsEngine:
 
     def _run_analysis(self) -> List[AiMoment]:
         with _quiet_c_stderr():
-            cap = cv2.VideoCapture(self.video_path)
+            cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
             logger.error("Could not open video.")
             return []

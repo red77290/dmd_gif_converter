@@ -4,6 +4,7 @@ import customtkinter as ctk
 from pathlib import Path
 from tkinter import filedialog
 from src.ui.events.event_bus import EventBus, EventType
+from src.ui.widgets import _InfoBadge, CTkChip
 
 # Suppress [mp3float @ ...] / Header missing messages (OpenCV/FFmpeg)
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "loglevel;quiet")
@@ -173,6 +174,17 @@ class AiMomentsPanel(ctk.CTkFrame):
         
         ctk.CTkLabel(row, text="Max", text_color="gray").pack(side="left", padx=(10, 5))
         ctk.CTkEntry(row, textvariable=self.app_state.v_ai_dur_max, width=50).pack(side="left")
+        
+        row2 = ctk.CTkFrame(f, fg_color="transparent")
+        row2.pack(fill="x", padx=10, pady=(0, 5))
+        
+        self.app_state.v_ai_analyze_fps = tk.StringVar(value="5.0")
+        ctk.CTkLabel(row2, text="Analyze FPS:").pack(side="left")
+        ctk.CTkEntry(row2, textvariable=self.app_state.v_ai_analyze_fps, width=50).pack(side="left", padx=(10, 5))
+        
+        badge = _InfoBadge(row2)
+        badge.configure(text="Analyze video at N frames per second.\n\nLower FPS = Faster processing time (skips more frames).\nHigher FPS = Better precision (analyzes more frames).\n\nDefault is 5.0 (analyzes 1 frame out of 5 on a 25fps video).")
+        badge.pack(side="left", padx=(0, 5))
         
         self.app_state.v_ai_auto_framing = tk.BooleanVar(value=True)
         ctk.CTkCheckBox(f, text="Auto Action Framing", variable=self.app_state.v_ai_auto_framing).pack(anchor="w", padx=10, pady=5)
@@ -456,7 +468,9 @@ class AiMomentsPanel(ctk.CTkFrame):
         if getattr(self, '_ai_preview_cap', None):
             self._ai_preview_cap.release()
         with _quiet_c_stderr():
-            self._ai_preview_cap = cv2.VideoCapture(path)
+            self._ai_preview_cap = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
+            if self._ai_preview_cap is None or not self._ai_preview_cap.isOpened():
+                self._ai_preview_cap = cv2.VideoCapture(path)
         
         from src.engine.conversion.ffmpeg_utils import get_metadata
         _, _, _, dur = get_metadata(path)
@@ -495,24 +509,31 @@ class AiMomentsPanel(ctk.CTkFrame):
         for var in self._ai_task_vars.values():
             var.set("[ ]")
             
-        options = {
-            "count": int(self.app_state.v_ai_moments_count.get()),
-            "crit_action": self.app_state.v_ai_crit_action.get(),
-            "crit_epic": self.app_state.v_ai_crit_epic.get(),
-            "crit_character": self.app_state.v_ai_crit_character.get(),
-            "crit_loopable": self.app_state.v_ai_crit_loopable.get(),
-            "crit_dmd": self.app_state.v_ai_crit_dmd.get(),
-            "strategy": self.app_state.v_ai_strategy.get(),
-            "w_action": self.app_state.v_ai_w_action.get(),
-            "w_epic": self.app_state.v_ai_w_epic.get(),
-            "w_character": self.app_state.v_ai_w_character.get(),
-            "w_loopable": self.app_state.v_ai_w_loopable.get(),
-            "w_dmd": self.app_state.v_ai_w_dmd.get(),
-            "dur_min": float(self.app_state.v_ai_dur_min.get() or 2.0),
-            "dur_max": float(self.app_state.v_ai_dur_max.get() or 5.0),
-            "auto_framing": self.app_state.v_ai_auto_framing.get(),
-            "opt_dmd": self.app_state.v_ai_opt_dmd.get()
-        }
+        try:
+            options = {
+                "count": int(str(self.app_state.v_ai_moments_count.get()).replace(',', '.') or 10),
+                "crit_action": self.app_state.v_ai_crit_action.get(),
+                "crit_epic": self.app_state.v_ai_crit_epic.get(),
+                "crit_character": self.app_state.v_ai_crit_character.get(),
+                "crit_loopable": self.app_state.v_ai_crit_loopable.get(),
+                "crit_dmd": self.app_state.v_ai_crit_dmd.get(),
+                "strategy": self.app_state.v_ai_strategy.get(),
+                "w_action": self.app_state.v_ai_w_action.get(),
+                "w_epic": self.app_state.v_ai_w_epic.get(),
+                "w_character": self.app_state.v_ai_w_character.get(),
+                "w_loopable": self.app_state.v_ai_w_loopable.get(),
+                "w_dmd": self.app_state.v_ai_w_dmd.get(),
+                "dur_min": float(str(self.app_state.v_ai_dur_min.get()).replace(',', '.') or 2.0),
+                "dur_max": float(str(self.app_state.v_ai_dur_max.get()).replace(',', '.') or 5.0),
+                "analyze_fps": float(str(self.app_state.v_ai_analyze_fps.get()).replace(',', '.') or 5.0),
+                "auto_framing": self.app_state.v_ai_auto_framing.get(),
+                "opt_dmd": self.app_state.v_ai_opt_dmd.get()
+            }
+        except ValueError:
+            import tkinter.messagebox as msg
+            msg.showerror("Invalid Input", "Please enter valid numbers for Duration and Analyze FPS.")
+            self._btn_ai_start.configure(state="normal")
+            return
         
         # Trigger analysis thread
         import threading

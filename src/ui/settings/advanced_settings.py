@@ -44,8 +44,11 @@ def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
         entry_sv.set(_lbl_txt())
 
     def _var_changed(*_):
-        if not _editing[0]:
-            entry_sv.set(_lbl_txt())
+        try:
+            if entry.winfo_exists() and not _editing[0]:
+                entry_sv.set(_lbl_txt())
+        except Exception:
+            pass
 
     var.trace_add("write", _var_changed)
     entry.bind("<FocusIn>",  _on_focus_in)

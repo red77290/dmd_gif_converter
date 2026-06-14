@@ -199,6 +199,15 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
                    "{:.2f}", "", steps=60))
         _add_dep(adv_slider(parent, "Intro panoramic", self.app_state.v_action_intro_duration, 0.0, 5.0,
                    "{:.1f}", " s", steps=50))
+                   
+        # Fast Tracking / Subsampling (not disabled by Let Me Handle It)
+        self._slider_subsample = adv_slider(parent, "Fast Tracking (Speedup)", self.app_state.v_action_subsample_frames, 1, 10,
+                   "{:.0f}", " frames", steps=9)
+        subsample_row = ctk.CTkFrame(parent, fg_color="transparent")
+        subsample_row.pack(fill="x", padx=14, pady=(0, 4))
+        _b_sub = _InfoBadge(subsample_row)
+        _b_sub.configure(text="Optimization: Skips YOLO analysis on X frames out of X.\nFor example, 3 divides tracking time by 3 without visual loss.\nThis setting remains editable even when 'Let me handle it' is checked.")
+        _b_sub.pack(side="left", padx=150) # Indent to align with slider label
 
         ctk.CTkLabel(
             parent, text="━━  📐  Crop & Vertical Bias",

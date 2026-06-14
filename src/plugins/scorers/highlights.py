@@ -21,7 +21,9 @@ def extract_highlights(
     Then it slides a window of `window_sec` across the timeline to find the best 
     contiguous blocks of action.
     """
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+    if cap is None or not cap.isOpened():
+        cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.error(f"Cannot open video for highlights: {video_path}")
         return []

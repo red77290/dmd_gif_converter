@@ -58,7 +58,9 @@ class AiMomentsEngine:
 
     def _run_analysis(self) -> List[AiMoment]:
         with _quiet_c_stderr():
-            cap = cv2.VideoCapture(self.video_path)
+            cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(self.video_path)
         if not cap.isOpened():
             logger.error("Could not open video.")
             return []
@@ -71,6 +73,8 @@ class AiMomentsEngine:
         
         # Subsample for speed (configurable)
         analyze_fps = float(self.options.get("analyze_fps", 5.0))
+        if analyze_fps <= 0:
+            analyze_fps = 5.0
         frame_step = max(1, int(fps / analyze_fps))
         
         # Determine sliding window sizes from min to max duration
@@ -107,7 +111,8 @@ class AiMomentsEngine:
                 signals.append(sig_with_time)
                 
             idx += 1
-            if idx % (fps * 5) == 0:
+            # Update progress every 1 second of video instead of every 5 seconds
+            if idx % int(fps) == 0:
                 self.progress_cb("Signal Extraction", 0.4 * (idx / total_frames))
                 
         cap.release()
@@ -145,7 +150,7 @@ class AiMomentsEngine:
                 
                 # Combine scores
                 temporal_bonus = (report.overall_temporal or 50.0) * 0.2
-                overall = avg_frame_score + temporal_bonus
+                overall = min(100.0, avg_frame_score + temporal_bonus)
                 
                 moments.append(AiMoment(
                     start_time=window[0][1],

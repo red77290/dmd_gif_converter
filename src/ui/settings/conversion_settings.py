@@ -53,8 +53,11 @@ class ConversionSettingsPanel(ctk.CTkFrame):
                 entry_sv.set(_lbl_txt())
 
             def _var_changed(*_):
-                if not _editing[0]:
-                    entry_sv.set(_lbl_txt())
+                try:
+                    if entry.winfo_exists() and not _editing[0]:
+                        entry_sv.set(_lbl_txt())
+                except Exception:
+                    pass
 
             var.trace_add("write", _var_changed)
             entry.bind("<FocusIn>",  _on_focus_in)
@@ -76,7 +79,11 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         self._mode_menu.grid(row=0, column=1, padx=4, sticky="w")
         
         def _update_mode_menu_state(*_):
-            self._mode_menu.configure(state="normal")
+            try:
+                if self.winfo_exists() and self._mode_menu.winfo_exists():
+                    self._mode_menu.configure(state="normal")
+            except Exception:
+                pass
         
         self.app_state.v_auto_color_enabled.trace_add("write", _update_mode_menu_state)
         self.app_state.v_let_me_handle_it.trace_add("write", _update_mode_menu_state)
