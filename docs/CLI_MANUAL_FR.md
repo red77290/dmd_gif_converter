@@ -64,8 +64,9 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `ai_moments_only`| `--ai-moments-only`| `False` | Extrait les meilleurs moments (en MP4) mais NE LES CONVERTIT PAS en GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Nombre maximum de moments à extraire par vidéo. |
 | `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`). |
-| `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes. |
-| `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes. |
+| `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes |
+| `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes |
+| `ai_moments_analyze_fps`| `--ai-moments-analyze-fps` | `5.0` | Analyse la vidéo à N images par seconde pour optimiser YOLO |
 
 ### A/B Testing Engine (Validation Scoring V2)
 
@@ -95,8 +96,9 @@ Cela exécutera le pipeline de prétraitement Auto Action sur toutes les vidéos
 | `action_intro` | `--action-intro` | `1.5` | Durée du plan d'établissement en secondes |
 | `action_strength` | `--action-strength` | `0.65` | Précision du cadrage autour du sujet |
 | `action_smoothness` | `--action-smoothness`| `0.65` | Lissage exponentiel de la caméra |
-| `action_zoom_max` | `--action-zoom-max` | `1.8` | Facteur de zoom IA maximum |
+| `action_zoom_max` | `--action-zoom-max` | `2.0` | Facteur de zoom dynamique maximal |
 | `action_padding` | `--action-padding` | `0.20` | Marge autour du ROI détecté |
+| `action_subsample_frames` | `--action-subsample-frames` | `3` | Optimisation de vitesse. Ignore l'inférence YOLO 1 fois sur N. |
 | `bg_sub_enable` | `--bg-sub-enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
 | `action_bottom_crop` | `--action-bottom-crop`| `0.0` | Exclut les N % inférieurs du cadre (manuel, 0 = désactivé) |
 | `action_auto_bottom_crop`| `--action-auto-bottom-crop`| `False` | Détecte auto la limite basse du sujet (pieds / sol) |

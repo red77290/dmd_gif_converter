@@ -159,6 +159,7 @@ class _FrameDetector(AbstractDetector):
                 if model_path is None:
                     self._onnx_session = None
                     return
+                
                 session = ort.InferenceSession(
                     model_path, providers=["CPUExecutionProvider"]
                 )

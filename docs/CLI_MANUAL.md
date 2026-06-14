@@ -67,8 +67,9 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `ai_moments_only`| `--ai-moments-only`| `False` | Extract the best moments (MP4) but DO NOT convert them to GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Max number of moments to extract per video. |
 | `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Strategy to prioritize (`Action`, `Balanced`, `Character`). |
-| `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Minimum duration of an extracted moment in seconds. |
-| `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Maximum duration of an extracted moment in seconds. |
+| `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Minimum duration of an extracted moment in seconds |
+| `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Maximum duration of an extracted moment in seconds |
+| `ai_moments_analyze_fps`| `--ai-moments-analyze-fps` | `5.0` | Analyze video at N frames per second to speed up YOLO |
 
 ### A/B Testing Engine (Scoring V2 Validation)
 
@@ -99,8 +100,9 @@ This will run the Auto Action preprocessing pipeline on all videos in the target
 | `action_intro` | `--action-intro` | `1.5` | Establishing shot duration in seconds |
 | `action_strength` | `--action-strength` | `0.65` | Framing tightness around subject |
 | `action_smoothness` | `--action-smoothness`| `0.65` | Camera exponential smoothing factor |
-| `action_zoom_max` | `--action-zoom-max` | `1.8` | Maximum AI zoom factor |
+| `action_zoom_max` | `--action-zoom-max` | `2.0` | Maximum dynamic zoom factor |
 | `action_padding` | `--action-padding` | `0.20` | Padding around detected ROI |
+| `action_subsample_frames` | `--action-subsample-frames` | `3` | Speed optimization. Skips YOLO inference on N frames. |
 | `bg_sub_enable` | `--bg-sub-enable` | `False` | Replace background with black (maximises subject contrast) |
 | `action_bottom_crop` | `--action-bottom-crop`| `0.0` | Exclude bottom N % of frame (manual, 0 = disabled) |
 | `action_auto_bottom_crop`| `--action-auto-bottom-crop`| `False` | Auto-detect bottom crop from ROI analysis |
