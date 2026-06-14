@@ -150,7 +150,7 @@ python auto_action_cli.py input.mp4 --top-crop 0.05 --bottom-crop 0.15
 
 If OpenCV is not installed, the feature is silently skipped and the standard pipeline runs instead — **no crash, no data loss**.
 
-### 🧠 Continuous Scoring Matrix (v6.2.0)
+### 🧠 Continuous Scoring Matrix (v6.3.0)
 
 > Replaces the rigid waterfall model to intelligently classify scenes and assign the perfect camera profile.
 
