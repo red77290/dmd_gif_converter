@@ -157,12 +157,13 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_clip_mode="none",
         face_head_frac=0.22,
         face_eye_offset=None,
-        platformer_mode=False,
+        platformer_mode=True,        # FIX: Now anchors to floor like a platformer!
         auto_vertical_bias=True,
         suggested_strength=0.70,
         suggested_smoothness=0.80,
         max_zoom_override=1.05,
     ),
+
     SceneType.ACTION_HORIZONTAL: SceneProfile(
         scene_type=SceneType.ACTION_HORIZONTAL,
         face_priority=False,
@@ -299,22 +300,49 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
 
     # 2. Fill Ratio -> Closeups / Wide shots
     is_massive_subject = fill_ratio >= 0.40
+    # Dialogue/talking scenes have no floor; if the subject is massive, any detected
+    # "floor" at the bottom of the bounding box is actually just the body boundary.
+    has_dialogue_floor = floor_in_lower and not is_massive_subject
+
+    # Top-Down Isometric scenes never contain large subjects filling the frame
+    if fill_ratio >= 0.30:
+        scores[SceneType.TOP_DOWN_ISOMETRIC] -= 5.0
+
     if fill_ratio >= 0.50:
-        if body_aspect <= 1.4 and body_aspect >= 0.85:
+        # If the subject is extremely close (fill_ratio >= 0.70), relax body aspect checks
+        if (body_aspect <= 1.4 and body_aspect >= 0.85) or fill_ratio >= 0.70:
             scores[SceneType.TALKING_CLOSEUP] += 5.0
-        scores[SceneType.TALKING_MEDIUM] += 2.0
+        # Only give TALKING_MEDIUM points if there is NO floor (i.e. it's truly a conversation scene)
+        if not has_dialogue_floor:
+            scores[SceneType.TALKING_MEDIUM] += 2.0
         scores[SceneType.PLATFORMER] -= 5.0  # Big subjects are not platformers
         scores[SceneType.ACTION_HORIZONTAL] -= 5.0
         scores[SceneType.ACTION_MOVING] -= 5.0
         scores[SceneType.FIGHTING_2D] -= 3.0
     elif fill_ratio >= 0.25:
-        scores[SceneType.TALKING_MEDIUM] += 2.0
-        scores[SceneType.FULL_BODY_MEDIUM] += 1.0
+        # Only give talking points if there is no floor signal at all
+        if not has_dialogue_floor:
+            scores[SceneType.TALKING_MEDIUM] += 2.0
+            scores[SceneType.FULL_BODY_MEDIUM] += 1.0
+        else:
+            # Subject fills medium portion of screen + floor detected = fighting_2d or platformer
+            scores[SceneType.FIGHTING_2D] += 1.5
         if fill_ratio >= 0.35:
             scores[SceneType.PLATFORMER] -= 2.0
             scores[SceneType.ACTION_HORIZONTAL] -= 2.0
     elif fill_ratio < 0.15:
-        scores[SceneType.WIDE_SHOT] += 3.0
+        if floor_in_lower and floor_var_score <= 0.25:
+            # Small character but stable floor -> zoomed out platformer
+            scores[SceneType.PLATFORMER] += 1.5
+            scores[SceneType.WIDE_SHOT] += 1.0
+        else:
+            # If the camera perfectly tracks a tiny subject, it's a game, not a cinematic wide shot.
+            if x_variance < 0.005 and y_variance < 0.005:
+                scores[SceneType.PLATFORMER] += 1.5
+                scores[SceneType.ACTION_HORIZONTAL] += 1.5
+                scores[SceneType.WIDE_SHOT] += 0.5
+            else:
+                scores[SceneType.WIDE_SHOT] += 3.0
 
     # 3. Tall Ratio + Aspect -> Full body / Fighting
     if tall_ratio >= 0.60 and body_aspect > 1.4:
@@ -336,9 +364,14 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         if x_variance >= 0.02:
             scores[SceneType.FIGHTING_2D] += 2.0
 
-    # 4. X-Variance -> Movement / Fighting
+    # 4. X-Variance -> Movement
     if x_variance >= 0.05:
-        scores[SceneType.FIGHTING_2D] += 2.0
+        # Huge subjects moving fast laterally are fighting games. Small are platformers.
+        if fill_ratio >= 0.35:
+            scores[SceneType.FIGHTING_2D] += 2.0
+        else:
+            scores[SceneType.PLATFORMER] += 2.0
+        
         scores[SceneType.ACTION_HORIZONTAL] += 1.5
         scores[SceneType.ACTION_MOVING] += 1.0
         
@@ -348,28 +381,52 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
             scores[SceneType.TALKING_CLOSEUP] -= 3.0
             scores[SceneType.TALKING_MEDIUM] -= 2.0
     else:
-        scores[SceneType.TALKING_CLOSEUP] += 1.0
-        scores[SceneType.TALKING_MEDIUM] += 1.0
+        # Static subject: only award talking points if there is NO floor
+        # A perfectly-centered game follow-camera has x_variance ~0 but is NOT a conversation scene.
+        if not has_dialogue_floor:
+            scores[SceneType.TALKING_CLOSEUP] += 1.0
+            scores[SceneType.TALKING_MEDIUM] += 1.0
+        # Penalize talking-style classifications if a floor was found
+        else:
+            scores[SceneType.TALKING_MEDIUM] -= 2.0
+            scores[SceneType.TALKING_CLOSEUP] -= 2.0
 
     # 5. Isometric Top-Down: High movement in both X and Y, no stable floor
     if x_variance >= 0.02 and y_variance >= 0.02 and floor_var_score > 0.4:
-        # Both X and Y are active, and the floor is very unstable or nonexistent
-        scores[SceneType.TOP_DOWN_ISOMETRIC] += 3.0
-        scores[SceneType.PLATFORMER] -= 2.0
+        # Both X and Y are active, and the floor is very unstable or nonexistent.
+        # Guard: a large or square subject (face, close-up) can NOT be isometric even if it wiggles.
+        # Anime expressions / hair animations cause bounding box jitter that triggers this falsely.
+        if fill_ratio < 0.30 and body_aspect < 1.2:
+            scores[SceneType.TOP_DOWN_ISOMETRIC] += 3.0
+            scores[SceneType.PLATFORMER] -= 2.0
+        else:
+            # It's a face or large close-up that moves -> classify as talking/full body
+            scores[SceneType.TALKING_CLOSEUP] += 2.0
+            scores[SceneType.FULL_BODY_TALL] += 1.0
+            scores[SceneType.TOP_DOWN_ISOMETRIC] -= 3.0
 
     # 6. Static Menu / Still Scene: Very low movement
     if x_variance < 0.005 and y_variance < 0.005:
-        scores[SceneType.PLATFORMER] -= 3.0
-        if fill_ratio >= 0.4:
-            # Huge static subject -> portrait or closeup, NOT a menu
-            scores[SceneType.TALKING_CLOSEUP] += 2.0
-            scores[SceneType.TALKING_MEDIUM] += 2.0
-            scores[SceneType.MENU_STATIC] -= 2.0
-        elif fill_ratio >= 0.2:
-            scores[SceneType.TALKING_MEDIUM] += 2.0
-            scores[SceneType.MENU_STATIC] += 0.5
+        # A perfectly centered follow-camera has ~0 variance! 
+        # If there is a floor, it's a game, not a static menu.
+        if not has_dialogue_floor:
+            scores[SceneType.PLATFORMER] -= 3.0
+            if fill_ratio >= 0.4:
+                # Huge static subject -> portrait or closeup, NOT a menu
+                scores[SceneType.TALKING_CLOSEUP] += 2.0
+                scores[SceneType.TALKING_MEDIUM] += 2.0
+                scores[SceneType.MENU_STATIC] -= 2.0
+            elif fill_ratio >= 0.2:
+                scores[SceneType.TALKING_MEDIUM] += 2.0
+                scores[SceneType.MENU_STATIC] += 0.5
+            else:
+                scores[SceneType.MENU_STATIC] += 3.0
         else:
-            scores[SceneType.MENU_STATIC] += 3.0
+            # Floor detected + zero variance = perfectly locked camera (game with follow-cam)
+            # Do NOT give talking/menu points; reinforce platform/fighting instead.
+            scores[SceneType.TALKING_MEDIUM] -= 3.0
+            scores[SceneType.MENU_STATIC] -= 3.0
+            scores[SceneType.PLATFORMER] += 1.0
 
     # Add small default bias to moving action as the safest fallback
     scores[SceneType.ACTION_MOVING] += 0.5
