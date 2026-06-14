@@ -15,6 +15,7 @@ try:
 except Exception:
     _analyze_and_compensate = None
 from src.engine.conversion.ffmpeg_utils import _check_drawtext, _apply_text_overlay_pillow, snap_to_clean_fps, get_metadata
+from src.engine.conversion.quality import evaluate_gif_quality
 logger = logging.getLogger(__name__)
 
 
@@ -628,8 +629,13 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         else:
             log(f"[TEXT  ] {filename} — Pillow text overlay failed: {txt_msg}", "warning")
 
-    # Quality evaluation is now performed pre-conversion by Scoring V2 engines (AiMoments).
-    # Post-conversion evaluate_gif_quality() has been removed as it is obsolete.
+    # Run quality evaluation on the generated GIF for UI rating and the Cleanup Assistant
+    try:
+        q_res = evaluate_gif_quality(out_path)
+        log(f"[QUALITY] {filename} — Quality Score: {q_res.get('score', 0)}% ({q_res.get('rating', 'Unknown')})")
+    except Exception as e:
+        log(f"[QUALITY] {filename} — Failed to evaluate quality: {e}", "warning")
+
     log(f"[OK    ] {filename}")
     return True, f"[OK] {filename}"
 

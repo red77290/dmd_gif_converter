@@ -277,6 +277,18 @@ class TestProcessFile(unittest.TestCase):
                 conv.process_file("input.mp4", out, callback=cb)
         self.assertTrue(len(messages) > 0)
 
+    @patch("src.engine.conversion.core.evaluate_gif_quality")
+    def test_quality_evaluated_on_success(self, mock_evaluate):
+        mock_evaluate.return_value = {"score": 85, "rating": "Good", "color": "🟢", "reasons": []}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = os.path.join(tmpdir, "out.gif")
+            with open(out, "w") as f:
+                f.write("mock gif data")
+            with self._mock_metadata(), self._mock_ffmpeg_ok():
+                ok, msg = conv.process_file("input.mp4", out)
+            self.assertTrue(ok)
+            mock_evaluate.assert_called_once_with(out)
+
     def test_custom_params_are_merged(self):
         """process_file doit respecter les params personnalisés."""
         captured_cmd = []
