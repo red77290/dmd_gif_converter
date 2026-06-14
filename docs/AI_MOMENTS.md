@@ -18,6 +18,13 @@ The AI Moments engine runs a multi-pass analysis on your video using the **Scori
 4. **Strategy Weighting**: Dynamically applies weights based on the chosen strategy (`Action`, `Balanced`, `Character`).
 5. **Non-Maximum Suppression (NMS)**: Ranks the sequences and extracts the top non-overlapping moments.
 
+## Performance Optimization
+
+The AI Moments engine can be very CPU intensive. You can control the speed of the analysis by adjusting the **Analyze FPS** parameter:
+- **Lower FPS** (e.g. `2.0`): The engine will skip more frames. Processing will be significantly faster, but you might lose precision on micro-movements.
+- **Higher FPS** (e.g. `10.0`): The engine analyzes more frames per second. The result is highly precise, but takes longer to process.
+- **Default**: `5.0` (analyzes 1 frame out of 5 on a standard 25fps video).
+
 ## Usage in the UI
 
 1. Open a video in the UI.

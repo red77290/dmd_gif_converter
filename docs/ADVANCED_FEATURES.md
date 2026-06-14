@@ -419,3 +419,18 @@ python -m src.engine.conversion.cli input/ --log-level INFO    # verbose
 python -m src.engine.conversion.cli input/ --log-level WARNING # quiet (progress bar only)
 python -m src.engine.conversion.cli input/ --verbose           # alias for --log-level DEBUG
 ```
+
+## Performance & Subsampling
+
+To optimize CPU usage during heavy YOLO inference, two parameters allow you to trade off processing time vs precision:
+
+1. **Auto-Action Subsample Frames** (Tracking):
+   - Skips YOLO inference on N frames during normal Auto-Action tracking.
+   - *Example*: `3` means the engine runs inference every 3rd frame and interpolates the bounding box between them.
+   - *CLI*: `--action-subsample-frames 3`
+
+2. **Analyze FPS** (AI Moments):
+   - Defines how many frames per second the AI Moments engine analyzes.
+   - *Example*: `5.0` means 5 frames per second are analyzed. Lower values are faster but less precise. Higher values catch micro-movements but take longer.
+   - *CLI*: `--ai-moments-analyze-fps 5.0`
+

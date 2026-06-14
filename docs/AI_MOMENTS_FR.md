@@ -18,6 +18,13 @@ Le moteur AI Moments effectue une analyse en plusieurs passes sur votre vidéo e
 4. **Pondération Stratégique** : Applique dynamiquement des poids en fonction de la stratégie choisie (`Action`, `Balanced`, `Character`).
 5. **Suppression des Non-Maxima (NMS)** : Classe les séquences et extrait les meilleurs moments sans chevauchement.
 
+## Optimisation des Performances
+
+Le moteur AI Moments peut être très gourmand en CPU. Vous pouvez contrôler la vitesse d'analyse en ajustant le paramètre **Analyze FPS** :
+- **FPS Bas** (ex: `2.0`) : Le moteur ignorera plus d'images. L'analyse sera significativement plus rapide, mais vous perdrez en précision sur les micro-mouvements.
+- **FPS Haut** (ex: `10.0`) : Le moteur analyse plus d'images par seconde. Le résultat sera d'une précision chirurgicale, mais l'analyse sera beaucoup plus longue.
+- **Par défaut** : `5.0` (analyse 1 image sur 5 sur une vidéo à 25 fps).
+
 ## Utilisation dans l'interface
 
 1. Ouvrez une vidéo dans l'interface.
