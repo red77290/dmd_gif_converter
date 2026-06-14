@@ -152,6 +152,8 @@ def _compute_auto_crop_margins(  # noqa: C901
     bottom_y = min(float(frame_h), bottom_y)
 
     top_pct    = _clamp(top_y / frame_h, 0.0, 0.9)
+    if face_priority:
+        top_pct = 0.0
     bottom_pct = _clamp((frame_h - bottom_y) / frame_h, 0.0, 0.9)
 
     return top_pct, bottom_pct, face_priority
@@ -268,7 +270,19 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
+    _auto_scene = getattr(cfg, "auto_scene_type", False)
     if not roi_tops:
+        # No detections: if auto_scene_type is active, assign a safe default profile
+        # rather than leaving scene_profile=None (which shows as 'Unknown').
+        if _auto_scene:
+            from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType
+            _fallback_profile = SCENE_PROFILES.get(SceneType.ACTION_MOVING)
+            return {**_EMPTY, "best_detector": best_detector,
+                    "reasons": ["no detections in scan → fallback to action_moving"],
+                    "scene_profile": _fallback_profile,
+                    "suggested_strength": _fallback_profile.suggested_strength if _fallback_profile else 0.65,
+                    "suggested_smoothness": _fallback_profile.suggested_smoothness if _fallback_profile else 0.85,
+                    "scoreboard_lines": [], "scene_scores": {}}
         return {**_EMPTY, "best_detector": best_detector, "reasons": ["no detections in scan — all manual"]}
 
     arr_tops       = np.array(roi_tops)
@@ -377,7 +391,7 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     face_priority = scene_profile.face_priority if scene_profile is not None else (tall_ratio > TALL_FACTOR)
     aspect        = body_aspect
     if face_priority:
-        # Increase top padding heavily for face priority to protect tall hair (like Goku)
+        # Increase top padding heavily for face priority to protect tall hair
         pad_top_px    = frame_h * 0.35
         pad_bottom_px = frame_h * 0.10
     else:
@@ -396,6 +410,8 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     bottom_y = min(float(frame_h), bottom_y)
 
     pre_top_pct    = _clamp(top_y    / frame_h,              0.0, 0.9)
+    if face_priority:
+        pre_top_pct = 0.0
     pre_bottom_pct = _clamp((frame_h - bottom_y) / frame_h,  0.0, 0.9)
 
     left_pct = 0.0

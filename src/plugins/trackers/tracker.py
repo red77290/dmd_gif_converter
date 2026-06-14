@@ -120,7 +120,7 @@ class DetectionStage(ITrackerStage):
             )
             if context.raw_roi is not None and engine.effective_frame_top > 0:
                 rx, ry, rw, rh = context.raw_roi
-                context.raw_roi = (rx, ry + engine.effective_frame_top, rw, rh)
+                context.raw_roi = BoundingBox(rx, ry + engine.effective_frame_top, rw, rh)
 
 
 class PersistenceStage(ITrackerStage):
@@ -199,7 +199,7 @@ class HistorySynthesisStage(ITrackerStage):
                     ww += w * hr[2]
                     wh += w * hr[3]
                 if total_w > 0:
-                    context.raw_roi = (int(wx / total_w), int(wy / total_w), int(ww / total_w), int(wh / total_w))
+                    context.raw_roi = BoundingBox(int(wx / total_w), int(wy / total_w), int(ww / total_w), int(wh / total_w))
                     context.face_roi = engine._clip_to_face_roi(context.raw_roi)
 
 
@@ -280,7 +280,7 @@ class ReadabilityScoreStage(ITrackerStage):
 
             if read_prop_score < read_prev_score * 0.95:
                 # Reject width/height changes if readability is significantly worse
-                context.cam_now = (context.cam_now_proposed[0], context.cam_now_proposed[1], context.cam_prev[2], context.cam_prev[3])
+                context.cam_now = CamRect(context.cam_now_proposed[0], context.cam_now_proposed[1], context.cam_prev[2], context.cam_prev[3])
 
             if getattr(engine.cfg, 'auto_tuning_dataset_dir', None) is not None:
                 _ds_dir = engine.cfg.auto_tuning_dataset_dir
@@ -350,17 +350,10 @@ class TrackingEngine(ITracker):
         self.effective_frame_h = effective_frame_h
         self.effective_frame_left = effective_frame_left
         self.effective_frame_w = effective_frame_w
-        self.face_priority_mode = face_priority_mode
+        self._face_priority_mode_init = face_priority_mode
         self.cfg = cfg
         
         self.detector = DetectorFactory.create()
-
-        if self.face_priority_mode:
-            self.cam_frame_h = self.frame_h
-            self.cam_frame_top = 0.0
-        else:
-            self.cam_frame_h = self.effective_frame_h
-            self.cam_frame_top = float(self.effective_frame_top)
 
         self.readability_engine = DmdReadabilityEngine(
             target_w=self.cfg.target_width,
@@ -424,6 +417,20 @@ class TrackingEngine(ITracker):
     def cam_full_view(self) -> CamRect:
         return self._cam_full_view
 
+    @property
+    def face_priority_mode(self) -> bool:
+        if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
+            return self.cfg.scene_profile.face_priority
+        return self._face_priority_mode_init
+
+    @property
+    def cam_frame_h(self) -> float:
+        return float(self.effective_frame_h)
+
+    @property
+    def cam_frame_top(self) -> float:
+        return float(self.effective_frame_top)
+
     def process_frame(self, frame: np.ndarray, cam_prev: CamRect, src_idx: int, out_w: int, out_h: int) -> CamRect:
         """Processes a single frame using the discrete Pipeline stages."""
         context = FrameTrackingContext(
@@ -455,12 +462,12 @@ class TrackingEngine(ITracker):
             clip_mode = "closeup" if aspect <= 1.4 else "full_body_head"
 
         if clip_mode == "closeup":
-            hair_skip = int(rh * 0.35)
-            face_h    = max(8, int(rh * 0.30))
-            return (rx, ry + hair_skip, rw, face_h)
+            hair_skip = int(rh * 0.25)
+            face_h    = max(8, int(rh * 0.35))
+            return BoundingBox(rx, ry + hair_skip, rw, face_h)
 
         if clip_mode == "full_body_head":
-            eye_target_pct = min(0.65, max(0.08, 0.77 - 0.27 * aspect))
+            eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
             head_frac = 0.10
             
             if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
@@ -471,6 +478,6 @@ class TrackingEngine(ITracker):
             
             roi_h   = max(8, int(rh * head_frac))
             roi_top = max(0, int(rh * eye_target_pct - roi_h / 2.0))
-            return (rx, ry + roi_top, rw, roi_h)
+            return BoundingBox(rx, ry + roi_top, rw, roi_h)
 
         return raw_roi

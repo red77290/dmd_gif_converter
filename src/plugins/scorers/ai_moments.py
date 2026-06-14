@@ -69,8 +69,8 @@ class AiMomentsEngine:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = total_frames / fps
         
-        # Subsample to 2 FPS for speed
-        analyze_fps = 2.0
+        # Subsample for speed (configurable)
+        analyze_fps = float(self.options.get("analyze_fps", 5.0))
         frame_step = max(1, int(fps / analyze_fps))
         
         # Determine sliding window sizes from min to max duration

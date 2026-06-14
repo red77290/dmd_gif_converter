@@ -76,10 +76,7 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         self._mode_menu.grid(row=0, column=1, padx=4, sticky="w")
         
         def _update_mode_menu_state(*_):
-            if self.app_state.v_let_me_handle_it.get() or self.app_state.v_auto_color_enabled.get():
-                self._mode_menu.configure(state="disabled")
-            else:
-                self._mode_menu.configure(state="normal")
+            self._mode_menu.configure(state="normal")
         
         self.app_state.v_auto_color_enabled.trace_add("write", _update_mode_menu_state)
         self.app_state.v_let_me_handle_it.trace_add("write", _update_mode_menu_state)

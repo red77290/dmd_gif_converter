@@ -168,15 +168,15 @@ The scene profile with the highest total score dictates the final camera behavio
 - **`platformer`**: For 2D games with a stable floor (e.g. Mario, Sonic). Enables auto-floor tracking to lock the camera to the ground.
 - **`top_down_isometric`**: For Zelda, Pokémon, and isometric games. Focuses on horizontal and vertical tracking without floor gravity constraints. Zoom is restricted to preserve context.
 - **`first_person`**: For Doom, Minecraft, and centered action. Locks the camera firmly to the center and prevents zooming to avoid cutting out the HUD or weapons.
-- **`fighting_2d`**: For 1v1 arcade fighters (e.g. Street Fighter). Uses tighter tracking (strength 0.70) and faster camera movements (smoothness 0.80) to follow rapid back-and-forth dashes.
+
 - **`action_horizontal`**: For side-scrollers or beat 'em ups. Enables auto-vertical bias to keep the floor level consistent while the camera scrolls smoothly left to right.
 - **`action_moving`**: For RPGs or games where the subject moves freely in all directions. Uses standard smooth tracking without locking the floor.
 - **`wide_shot`**: For scenes with small subjects and lots of background. Uses very loose tracking (strength 0.40) and high smoothness (0.90) to prevent the camera from jittering aggressively.
 - **`menu_static`**: For title screens, menus, and highly static scenes. Locks the camera and heavily smooths any micro-movements to keep the screen stable.
 
 #### 👤 People & Dialogue Profiles
-- **`talking_closeup`**: For anime, vlogs, or dialogue where the face fills the frame. Enables **Face Priority Mode**. The camera ignores the lower body and rigidly locks onto the eye region (top 45% of the head) so the face doesn't bounce around during speech.
-- **`talking_medium`**: For news anchors or waist-up shots. Enables Face Priority Mode, calculating the head as the top 35% of the visible body bounding box.
+- **`talking_closeup`**: For anime, vlogs, or dialogue where the face fills the frame. Enables **Face Priority Mode**. The camera ignores the lower body and rigidly locks onto the eye region (ignoring the top 25% hair/forehead, and targeting the next 35% face height) so the face doesn't bounce around during speech.
+- **`talking_medium`**: For news anchors or waist-up shots. Enables Face Priority Mode, calculating the head as the top 22% of the visible body bounding box.
 - **`full_body_tall`**: For standing characters or tall anime sprites. Enables Face Priority Mode, calculating the head as the top 22% of the body bounding box, ensuring the face is centered rather than cutting them off at the shoulders.
 - **`full_body_medium`**: Standard generic tracking for full-body subjects without Face Priority. Uses tighter tracking margins.
 

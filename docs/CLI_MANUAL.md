@@ -108,7 +108,7 @@ This will run the Auto Action preprocessing pipeline on all videos in the target
 | `action_auto_top_crop`| `--action-auto-top-crop`| `False` | Auto-detect top crop from ROI analysis |
 | `action_vertical_bias`| `--action-vertical-bias`| `0.0` | Manual camera vertical shift (`+1.0` = floor, `-1.0` = ceiling) |
 | `action_auto_vertical_bias`| `--action-auto-vertical-bias`| `False` | Auto floor detect — asymmetric EMA ground tracker, overrides vertical bias |
-| `action_scene_type` | `--action-scene-type`| `""` | Manually force one of the 9 Continuous Scoring Matrix profiles: `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Overrides auto-detection. |
+| `action_scene_type` | `--action-scene-type`| `""` | Manually force one of the Continuous Scoring Matrix profiles: `platformer` / `talking_closeup` / `full_body_tall` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Overrides auto-detection. |
 | `action_auto_scene_type`| `--action-auto-scene-type`| `False` | Auto-detect scene type from content (overrides `--action-scene-type`). |
 | `action_smart_auto_crop` | `--smart-auto-crop`| `False` | 🧠 Smart Auto Crop — engine scans 60 frames and activates the optimal camera profile using a continuous scoring matrix of 9 scene types; resolves the face-priority ↔ floor-tracking contradiction automatically |
 | `reject_threshold` | `--reject-threshold`| `0` | Automatically move generated GIFs to the trash if their DMD Visibility Score is strictly below N% (0-100). Default: 0 (disabled). |
@@ -203,9 +203,10 @@ python3 -m src.engine.conversion.cli gifs_Batman --auto-color
 ```
 
 ### 5. Web Search & Download
-Search for "arcade fighting" on DuckDuckGo, download the top 5 results, and convert them immediately using the fighting 2D camera profile.
+Search for "arcade fighting" on DuckDuckGo, download the top 5 results, and convert them immediately using the platformer camera profile (which tracks tall sprites perfectly and locks to the ground).
+
 ```bash
-python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search-limit 5 --action-scene-type "fighting_2d"
+python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search-limit 5 --action-scene-type "platformer"
 ```
 
 ### 6. AI Moments: Pipeline Extraction + Conversion
