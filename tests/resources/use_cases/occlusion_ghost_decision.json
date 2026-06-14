@@ -1,5 +1,5 @@
 {
-  "task_id": "5B877",
+  "task_id": "E5665",
   "file_info": {
     "filename": "occlusion_ghost.gif",
     "video_width": 542,
@@ -9,30 +9,38 @@
   "camera_params": {
     "strength": {
       "value": 0.65,
-      "reason": "Standard default strength."
+      "reason": "High strength to track fast action."
     },
     "smoothness": {
-      "value": 0.0,
-      "reason": "Standard default smoothness."
+      "value": 0.85,
+      "reason": "Standard smoothness."
     }
   },
-  "raw_signals": {},
+  "raw_signals": {
+    "tall_ratio": 0.4059040590405904,
+    "fill_ratio": 0.23109243697478993,
+    "body_aspect": 1.4473684210526316,
+    "floor_in_lower": true,
+    "floor_var_score": 0.05856686702836639,
+    "x_variance": 0.004002063636872531,
+    "y_variance": 0.002802572009195836
+  },
   "decisions": {
     "face_priority": {
       "value": false,
-      "reason": "Standard subject, no portrait mode required."
+      "reason": "Subject not dominant, face priority disabled."
     },
     "auto_vertical_bias": {
-      "value": false,
-      "reason": "No trackable floor detected."
+      "value": true,
+      "reason": "Floor line detected, tracking enabled."
     },
     "auto_bottom_crop": {
       "value": false,
-      "reason": "Screen is filled."
+      "reason": "Feet are close to the bottom edge."
     },
     "auto_top_crop": {
       "value": false,
-      "reason": "Screen is filled at the top."
+      "reason": "Unnecessary for standard video games."
     },
     "pillarbox": {
       "value": "L:0px",
@@ -41,6 +49,6 @@
   },
   "auto_crop_margins": {
     "top_pct": 0.0,
-    "bottom_pct": 0.0
+    "bottom_pct": 0.2655462184873949
   }
 }

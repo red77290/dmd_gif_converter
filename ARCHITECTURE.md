@@ -100,12 +100,12 @@ dmd_gif_converter/
 │       ├── controllers/
 │       │   ├── conversion_controller.py  ← ConversionController (IController)
 │       │   └── preview_controller.py    ← PreviewController (IController)
-│       ├── panels/                   ← UI panel Mixins (left, middle, preview, settings, actions)
+│       ├── panels/                   ← UI Panels (Composition based)
 │       ├── widgets.py                ← _InfoBadge, reusable widgets
 │       ├── dmd_led_sim.py            ← LED grid pixel simulation
 │       └── constants.py              ← APP_VERSION, colors, fonts
 │
-├── tests/                            # 191 unit tests
+├── tests/                            # 440 unit tests
 │   ├── auto_action/
 │   ├── converter/
 │   └── ui/
@@ -121,7 +121,7 @@ The system is divided into **three independent layers**, each with its own set o
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │  UI Layer      DMDConverterApp  ←  AppState (IModel)                   │
-│  (Tkinter)     Panels (Mixins)  ←  ConversionController (IController)  │
+│  (Tkinter)     Panels (Composition) ←  ConversionController (IController)  │
 │                                 ←  PreviewController (IController)     │
 └────────────────────────────────────┬───────────────────────────────────┘
                                      │ calls process_file() / process_folder()
@@ -184,8 +184,8 @@ class FFmpegConverter(IConverter):
 
 Type aliases used throughout this layer:
 ```python
-BoundingBox = Tuple[int, int, int, int]    # (x, y, w, h)
-CamRect     = Tuple[float, float, float, float]  # (cx, cy, cw, ch)  ← centre + size
+BoundingBox = typing.NamedTuple('BoundingBox', [('x', int), ('y', int), ('w', int), ('h', int)])
+CamRect     = typing.NamedTuple('CamRect', [('cx', float), ('cy', float), ('cw', float), ('ch', float)])
 ```
 
 ### 4.3 UI Layer — `src/ui/interfaces.py`
@@ -496,22 +496,22 @@ classDiagram
         +_on_close() void
     }
 
-    class LeftPanelMixin {
+    class LeftPanel {
         +_build_left_panel() void
         +_add_files() void
         +_convert_all() void
     }
-    class SettingsPanelMixin {
+    class SettingsPanel {
         +_build_right_panel() void
         +_snapshot_params() dict
         +_restore_params(snap) void
     }
-    class PreviewPanelMixin {
+    class PreviewPanel {
         +_build_middle_panel() void
         +_generate_dmd_preview() void
         +_animate_dmd() void
     }
-    class AiMomentsPanelMixin {
+    class AiMomentsPanel {
         +_build_studio_timeline() void
         +_on_generate_ai_moments() void
         +_show_ai_report_popup() void
@@ -520,10 +520,10 @@ classDiagram
     IModel <|.. AppState : implements
     IController <|.. ConversionController : implements
     IController <|.. PreviewController : implements
-    DMDConverterApp --|> LeftPanelMixin : inherits mixin
-    DMDConverterApp --|> SettingsPanelMixin : inherits mixin
-    DMDConverterApp --|> PreviewPanelMixin : inherits mixin
-    DMDConverterApp --|> AiMomentsPanelMixin : inherits mixin
+    DMDConverterApp *-- LeftPanel : instantiates via Composition
+    DMDConverterApp *-- SettingsPanel : instantiates via Composition
+    DMDConverterApp *-- PreviewPanel : instantiates via Composition
+    DMDConverterApp *-- AiMomentsPanel : instantiates via Composition
     DMDConverterApp --> AppState : owns
     DMDConverterApp --> ConversionController : creates
     DMDConverterApp --> PreviewController : creates
@@ -570,7 +570,9 @@ sequenceDiagram
     end
 ```
 
-### 6.2 Auto Action Pipeline (AI Framing)
+### 6.2 The Tracking Engine Pipeline (Async/Queue)
+
+The processing loop `preprocess_video_for_dmd` utilizes a Producer-Consumer threading pattern with `queue.Queue`. It separates video file reading (`cv2.VideoCapture`), frame analysis/tracking (YOLO + scoring + tracking), and encoding (`ffmpeg`) into distinct threads. This eliminates the I/O bottleneck where tracking was stalling during I/O blocking. (AI Framing)
 
 This is the core of the system — a 3-phase loop that produces an intermediary MP4 at the source's native resolution, with the AI-controlled camera already applied.
 
@@ -663,7 +665,7 @@ sequenceDiagram
 
 ### 6.5 AI Iconic Moments Analysis (Scoring V2)
 
-Runs a multi-metric analysis across the entire video (subsampled at 2 FPS) using the pure mathematical modules of **Scoring V2** to discover the best moments based on Action, Contrast, Edge Density, Entropy, and Character presence.
+Runs a multi-metric analysis across the entire video (subsampled dynamically via `analyze_fps`) using the pure mathematical modules of **Scoring V2** to discover the best moments based on Action, Contrast, Edge Density, Entropy, and Character presence.
 When invoked from the UI or via CLI (`--ai-moments`), the engine extracts these moments to a temporary folder using FFmpeg, which is then fed into the standard Conversion pipeline.
 
 ```mermaid
@@ -675,7 +677,7 @@ sequenceDiagram
     participant FIN as FinalScoringEngine
 
     CLI/UI->>ENG: run() [in background thread]
-    loop Every Nth frame (2 FPS)
+    loop Every Nth frame (analyze_fps)
         ENG->>SIG: push_frame(frame)
         SIG->>SIG: Compute Contrast, Entropy, Edge Density, Motion
         ENG->>QE: evaluate_frame(frame, bbox)
@@ -758,27 +760,26 @@ class AutoActionConfig:
         ...
 ```
 
-### `CamRect` — `Tuple[float, float, float, float]`
+### `CamRect` — `typing.NamedTuple`
 
 The canonical representation of the virtual camera window:
 
+```python
+CamRect = typing.NamedTuple('CamRect', [('cx', float), ('cy', float), ('cw', float), ('ch', float)])
 ```
-CamRect = (cx, cy, cw, ch)
-
   cx, cy  — centre of the crop window (in source frame pixels)
   cw, ch  — width and height of the crop window (in source frame pixels)
 
   The actual pixel bounding box is:
     x1 = cx - cw/2,  y1 = cy - ch/2
     x2 = cx + cw/2,  y2 = cy + ch/2
-```
 
-Using centre+size (instead of top-left+size) makes linear interpolation (_smooth) trivial — you just lerp all 4 values directly without edge-case arithmetic.
+Using centre+size (instead of top-left+size) makes linear interpolation (_smooth) trivial — you just lerp all 4 values directly without edge-case arithmetic. By migrating to `NamedTuple`, we eliminate fragile tuple indexing (`rect[0]`) and rely on readable explicit attributes (`rect.cx`).
 
-### `BoundingBox` — `Tuple[int, int, int, int]`
+### `BoundingBox` — `typing.NamedTuple`
 
-```
-BoundingBox = (x, y, w, h)   ← top-left + size (standard OpenCV convention)
+```python
+BoundingBox = typing.NamedTuple('BoundingBox', [('x', int), ('y', int), ('w', int), ('h', int)]) # ← top-left + size
 ```
 
 ---
@@ -792,7 +793,7 @@ graph TD
         STATE[AppState]
         CC[ConversionController]
         PC[PreviewController]
-        PANELS[Panel Mixins]
+        PANELS[UI Panels (Composition)]
     end
 
     subgraph "Converter Layer"
@@ -917,7 +918,7 @@ tests/
 **Running the full suite:**
 ```bash
 PYTHONPATH=. pytest tests/ -v
-# Expected: 191 passed, 0 failed
+# Expected: 440 passed, 0 failed
 ```
 
 **Mocking strategy:**
@@ -987,18 +988,22 @@ class MyConverter(IConverter):
 ```python
 from ..interfaces import IPanel
 
-class MyPanelMixin(IPanel):
-    def build(self, parent):
-        self._my_frame = ctk.CTkFrame(parent)
+class MyPanel(ctk.CTkFrame, IPanel):
+    def __init__(self, parent, app_state):
+        super().__init__(parent)
+        self.app_state = app_state
+        self.build()
+
+    def build(self):
         # ... build widgets
-        return self._my_frame
+        pass
 
     def refresh(self):
-        # Update widget values from self.state
+        # Update widget values from self.app_state
         pass
 ```
 
-3. Mix it into `DMDConverterApp(ctk.CTk, ..., MyPanelMixin)`.
+3. Instantiate it inside `DMDConverterApp` via composition: `self.my_panel = MyPanel(self, self.app_state)`.
 
 ---
 

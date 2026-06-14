@@ -1,5 +1,5 @@
 {
-  "task_id": "F8425",
+  "task_id": "0791A",
   "file_info": {
     "filename": "visage_anime_1.gif",
     "video_width": 500,
@@ -8,31 +8,39 @@
   },
   "camera_params": {
     "strength": {
-      "value": 0.65,
-      "reason": "Standard default strength."
+      "value": 0.55,
+      "reason": "Reduced strength to stabilize the tall subject."
     },
     "smoothness": {
-      "value": 0.0,
-      "reason": "Standard default smoothness."
+      "value": 0.85,
+      "reason": "Increased smoothness to prevent motion sickness."
     }
   },
-  "raw_signals": {},
+  "raw_signals": {
+    "tall_ratio": 2.856,
+    "fill_ratio": 0.9916666666666667,
+    "body_aspect": 0.816,
+    "floor_in_lower": true,
+    "floor_var_score": 0.001388888888888889,
+    "x_variance": 0.00225625,
+    "y_variance": 1.9290123456790124e-06
+  },
   "decisions": {
     "face_priority": {
-      "value": false,
-      "reason": "Standard subject, no portrait mode required."
+      "value": true,
+      "reason": "Very tall subject detected, switching to portrait mode."
     },
     "auto_vertical_bias": {
       "value": false,
-      "reason": "No trackable floor detected."
+      "reason": "Floor tracking disabled (contradictory with portrait mode)."
     },
     "auto_bottom_crop": {
       "value": false,
-      "reason": "Screen is filled."
+      "reason": "Bottom crop forced to frame the upper body."
     },
     "auto_top_crop": {
       "value": false,
-      "reason": "Screen is filled at the top."
+      "reason": "Top crop forced to frame the head."
     },
     "pillarbox": {
       "value": "L:0px",

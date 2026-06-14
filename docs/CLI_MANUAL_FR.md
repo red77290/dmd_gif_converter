@@ -104,7 +104,7 @@ Cela exécutera le pipeline de prétraitement Auto Action sur toutes les vidéos
 | `action_auto_top_crop`| `--action-auto-top-crop`| `False` | Détecte auto la limite haute du sujet (tête / ciel) |
 | `action_vertical_bias`| `--action-vertical-bias`| `0.0` | Décalage vertical manuel de la caméra (`+1.0` = sol, `-1.0` = plafond) |
 | `action_auto_vertical_bias`| `--action-auto-vertical-bias`| `False` | Suivi automatique du sol — EMA asymétrique, écrase le bias manuel |
-| `action_scene_type` | `--action-scene-type`| `""` | Force manuellement l'un des 9 profils de la Matrice Continue : `platformer` / `talking_closeup` / `full_body_tall` / `fighting_2d` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Écrase l'auto-détection. |
+| `action_scene_type` | `--action-scene-type`| `""` | Force manuellement l'un des profils de la Matrice Continue : `platformer` / `talking_closeup` / `full_body_tall` / `action_horizontal` / `talking_medium` / `full_body_medium` / `wide_shot` / `action_moving`. Écrase l'auto-détection. |
 | `action_auto_scene_type`| `--action-auto-scene-type`| `False` | Détection automatique du type de scène (écrase `--action-scene-type`). |
 | `action_smart_auto_crop` | `--smart-auto-crop`| `False` | 🧠 Smart Auto Crop — analyse 60 images et active le profil de caméra optimal via une matrice de score continue de 9 scènes ; résout la contradiction face-priority ↔ floor-tracking |
 | `reject_threshold` | `--reject-threshold`| `0` | Déplace automatiquement les GIFs générés vers la corbeille si leur DMD Visibility Score est strictement inférieur à N% (0-100). Défaut : 0 (désactivé). |
@@ -199,9 +199,10 @@ python3 -m src.engine.conversion.cli gifs_Batman --auto-color
 ```
 
 ### 5. Recherche Web & Téléchargement
-Recherche "arcade fighting" sur DuckDuckGo, télécharge les 5 meilleurs résultats, et les convertit immédiatement en utilisant le profil de caméra de combat 2D.
+Recherche "arcade fighting" sur DuckDuckGo, télécharge les 5 meilleurs résultats, et les convertit immédiatement en utilisant le profil de caméra platformer.
+
 ```bash
-python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search-limit 5 --action-scene-type "fighting_2d"
+python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search-limit 5 --action-scene-type "platformer"
 ```
 
 ### 6. AI Moments : Pipeline complet (Extraction + Conversion)

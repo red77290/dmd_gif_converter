@@ -1,4 +1,5 @@
 from typing import Optional, Tuple
+from src.engine.auto_action.interfaces import CamRect, BoundingBox
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.engine.analysis.analysis import _clamp
 
@@ -32,7 +33,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         return max(crop_h / 2.0, frame_top + crop_h / 2.0)
 
     def _cy_max(crop_h: float) -> float:
-        return float(frame_h) - crop_h / 2.0
+        return frame_top + float(frame_h) - crop_h / 2.0
 
     def _apply_bias(cy: float, crop_h: float) -> float:
         if abs(_bias) < 1e-4:
@@ -51,7 +52,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         crop_w = float(effective_frame_w)
         crop_h = crop_w / target_ratio
         cy = _apply_bias(cy, crop_h)
-        return cx, cy, crop_w, crop_h
+        return CamRect(cx, cy, crop_w, crop_h)
 
     x, y, w, h = roi
 
@@ -117,6 +118,9 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # The tracker already clips the roi to the eye/face region for close-ups,
         # so y + h/2 targets the eyes rather than the top of the head.
         cy = y + h / 2.0
+        # Prevent the top edge of the camera from cropping below the eye region in close-ups.
+        # This keeps the eyes visible even when the camera window is very short.
+        cy = min(cy, y + 0.25 * crop_h)
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
@@ -124,10 +128,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         # Keep head+hair visible over floor, even in platformer mode.
         # If the sprite is larger than the screen, prioritize the top of the character.
         if (cy_floor - crop_h / 2.0) > ideal_top:
-            # If the bounding box is huge, it's likely tracking a flying platform/enemy
-            # far above the character. In a platformer, we should NOT let this pull
-            # the camera up and lose the floor.
-            if _platformer and total_h > crop_h * 0.8:
+            scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
+            # In platformers, huge bounding boxes are usually floating blocks (false positives).
+            # We must ignore them and stay anchored to the floor.
+            # In fighting_2d, huge bounding boxes are the actual character, so we shift up to show the head.
+            if scene_type == "platformer" and total_h > crop_h * 0.8:
                 cy = cy_floor
             else:
                 cy = ideal_top + crop_h / 2.0
@@ -147,14 +152,14 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     cy = _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
     
 
-    return cx, cy, crop_w, crop_h
+    return CamRect(cx, cy, crop_w, crop_h)
 
 
 def _smooth(prev, curr, smoothness: float):
     if prev is None:
         return curr
     a = _clamp(smoothness, 0.0, 0.98)
-    return tuple((a * p) + ((1.0 - a) * c) for p, c in zip(prev, curr))
+    return CamRect(*( (a * p) + ((1.0 - a) * c) for p, c in zip(prev, curr) ))
 
 
 def _crop_frame(frame, cam_rect):
@@ -240,4 +245,4 @@ def _apply_look_ahead(
     else:
         cy = _clamp(cy + offset_y, ch / 2.0, float(frame_h) - ch / 2.0)
 
-    return (cx, cy, cw, ch)
+    return CamRect(cx, cy, cw, ch)

@@ -4,12 +4,21 @@ These define the contracts that all detection, tracking, and rendering
 components must respect.
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, NamedTuple
 import numpy as np
 
 
-BoundingBox = Tuple[int, int, int, int]  # (x, y, w, h)
-CamRect = Tuple[float, float, float, float]  # (cx, cy, cw, ch)
+class BoundingBox(NamedTuple):
+    x: int
+    y: int
+    w: int
+    h: int
+
+class CamRect(NamedTuple):
+    cx: float
+    cy: float
+    cw: float
+    ch: float
 
 
 class IDetector(ABC):

@@ -135,6 +135,26 @@ class TestBuildCameraRectFacePriorityCloseUp(unittest.TestCase):
         self.assertAlmostEqual(cy, roi_cy, delta=roi[3],
                                msg="Without face_priority cy should be near roi centre")
 
+    def test_face_priority_mode_respects_manual_top_crop(self):
+        """
+        Even in face_priority_mode, if a manual top crop is specified,
+        the camera window must not go above the top crop line.
+        """
+        cfg = _default_cfg()
+        # Propose a face roi near the top crop line (y = 60)
+        roi = (50, 60, 540, 150)
+        
+        # Build camera rect with frame_top=54.0 (representing a manual top crop)
+        cx, cy, cw, ch = _build_camera_rect(
+            FRAME_W, FRAME_H, roi, cfg,
+            frame_top=54.0,
+            face_priority_mode=True,
+        )
+        
+        cam_top = cy - ch / 2.0
+        self.assertGreaterEqual(cam_top, 54.0, 
+                                f"Camera top ({cam_top}) must be bounded by frame_top (54.0)")
+
 
 class TestBuildCameraRectClamping(unittest.TestCase):
     """cy is always clamped to [cy_min, cy_max]."""
@@ -199,8 +219,8 @@ class TestSmooth(unittest.TestCase):
         self.assertEqual(result, (1, 2, 3, 4))
 
     def test_smoothness_clamped_at_0_98(self):
-        result_098 = _smooth((0.0,), (10.0,), 0.98)
-        result_100 = _smooth((0.0,), (10.0,), 1.00)
+        result_098 = _smooth((0.0, 0.0, 0.0, 0.0), (10.0, 10.0, 10.0, 10.0), 0.98)
+        result_100 = _smooth((0.0, 0.0, 0.0, 0.0), (10.0, 10.0, 10.0, 10.0), 1.00)
         self.assertAlmostEqual(result_098[0], result_100[0], places=3)
 
 

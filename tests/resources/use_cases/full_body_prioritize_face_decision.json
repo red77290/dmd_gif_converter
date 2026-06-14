@@ -1,5 +1,5 @@
 {
-  "task_id": "8A068",
+  "task_id": "DCBD8",
   "file_info": {
     "filename": "full_body_prioritize_face.gif",
     "video_width": 500,
@@ -8,31 +8,39 @@
   },
   "camera_params": {
     "strength": {
-      "value": 0.65,
-      "reason": "Standard default strength."
+      "value": 0.55,
+      "reason": "Reduced strength to stabilize the tall subject."
     },
     "smoothness": {
-      "value": 0.0,
-      "reason": "Standard default smoothness."
+      "value": 0.85,
+      "reason": "Increased smoothness to prevent motion sickness."
     }
   },
-  "raw_signals": {},
+  "raw_signals": {
+    "tall_ratio": 3.672,
+    "fill_ratio": 0.918,
+    "body_aspect": 2.6842105263157894,
+    "floor_in_lower": true,
+    "floor_var_score": 0.0016583123951777,
+    "x_variance": 1.6875e-06,
+    "y_variance": 1.875e-05
+  },
   "decisions": {
     "face_priority": {
-      "value": false,
-      "reason": "Standard subject, no portrait mode required."
+      "value": true,
+      "reason": "Very tall subject detected, switching to portrait mode."
     },
     "auto_vertical_bias": {
       "value": false,
-      "reason": "No trackable floor detected."
+      "reason": "Floor tracking disabled (contradictory with portrait mode)."
     },
     "auto_bottom_crop": {
       "value": false,
-      "reason": "Screen is filled."
+      "reason": "Bottom crop forced to frame the upper body."
     },
     "auto_top_crop": {
       "value": false,
-      "reason": "Screen is filled at the top."
+      "reason": "Top crop forced to frame the head."
     },
     "pillarbox": {
       "value": "L:0px",

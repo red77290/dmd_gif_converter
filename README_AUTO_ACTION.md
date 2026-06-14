@@ -27,7 +27,7 @@ It creates an intermediate video that follows action/person areas at the target 
 
 **v7.0.0 improvements:**
 - **Tracker Pipeline Architecture**: The monolithic `TrackingEngine` was completely refactored into a modular Pipeline pattern (Chain of Responsibility) using 12 discrete, testable stages (e.g., `DetectionStage`, `FaceClippingStage`, `LookAheadStage`).
-- **Eye framing math**: Close-up tracking logic refined to ignore the top 35% (hair) and target the next 30% (eyes) of the bounding box. This guarantees the lowest eye perfectly targets the horizontal midline for optimal cinematic rule-of-thirds on the DMD.
+- **Letterbox drifting fix**: Integrated strict letterbox boundary containment to prevent the camera from panning into black bars on widescreen cinema clips, resolving eye cutoff issues on cinematic clips (such as characters like Doc/Marty in Back to the Future).
 - **Dynamic Logging**: Added real-time `[DYNAMIC]` logs tracking every camera cut and continuous scoring profile activation.
 - **Scene classification fix**: Relaxed `action_horizontal` thresholds (`fill_ratio > 0.1`) to prevent wide fight scenes from being misclassified as `talking_closeup` (which caused abrupt decapitation zooms).
 

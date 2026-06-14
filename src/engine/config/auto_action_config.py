@@ -81,7 +81,6 @@ class AutoActionConfig:
             "action_top_crop":       "top_crop_pct",
             "action_auto_pillarbox": "auto_pillarbox_crop",
         }
-        # Fields that DON'T use the "action_" prefix in the params dict
         no_prefix = {
             "bg_sub_enable", "dynamic_scene_detection",
             "dmd_visibility_score_enabled", "dmd_readability_score_enabled",
