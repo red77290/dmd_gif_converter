@@ -419,3 +419,18 @@ L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source 
 |---|---|
 | `color=black` + `overlay` | Fond noir composite — alpha source → noir |
 | `-gifflags -offsetting-transdiff` | Désactive le delta encoding GIF |
+
+## Performances et Sous-échantillonnage
+
+Pour optimiser l'utilisation du processeur pendant l'inférence YOLO, deux paramètres vous permettent d'équilibrer le temps de traitement et la précision :
+
+1. **Auto-Action Subsample Frames** (Tracking) :
+   - Ignore l'inférence YOLO sur N images pendant le tracking Auto-Action normal.
+   - *Exemple* : `3` signifie que le moteur lance l'inférence toutes les 3 images et interpole la zone de détection entre elles.
+   - *CLI* : `--action-subsample-frames 3`
+
+2. **Analyze FPS** (AI Moments) :
+   - Définit le nombre d'images par seconde que le moteur AI Moments analyse.
+   - *Exemple* : `5.0` signifie que 5 images par seconde sont analysées. Une valeur plus basse accélère l'analyse mais réduit la précision. Une valeur plus haute détecte les micro-mouvements mais prend plus de temps.
+   - *CLI* : `--ai-moments-analyze-fps 5.0`
+
