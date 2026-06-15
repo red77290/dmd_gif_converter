@@ -1,5 +1,9 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## Nouveautés de la v6.4.0
+- **📐 Conserver la Résolution d'Origine** : Une nouvelle option permettant de contourner entièrement la mise à l'échelle et le recadrage, ce qui vous permet d'utiliser l'outil uniquement pour ses paramètres de Smart Boost Color et de rendu FPS tout en conservant la résolution d'origine de la vidéo source. Disponible via une case à cocher dans l'interface utilisateur et le paramètre CLI `--keep-original-resolution`.
+- **🧠 Smart Ratio Bypass** : Le moteur détecte désormais intelligemment si votre vidéo source est déjà formatée exactement au format cible (par exemple, 4:1 pour 512x128). Si elle correspond parfaitement, le recadrage automatique de l'IA (Auto Action) et le défilement (Scroll) sont automatiquement contournés pour éviter un recadrage redondant ou destructeur, passant directement au traitement des couleurs et du framerate.
+
 ## Nouveautés de la v6.3.0
 - **📊 Matrice de Score Continue** : La détection de scène (Auto Action) ne repose plus sur un arbre en cascade rigide. Elle utilise désormais une matrice de score dynamique et continue pour identifier le profil de caméra optimal (ex: Platformer, Talking Closeup, Action). Le tableau des scores est désormais entièrement visible dans les logs de l'interface.
 - **🛡️ Détecteur de Secours Auto (Person → Hybrid)** : Lors du suivi de contenus mixtes, si le détecteur principal `person` échoue sur un très gros-plan ou un sujet non-humain, le moteur peut désormais basculer instantanément sur le détecteur `hybrid` en plein milieu d'une scène ou lors du pré-scan, garantissant un suivi cinématique parfait sans jamais abandonner.

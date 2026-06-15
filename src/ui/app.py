@@ -26,7 +26,7 @@ from src.ui.panels.ai_moments_panel import AiMomentsPanel
 class DMDConverterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("🎞️  DMD GIF Converter  v6.3.0")
+        self.title("🎞️  DMD GIF Converter  v6.4.0")
         self.geometry("1300x920")
         self.minsize(980, 720)
         self.protocol("WM_DELETE_WINDOW", self._on_close)

@@ -49,5 +49,9 @@ class TestCliArgs(unittest.TestCase):
         args = self.parser.parse_args(["--action-auto-detector-fallback"])
         self.assertTrue(args.action_auto_detector_fallback)
 
+    def test_smart_ratio_bypass(self):
+        args = self.parser.parse_args(["--no-smart-ratio-bypass"])
+        self.assertFalse(args.smart_ratio_bypass)
+
 if __name__ == "__main__":
     unittest.main()

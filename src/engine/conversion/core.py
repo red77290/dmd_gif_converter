@@ -165,6 +165,7 @@ DEFAULT_PARAMS = {
     # trimmed from trim_start to trim_start + max_duration.
     "max_duration": 0.0,
     # ── Advanced: Auto action framing (pre-ffmpeg stage) ─────────────────
+    "smart_ratio_bypass": True,
     "auto_action_enabled": False,
     "action_detector":     "person",   # person | motion | hybrid | center
     "action_auto_detector_fallback": False, # fallback to hybrid if person fails
@@ -252,13 +253,45 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     # must analyse the original colours, not the auto-action crop).
     original_src = src_path
 
+    src_w, src_h, fps_src, duration_full = get_metadata(src_path)
+    if not src_w:
+        log(f"[ERROR] {filename} — could not read metadata", "error")
+        return False, f"[ERROR] {filename} — metadata unreadable"
+
     # Get target dimensions
-    target_width = p["target_width"]
-    target_height = p["target_height"]
+    target_width = int(p.get("target_width", 128))
+    target_height = int(p.get("target_height", 32))
+    
+    smart_ratio_bypass = bool(p.get("smart_ratio_bypass", True))
+
+    if target_width == 0 or target_height == 0:
+        keep_original_resolution = True
+        target_width = src_w
+        target_height = src_h
+    else:
+        keep_original_resolution = False
+
+    is_perfect_ratio = False
+    if src_w > 0 and src_h > 0 and target_height > 0:
+        src_ratio = src_w / src_h
+        target_ratio = target_width / target_height
+        is_perfect_ratio = abs(src_ratio - target_ratio) < 0.05
+
+    auto_action_enabled = bool(p.get("auto_action_enabled", False))
+
+    if keep_original_resolution:
+        p["scroll_enabled"] = False
+        p["zoom"] = 1.0
+        p["manual_x"] = 0
+        p["manual_y"] = 0
+        auto_action_enabled = False
+        log(f"[BYPASS ] {filename} — Keep Original Resolution active ({src_w}x{src_h})", "info")
+    elif is_perfect_ratio and auto_action_enabled and smart_ratio_bypass:
+        auto_action_enabled = False
+        log(f"[BYPASS ] {filename} — Source matches target ratio ({src_w}x{src_h}), auto-framing bypassed.", "info")
 
     # ── Auto action preprocessor (outside ffmpeg pipeline) ───────────────────
     # Default is disabled, so this block has zero effect unless explicitly enabled.
-    auto_action_enabled = bool(p.get("auto_action_enabled", False))
     if auto_action_enabled:
         cfg = AutoActionConfig(
             detector=str(p.get("action_detector", "person") or "person"),
@@ -307,14 +340,6 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
                 log(f"[COLOR  ] {filename} — fallback to defaults: {color_msg}", "warning")
         else:
             log(f"[COLOR  ] {filename} — OpenCV unavailable, skipping auto-colorimetry", "warning")
-
-    src_w, src_h, fps_src, duration_full = get_metadata(src_path)
-    if not src_w:
-        if temp_pre_src and os.path.isdir(temp_pre_src):
-            import shutil
-            shutil.rmtree(temp_pre_src, ignore_errors=True)
-        log(f"[ERROR] {filename} — could not read metadata", "error")
-        return False, f"[ERROR] {filename} — metadata unreadable"
 
     # ── Clip timing ───────────────────────────────────────────────────────
     trim_start   = float(start_s) if start_s is not None else 0.0

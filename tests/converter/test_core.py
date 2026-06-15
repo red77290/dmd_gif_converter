@@ -378,6 +378,37 @@ class TestProcessFile(unittest.TestCase):
         ffmpeg_calls = [c for c in captured_cmds if "ffmpeg" in c]
         self.assertTrue(len(ffmpeg_calls) > 0)
 
+    def test_keep_original_resolution_via_zero_dims(self):
+        """Si target_width=0 ou target_height=0, on bypass crop/zoom et on garde src_w/src_h"""
+        captured_cmd = []
+        def fake_run(cmd, **kwargs):
+            captured_cmd.extend(cmd)
+            m = MagicMock()
+            m.returncode = 0; m.poll.return_value = 0; m.stderr.read.return_value = b""
+            return m
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = os.path.join(tmpdir, "out.gif")
+            with patch("src.engine.conversion.core.get_metadata", return_value=(1920, 1080, 25.0, 10.0)):
+                with patch("src.engine.conversion.core.subprocess.Popen", side_effect=fake_run):
+                    conv.process_file("input.mp4", out, params={"target_width": 0, "target_height": 0, "auto_action_enabled": True})
+        
+        # Le scale ne doit pas avoir lieu, ou doit scaler à la taille d'origine (1920x1080)
+        cmd_str = " ".join(captured_cmd)
+        self.assertIn("scale=1920:-2", cmd_str)
+
+    def test_smart_ratio_bypass(self):
+        """Si le ratio source correspond au ratio cible, auto_action est désactivé automatiquement"""
+        # source 512x128 -> ratio 4:1. target 128x32 -> ratio 4:1.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = os.path.join(tmpdir, "out.gif")
+            with patch("src.engine.conversion.core.get_metadata", return_value=(512, 128, 25.0, 10.0)):
+                # Mock preprocess_video_for_dmd pour vérifier qu'il n'est PAS appelé
+                with patch("src.engine.conversion.core.preprocess_video_for_dmd") as mock_pre:
+                    with self._mock_ffmpeg_ok():
+                        conv.process_file("input.mp4", out, params={"auto_action_enabled": True, "target_width": 128, "target_height": 32})
+                    mock_pre.assert_not_called()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # process_folder

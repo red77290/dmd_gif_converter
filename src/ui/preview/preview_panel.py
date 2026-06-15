@@ -362,36 +362,48 @@ class PreviewPanel(ctk.CTkFrame):
         )
         self._btn_stop.grid(row=5, column=0, padx=4, pady=(2, 6), sticky="ew")
 
-    def _compute_led_sim_display_size(self):
+    def _get_target_dims(self):
         try:
             w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
         except Exception:
             w, h = 128, 32
+
+        if (w == 0 or h == 0) and getattr(self, "_current_path", None):
+            try:
+                src_w, src_h, _, _ = get_metadata(self._current_path)
+                if src_w and src_h:
+                    w, h = src_w, src_h
+            except Exception:
+                pass
+
+        if w == 0 or h == 0:
+            w, h = 128, 32
+            
+        return w, h
+
+    def _compute_led_sim_display_size(self):
+        w, h = self._get_target_dims()
         scale = LED_SIM_SCALE
         while w * scale > LED_SIM_MAX_W and scale > 2:
             scale -= 1
         return w * scale, h * scale, scale
 
     def _get_final_canvas_size(self):
-        try:
-            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
-        except Exception:
-            w, h = 128, 32
+        w, h = self._get_target_dims()
         led = getattr(self.app_state, "v_led_sim", None)
         if led and led.get():
             dw, dh, _ = self._compute_led_sim_display_size()
         else:
             dw, dh = int(w * DMD_DISPLAY_SCALE_FACTOR), int(h * DMD_DISPLAY_SCALE_FACTOR)
-        MAX_W, MAX_H = 640, 360
+        MAX_W, MAX_H = 512, 160
         if dw > MAX_W or dh > MAX_H:
             s = min(MAX_W / dw, MAX_H / dh)
             dw, dh = int(dw * s), int(dh * s)
         return dw, dh
 
     def _update_dmd_canvas_size(self, *_):
-        try:
-            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
-        except Exception:
+        w, h = self._get_target_dims()
+        if w == 0 or h == 0:
             return
         nw, nh = self._get_final_canvas_size()
         self._dmd_canvas.configure(width=nw, height=nh)
@@ -608,6 +620,26 @@ class PreviewPanel(ctk.CTkFrame):
         self._btn_auto.configure(state="disabled", text="⏳ Auto…")
         start_s, end_s = self._get_trim()
         s = self.app_state
+        tw, th = self._get_target_dims()
+
+        # Check smart ratio bypass
+        bypass_active = s.v_smart_ratio_bypass.get()
+        is_perfect_ratio = False
+        try:
+            if getattr(self, "_current_path", None):
+                src_w, src_h, _, _ = get_metadata(self._current_path)
+                if src_w and src_h and tw and th:
+                    if abs((src_w / src_h) - (tw / th)) < 0.05:
+                        is_perfect_ratio = True
+        except Exception:
+            pass
+
+        if bypass_active and is_perfect_ratio:
+            self._auto_rendering = False
+            self._btn_auto.configure(state="normal", text="🎯 Auto")
+            self._on_auto_bypass()
+            return
+
         cfg = AutoActionConfig(
             detector=s.v_action_detector.get(),
             strength=float(s.v_action_strength.get()),
@@ -631,14 +663,22 @@ class PreviewPanel(ctk.CTkFrame):
             dynamic_scene_detection=bool(s.v_action_dynamic_scene_detection.get()),
             auto_detector_fallback=bool(s.v_action_auto_detector_fallback.get()),
             start_s=start_s, end_s=end_s,
-            target_width=s.v_target_width.get(), target_height=s.v_target_height.get(),
+            target_width=tw, target_height=th,
         )
         threading.Thread(target=self._generate_auto_preview,
                          args=(src, cfg), daemon=True).start()
 
     def _generate_auto_preview(self, src, cfg):
         try:
+            self.after(0, lambda: self._conv_progress.configure(mode="indeterminate"))
+            self.after(0, lambda: self._conv_progress.start())
+            
             ok, out_mp4, msg = preprocess_video_for_dmd(src, cfg)
+            
+            self.after(0, lambda: self._conv_progress.stop())
+            self.after(0, lambda: self._conv_progress.configure(mode="determinate"))
+            self.after(0, lambda: self._conv_progress.set(0))
+            
             if not ok or not out_mp4:
                 self.after(0, lambda: self._on_auto_fail(msg))
                 return
@@ -693,6 +733,19 @@ class PreviewPanel(ctk.CTkFrame):
                                       text="❌  Auto-action failed",
                                       fill="#e74c3c", font=("Helvetica", 11))
         self._auto_info.configure(text=msg)
+        self._flush_auto_pending()
+
+    def _on_auto_bypass(self):
+        self._auto_rendering = False
+        self._btn_auto.configure(state="normal", text="🎯 Auto")
+        if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+                                      text="⏭️  Bypassed\n(Original or perfect ratio)",
+                                      fill="#2ecc71", font=("Helvetica", 12), justify="center")
+        self._auto_info.configure(text="Auto Action is skipped. Color Boost & FPS only.")
         self._flush_auto_pending()
 
     def _flush_auto_pending(self):
@@ -787,11 +840,20 @@ class PreviewPanel(ctk.CTkFrame):
                 out_gif = src
             else:
                 out_gif = os.path.join(tmpdir, "preview.gif")
+                
+                self.after(0, lambda: self._conv_progress.configure(mode="indeterminate"))
+                self.after(0, lambda: self._conv_progress.start())
+                
                 success, msg = process_file(
                     src, out_gif, params, start_s, end_s,
                     callback=lambda m, lv="info": self.after(
                         0, lambda _m=m, _lv=lv: self._log(_m, _lv))
                 )
+                
+                self.after(0, lambda: self._conv_progress.stop())
+                self.after(0, lambda: self._conv_progress.configure(mode="determinate"))
+                self.after(0, lambda: self._conv_progress.set(0))
+                
                 if not success or not os.path.isfile(out_gif):
                     self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
                     return
@@ -957,6 +1019,7 @@ class PreviewPanel(ctk.CTkFrame):
             "dmd_readability_score_enabled": s.v_action_dmd_readability_score_enabled.get(),
             "target_width":    s.v_target_width.get(),
             "target_height":   s.v_target_height.get(),
+            "smart_ratio_bypass": s.v_smart_ratio_bypass.get(),
             "text_overlay_enabled": s.v_text_overlay_enabled.get(),
             "text_content":    s.v_text_content.get(),
             "text_font_size":  s.v_text_font_size.get(),

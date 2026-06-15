@@ -273,9 +273,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         cfg = _make_cfg()
 
         mock_det = MagicMock()
-        # ROI tall: ry=0, rh=420 (>> 0.80 * dmd_crop_h=80)
-        mock_det.detect_person.return_value = (10, 0, 80, 420)
-        mock_det.detect.return_value = (10, 0, 80, 420)
+        # Add variance to avoid MENU_STATIC profile (which triggers when var_x and var_y are 0)
+        rois = [(10 + i % 10 * 10, 0, 80, 420) for i in range(100)]
+        mock_det.detect_person.side_effect = rois
+        mock_det.detect.side_effect = rois
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
             result = _smart_auto_crop_decision(cap, cfg, frame_w=400, frame_h=1080)
@@ -294,8 +295,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         cfg = _make_cfg()
 
         mock_det = MagicMock()
-        mock_det.detect_person.return_value = (10, 0, 50, 82)  # 82 > 70, aspect 1.64 > 1.4
-        mock_det.detect.return_value = (10, 0, 50, 82)
+        # Add variance to avoid MENU_STATIC profile
+        rois = [(10 + i % 10 * 10, 0, 50, 82) for i in range(100)]
+        mock_det.detect_person.side_effect = rois
+        mock_det.detect.side_effect = rois
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
             result = _smart_auto_crop_decision(cap, cfg, frame_w=400, frame_h=1080)
@@ -313,8 +316,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         cfg = _make_cfg()
 
         mock_det = MagicMock()
-        mock_det.detect_person.return_value = (0, 0, 400, 420)  # très tall
-        mock_det.detect.return_value = (0, 0, 400, 420)
+        # Add variance to avoid MENU_STATIC profile
+        rois = [(0 + i % 10 * 10, 0, 400, 420) for i in range(100)]
+        mock_det.detect_person.side_effect = rois
+        mock_det.detect.side_effect = rois
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
             result = _smart_auto_crop_decision(cap, cfg, frame_w=400, frame_h=1080)

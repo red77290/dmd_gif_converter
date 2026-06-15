@@ -76,17 +76,44 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         self._mode_menu.grid(row=0, column=1, padx=4, sticky="w")
         
         def _update_mode_menu_state(*_):
-            if self.app_state.v_let_me_handle_it.get() or self.app_state.v_auto_color_enabled.get():
-                self._mode_menu.configure(state="disabled")
-            else:
-                self._mode_menu.configure(state="normal")
+            try:
+                if self.app_state.v_let_me_handle_it.get() or self.app_state.v_auto_color_enabled.get():
+                    self._mode_menu.configure(state="disabled")
+                else:
+                    self._mode_menu.configure(state="normal")
+            except Exception:
+                pass
         
-        self.app_state.v_auto_color_enabled.trace_add("write", _update_mode_menu_state)
-        self.app_state.v_let_me_handle_it.trace_add("write", _update_mode_menu_state)
+        cb_id1 = self.app_state.v_auto_color_enabled.trace_add("write", _update_mode_menu_state)
+        cb_id2 = self.app_state.v_let_me_handle_it.trace_add("write", _update_mode_menu_state)
         _update_mode_menu_state()
+
+        def _on_destroy(event):
+            if event.widget == self:
+                try: self.app_state.v_auto_color_enabled.trace_remove("write", cb_id1)
+                except Exception: pass
+                try: self.app_state.v_let_me_handle_it.trace_remove("write", cb_id2)
+                except Exception: pass
+        self.bind("<Destroy>", _on_destroy)
 
         section("⚡  Parallelism")
         slider_row("Workers (CPU)", self.app_state.v_workers, 1, 16, "{:.0f}", " workers", steps=15)
+
+        section("📐  Dimensions")
+        dim_row = ctk.CTkFrame(self, fg_color="transparent")
+        dim_row.pack(fill="x", padx=8, pady=2)
+        cb_ratio_bypass = ctk.CTkCheckBox(
+            dim_row,
+            text="Bypass framing for equivalent ratio",
+            variable=self.app_state.v_smart_ratio_bypass,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        cb_ratio_bypass.pack(side="left")
+
+        from src.ui.widgets import _InfoBadge
+        badge = _InfoBadge(dim_row)
+        badge.configure(text="Bypass framing/cropping and apply only Render FPS and Color Boost when the source video ratio matches the target ratio. By definition, selecting 'Original' resolution will always trigger this bypass.")
+        badge.pack(side="left", padx=5)
 
         section("📜  Scroll")
         slider_row("Scroll speed",    self.app_state.v_scroll_speed,        4.0, 80.0, "{:.0f}", " px/s")

@@ -102,6 +102,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `let_me_handle_it` | `--let-me-handle-it`| `False` | 🚀 Laisse-moi gérer ça — mode tout-automatique : active Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond + DMD Visibility Score simultanément |
 | `target_width` | `--target-width` | `128` | Largeur de sortie en pixels (tiling multi-dalle) |
 | `target_height` | `--target-height` | `32` | Hauteur de sortie en pixels (tiling multi-dalle) |
+| `smart_ratio_bypass` | `--smart-ratio-bypass` | `False` | Désactive le recadrage pour garder la résolution d'origine. Applique uniquement les couleurs/FPS |
 | `text_overlay_enabled` | `--text-overlay` | `False` | 💬 Graver un texte dans le GIF de sortie |
 | `text_content` | `--text-content` | `""` | Chaîne de texte à afficher |
 | `text_font_size` | `--text-font-size` | `8` | Taille de la police en pixels |
