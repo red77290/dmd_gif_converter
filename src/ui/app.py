@@ -5,6 +5,7 @@ import logging
 import platform
 import shutil
 import tkinter as tk
+import queue
 import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
@@ -33,8 +34,19 @@ class DMDConverterApp(ctk.CTk):
 
         self.app_state = ApplicationState()
         self._build_ui()
+        self._log_queue = queue.Queue()
         # Subscribe to log events
         EventBus.subscribe(EventType.CONVERSION_PROGRESS, self._on_log_event)
+        self._poll_logs()
+
+    def _poll_logs(self):
+        try:
+            while True:
+                payload = self._log_queue.get_nowait()
+                self._process_log_event(payload)
+        except queue.Empty:
+            pass
+        self.after(50, self._poll_logs)
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -138,6 +150,9 @@ class DMDConverterApp(ctk.CTk):
         self._log_box.pack(fill="x", padx=6, pady=(2, 4))
 
     def _on_log_event(self, payload):
+        self._log_queue.put(payload)
+
+    def _process_log_event(self, payload):
         if not payload or "log" not in payload:
             return
         msg = payload["log"]
@@ -198,16 +213,36 @@ class DMDConverterApp(ctk.CTk):
         EventBus.clear()
         self.destroy()
 
+class EventBusLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            EventBus.publish(EventType.CONVERSION_PROGRESS, {"log": msg, "level": record.levelname})
+        except Exception:
+            pass
+
 def main():
     import logging as _logging
-    # Ensure terminal logs reach the console even when called directly
-    # (not via launcher.py which already configures basicConfig).
+    from pathlib import Path
+    
     if not _logging.root.handlers:
+        log_file = Path(__file__).parent.parent.parent.parent / "dmd_converter.log"
         _logging.basicConfig(
-            level=_logging.INFO,
+            level=_logging.DEBUG,
             format="%(asctime)s [%(levelname)-7s] %(name)s — %(message)s",
             datefmt="%H:%M:%S",
+            filename=str(log_file),
+            filemode="w",
         )
+    
+    # Always ensure EventBus gets the logs if not already added
+    has_eb_handler = any(isinstance(h, EventBusLogHandler) for h in _logging.root.handlers)
+    if not has_eb_handler:
+        eb_handler = EventBusLogHandler()
+        eb_handler.setFormatter(_logging.Formatter("%(asctime)s [%(levelname)-7s] %(name)s — %(message)s", datefmt="%H:%M:%S"))
+        eb_handler.setLevel(_logging.DEBUG)
+        _logging.root.addHandler(eb_handler)
+
     app = DMDConverterApp()
     app.mainloop()
 
