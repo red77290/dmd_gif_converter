@@ -18,11 +18,13 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Fallback module-level logger
+log_file = Path(__file__).parent.parent.parent.parent / "dmd_converter.log"
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)-7s] [UI] %(message)s",
     datefmt="%H:%M:%S",
-    stream=sys.stderr,
+    filename=str(log_file),
+    filemode="w",
 )
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
 {
-  "task_id": "7BCEE",
+  "task_id": "DB4A6",
   "file_info": {
     "filename": "combat_anime.gif",
     "video_width": 540,
@@ -8,39 +8,31 @@
   },
   "camera_params": {
     "strength": {
-      "value": 0.55,
-      "reason": "Reduced strength to stabilize the tall subject."
+      "value": 0.65,
+      "reason": "Standard default strength."
     },
     "smoothness": {
-      "value": 0.85,
-      "reason": "Increased smoothness to prevent motion sickness."
+      "value": 0.0,
+      "reason": "Standard default smoothness."
     }
   },
-  "raw_signals": {
-    "tall_ratio": 2.859259259259259,
-    "fill_ratio": 0.9554455445544554,
-    "body_aspect": 1.1123919308357348,
-    "floor_in_lower": true,
-    "floor_var_score": 0.0508281480224478,
-    "x_variance": 0.0015967098481343498,
-    "y_variance": 0.0009396739442530579
-  },
+  "raw_signals": {},
   "decisions": {
     "face_priority": {
-      "value": true,
-      "reason": "Very tall subject detected, switching to portrait mode."
+      "value": false,
+      "reason": "Standard subject, no portrait mode required."
     },
     "auto_vertical_bias": {
       "value": false,
-      "reason": "Floor tracking disabled (contradictory with portrait mode)."
+      "reason": "No trackable floor detected."
     },
     "auto_bottom_crop": {
       "value": false,
-      "reason": "Bottom crop forced to frame the upper body."
+      "reason": "Screen is filled."
     },
     "auto_top_crop": {
       "value": false,
-      "reason": "Top crop forced to frame the head."
+      "reason": "Screen is filled at the top."
     },
     "pillarbox": {
       "value": "L:0px",
