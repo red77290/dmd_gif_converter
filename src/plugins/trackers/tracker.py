@@ -249,12 +249,16 @@ class SceneClassificationStage(ITrackerStage):
                     "y_variance":      float(np.var(y_centers)) / max(1.0, float(engine.cam_frame_h)**2),
                 }
                 
-                new_profile, _, _ = classify_scene(scene_signals)
-                if getattr(engine.cfg, "scene_type", None) != new_profile.scene_type:
-                    old_scene = getattr(engine.cfg, "scene_type", "Unknown")
-                    logger.debug(f"[DYNAMIC] Camera cut detected! Scene changed dynamically from '{old_scene}' to '{new_profile.scene_type}'")
-                    if logger.isEnabledFor(logging.DEBUG):
-                        print(f"16:00:00 [DEBUG  ] [UI] [DYNAMIC] Camera cut! Scene changed: {old_scene} -> {new_profile.scene_type}")
+                new_profile, scoreboard_lines, _ = classify_scene(scene_signals)
+                old_scene = getattr(engine.cfg, "scene_type", "Unknown")
+                
+                if old_scene != new_profile.scene_type:
+                    logger.info(f"[DYNAMIC] Camera cut detected! Scene changed dynamically from '{old_scene}' to '{new_profile.scene_type}'")
+                else:
+                    logger.debug(f"[DYNAMIC] Camera cut detected! Scene remains '{new_profile.scene_type}'")
+                
+                for line in scoreboard_lines:
+                    logger.debug(line)
                 
                 engine.cfg.scene_profile = new_profile
                 engine.cfg.scene_type = new_profile.scene_type
