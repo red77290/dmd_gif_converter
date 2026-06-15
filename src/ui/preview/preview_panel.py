@@ -619,8 +619,7 @@ class PreviewPanel(ctk.CTkFrame):
     def _generate_auto_preview(self, src, cfg):
         try:
             ok, out_mp4, msg = preprocess_video_for_dmd(
-                src, cfg,
-                callback=lambda m, lv="info": self.after(0, lambda: self._log(m, lv))
+                src, cfg
             )
             if not ok or not out_mp4:
                 self.after(0, lambda: self._on_auto_fail(msg))
@@ -782,9 +781,7 @@ class PreviewPanel(ctk.CTkFrame):
             else:
                 out_gif = os.path.join(tmpdir, "preview.gif")
                 success, msg = process_file(
-                    src, out_gif, params, start_s, end_s,
-                    callback=lambda m, lv="info": self.after(
-                        0, lambda _m=m, _lv=lv: self._log(_m, _lv))
+                    src, out_gif, params, start_s, end_s
                 )
                 if not success or not os.path.isfile(out_gif):
                     self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
@@ -1160,8 +1157,6 @@ class PreviewPanel(ctk.CTkFrame):
                 self.after(0, lambda _i=iid: lp._set_file_status(_i, "converting"))
             success, msg = process_file(
                 src, out, task_params, start_s, end_s,
-                callback=lambda m, lv="info": self.after(
-                    0, lambda _m=m, _lv=lv, _t=wid_tag: self._log(f"{_t}{_m}", _lv)),
                 cancel_event=self._cancel_event,
             )
             if success:
@@ -1202,8 +1197,6 @@ class PreviewPanel(ctk.CTkFrame):
 
         process_folder(
             folder_in, folder_out, params,
-            callback=lambda m, lv="info": self.after(
-                0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
             progress_callback=on_progress,
             cancel_event=self._cancel_event,
         )
@@ -1273,6 +1266,4 @@ class PreviewPanel(ctk.CTkFrame):
         lvl = {"debug": logging.DEBUG, "info": logging.INFO,
                "warning": logging.WARNING, "error": logging.ERROR}.get(level.lower(), logging.INFO)
         logger.log(lvl, message)
-        EventBus.publish(EventType.CONVERSION_PROGRESS,
-                         {"log": message, "level": level})
 

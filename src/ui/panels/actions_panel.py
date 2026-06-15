@@ -256,7 +256,6 @@ class ActionsPanel(ctk.CTkFrame):
             self.after(0, lambda _iid=iid: self._set_file_status(_iid, "converting"))
             success, msg = process_file(
                 src, out, task_params, start_s, end_s,
-                callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
                 cancel_event=getattr(self, "_cancel_event", None)
             )
             
@@ -295,7 +294,6 @@ class ActionsPanel(ctk.CTkFrame):
 
         process_folder(
             folder_in, folder_out, params,
-            callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv)),
             progress_callback=on_progress,
             cancel_event=getattr(self, "_cancel_event", None)
         )
