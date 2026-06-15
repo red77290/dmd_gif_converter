@@ -24,6 +24,12 @@ class ApplicationState(IModel):
         # This can be improved to automatically generate Tk vars from dataclass fields.
         self._var_map: Dict[str, tk.Variable] = {}
         
+        # Pre-initialize target dimensions as StringVar to prevent Tkinter TclError on empty Entry
+        self.v_target_width = tk.StringVar(value="128")
+        self.v_target_height = tk.StringVar(value="32")
+        self._var_map["v_target_width"] = self.v_target_width
+        self._var_map["v_target_height"] = self.v_target_height
+        
         self._create_tk_vars_for_config(self.conversion_config, "v_")
         self._create_tk_vars_for_config(self.auto_action_config, "v_action_")
         self._create_tk_vars_for_config(self.export_config, "v_")

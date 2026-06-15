@@ -75,6 +75,20 @@ class DMDConverterApp(ctk.CTk):
         self.left_panel = LeftPanel(self.tab_conversion, self.app_state)
         self.middle_panel = MiddlePanel(self.tab_conversion, self.app_state)
         self.preview_panel = PreviewPanel(self.tab_conversion, self.app_state)
+        self.preview_controller = PreviewController()
+        self.preview_controller.bind(self.preview_panel, self.app_state)
+        
+        # Trigger auto-refresh for visual parameters
+        refresh_vars = [
+            "v_target_width", "v_target_height",
+            "v_text_overlay_enabled", "v_text_content", "v_text_font_size",
+            "v_text_color", "v_text_position", "v_text_style", "v_text_animation",
+            "v_text_bg", "v_text_bg_opacity", "v_text_font_file"
+        ]
+        for v_name in refresh_vars:
+            var = getattr(self.app_state, v_name, None)
+            if var:
+                var.trace_add("write", lambda *_: self.preview_controller.schedule_refresh())
 
         self.left_panel.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.middle_panel.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
