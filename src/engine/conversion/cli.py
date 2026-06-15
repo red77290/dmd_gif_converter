@@ -263,6 +263,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── Multi-dalle / Tiling ─────────────────────────────────────────────────
     mg = p.add_argument_group("Multi-dalle / Tiling")
     mg.add_argument(
+        "--smart-ratio-bypass", action=argparse.BooleanOptionalAction, default=DEFAULT_PARAMS.get("smart_ratio_bypass", True),
+        help="Bypass all framing/cropping and apply only Render FPS and Color Boost when the source video ratio matches the target ratio. Enabled by default.",
+    )
+    mg.add_argument(
         "--target-width", type=int, default=DEFAULT_PARAMS["target_width"], metavar="PX",
         help=f"Target output width in pixels (default: {DEFAULT_PARAMS['target_width']}).",
     )
@@ -383,6 +387,7 @@ if __name__ == "__main__":
         "max_duration": args.max_duration,
         "target_width": args.target_width,
         "target_height": args.target_height,
+        "smart_ratio_bypass": args.smart_ratio_bypass,
         "text_overlay_enabled": args.text_overlay,
         "text_content": args.text_content,
         "text_font_size": args.text_font_size,

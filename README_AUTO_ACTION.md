@@ -1,4 +1,4 @@
-# Auto Action Framing (v6.3.0)
+# Auto Action Framing (v6.4.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.

@@ -31,3 +31,4 @@ class ConversionConfig:
     let_me_handle_it: bool = True
     per_gif_config: bool = False
     led_sim: bool = True
+    smart_ratio_bypass: bool = True

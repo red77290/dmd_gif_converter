@@ -115,6 +115,7 @@ class ApplicationState(IModel):
         if not self.v_let_me_handle_it.get():
             return
         forced_true = [
+            "v_smart_ratio_bypass",
             "v_auto_color_enabled",
             "v_action_enabled",
             "v_action_smart_auto_crop",

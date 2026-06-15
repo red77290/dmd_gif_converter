@@ -1,5 +1,8 @@
 # DMD GIF Converter — Changelog
 
+## What is New in v6.4.0?
+- **📐 Original Resolution & Smart Ratio Bypass**: Added a new "Original" target resolution preset. Furthermore, a "Bypass framing for equivalent ratio" toggle now intelligently detects if your source video is already formatted to the exact target aspect ratio (or if "Original" is selected). If so, AI Auto Framing and scrolling are bypassed, applying purely the Smart Color Boost and Render FPS settings to preserve the source's native layout.
+
 ## What is New in v6.3.0?
 - **📊 Continuous Scoring Matrix**: Scene detection (Auto Action) no longer relies on a rigid waterfall model. It uses a dynamic, continuous scoring matrix to identify the optimal camera profile (e.g., Platformer, Talking Closeup, Action). The scoreboard is fully visible in the UI logs.
 - **🛡️ Auto Detector Fallback (Person → Hybrid)**: When tracking mixed content, if the primary `person` detector fails on a close-up or non-human subject, the engine can now instantly fall back to the `hybrid` detector mid-scene or pre-scan, ensuring a perfect cinematic shot without giving up.

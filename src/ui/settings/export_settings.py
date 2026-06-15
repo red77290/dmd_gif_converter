@@ -22,7 +22,7 @@ class ExportSettingsPanel(ctk.CTkFrame):
         self._target_preset_menu = ctk.CTkOptionMenu(
             tiling_preset_row,
             variable=self.app_state.v_target_preset,
-            values=["128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "256x64 (2x2)", "Custom"],
+            values=["Original", "128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "256x64 (2x2)", "Custom"],
             command=self._on_target_preset_change,
             width=200,
         )
@@ -48,12 +48,14 @@ class ExportSettingsPanel(ctk.CTkFrame):
         self._on_target_preset_change(self.app_state.v_target_preset.get()) 
 
     def _on_target_preset_change(self, preset):
-        if preset == "Custom":
-            self._custom_tiling_frame.pack(
-                fill="x", padx=10, pady=2, after=self._tiling_preset_row
-            )
-        else:
+        if preset == "Original":
+            self.app_state.v_target_width.set(0)
+            self.app_state.v_target_height.set(0)
+            self._custom_tiling_frame.pack_forget()
+        elif preset != "Custom":
             width, height = map(int, preset.split(" ")[0].split("x"))
             self.app_state.v_target_width.set(width)
             self.app_state.v_target_height.set(height)
             self._custom_tiling_frame.pack_forget()
+        else:
+            self._custom_tiling_frame.pack(fill="x", padx=10, pady=2, after=self._tiling_preset_row)

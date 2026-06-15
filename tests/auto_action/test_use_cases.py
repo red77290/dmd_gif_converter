@@ -41,14 +41,20 @@ class TestUseCases(unittest.TestCase):
         # Use motion detector for platformers, person for faces
         detector_type = "motion" if "platformer" in filename else "person"
         
+        scene_type = "platformer" if "platformer" in filename else ("talking_closeup" if "visage" in filename or "face" in filename else "")
+        is_face = "visage" in filename or "face" in filename
         cfg = AutoActionConfig(
             detector=detector_type,
-            smart_auto_crop=True,
+            smart_auto_crop=False,
+            scene_type=scene_type,
             target_width=128,
             target_height=32,
             intro_duration=0.0,
-            smoothness=0.0,
-            platformer_mode=("platformer" in filename)
+            smoothness=0.70,
+            platformer_mode=("platformer" in filename),
+            auto_vertical_bias=("platformer" in filename),
+            auto_bottom_crop=is_face,
+            auto_top_crop=is_face
         )
         
         # We will intercept the camera bounds and the detected ROIs

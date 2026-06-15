@@ -106,6 +106,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `let_me_handle_it` | `--let-me-handle-it`| `False` | 🚀 Let Me Handle It — one-click full-auto mode: activates Smart Color Boost + Auto Action + Smart Auto Crop + Background Subtraction + DMD Visibility Score simultaneously |
 | `target_width` | `--target-width` | `128` | Output width in pixels (multi-panel tiling) |
 | `target_height` | `--target-height` | `32` | Output height in pixels (multi-panel tiling) |
+| `smart_ratio_bypass` | `--smart-ratio-bypass` | `False` | Bypasses scaling/cropping to keep source resolution. Applies only colors/FPS |
 | `text_overlay_enabled` | `--text-overlay` | `False` | 💬 Burn a text label into the output GIF |
 | `text_content` | `--text-content` | `""` | Text string to render |
 | `text_font_size` | `--text-font-size` | `8` | Font size in pixels |
