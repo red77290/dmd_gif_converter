@@ -146,7 +146,9 @@ class AutoActionConfig:
         for f in fields(cls):
             if f.name.startswith("_"):
                 continue
-            for prefix in ("v_action_", "v_"):
+            
+            prefixes = ("v_",) if f.name in ("target_width", "target_height") else ("v_action_", "v_")
+            for prefix in prefixes:
                 var = getattr(s, f"{prefix}{f.name}", None)
                 if var is not None and hasattr(var, "get"):
                     raw = var.get()

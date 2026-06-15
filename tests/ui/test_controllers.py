@@ -138,15 +138,15 @@ class TestPreviewController(unittest.TestCase):
 
     def test_trigger_refresh_calls_generate_preview(self):
         pc = self._make()
-        pc._view._generate_dmd_preview = MagicMock()
+        pc._view.refresh_all_previews = MagicMock()
         pc._trigger_refresh()
-        pc._view._generate_dmd_preview.assert_called_once()
+        pc._view.refresh_all_previews.assert_called_once()
         self.assertIsNone(pc._pending_job)
 
     def test_trigger_refresh_no_method_is_safe(self):
         pc = self._make()
         # Remove the method to test graceful fallback
-        del pc._view._generate_dmd_preview
+        del pc._view.refresh_all_previews
         pc._trigger_refresh()  # Should not crash
 
     def test_cancel_pending_without_view_is_safe(self):

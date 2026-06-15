@@ -139,12 +139,16 @@ class PreviewPanel(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_preview_area(self, parent):
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+        parent.grid_rowconfigure(1, weight=0)
+
+        pf = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        pf.grid(row=0, column=0, sticky="nsew")
+        pf.grid_columnconfigure(0, weight=1)
+        
         # ── Actions section (Convert / Batch / Stop) — pinned at bottom, always visible
         self._build_actions_section(parent)
-
-        pf = ctk.CTkFrame(parent, fg_color="transparent")
-        pf.pack(fill="both", expand=True)
-        pf.grid_columnconfigure(0, weight=1)
         # No row has weight: blocks (src/auto, dmd, trim, actions) stack
         # compactly from the top with no gaps between them.
 
@@ -289,7 +293,7 @@ class PreviewPanel(ctk.CTkFrame):
     def _build_actions_section(self, parent):
         af = ctk.CTkFrame(parent, fg_color="#0d1420", corner_radius=8,
                           border_width=1, border_color="#1a3a2a")
-        af.pack(side="bottom", fill="x", padx=10, pady=(4, 8))
+        af.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 8))
         af.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -364,8 +368,8 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _compute_led_sim_display_size(self):
         try:
-            w = int(self.app_state.v_target_width.get())
-            h = int(self.app_state.v_target_height.get())
+            w, h = self._get_target_dims()
+            
         except Exception:
             w, h = 128, 32
         scale = int(LED_SIM_SCALE)
@@ -377,6 +381,7 @@ class PreviewPanel(ctk.CTkFrame):
         try:
             w = int(self.app_state.v_target_width.get())
             h = int(self.app_state.v_target_height.get())
+            
             if w == 0 or h == 0:
                 from src.engine.conversion.ffmpeg_utils import get_metadata
                 if getattr(self, "_current_path", None):
@@ -424,8 +429,10 @@ class PreviewPanel(ctk.CTkFrame):
             hover_color="#7a6400" if is_on else "#2a2a4a",
             text="💡 LED Sim ✓" if is_on else "💡 LED Sim")
         self._update_dmd_canvas_size()
-        self._dmd_frames = [None] * len(self._dmd_pil_frames)
-        if self._current_path and not self._dmd_rendering:
+        self._dmd_frames = [None] * len(self._dmd_pil_frames) if hasattr(self, "_dmd_pil_frames") else []
+        if getattr(self, "_dmd_cached_out", None) and os.path.isfile(self._dmd_cached_out):
+            self._start_dmd_generation(self._dmd_cached_out, is_already_converted=True)
+        elif self._current_path and not self._dmd_rendering:
             self._start_dmd_generation(self._current_path)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -579,7 +586,7 @@ class PreviewPanel(ctk.CTkFrame):
         if not self._current_path:
             from tkinter import messagebox; messagebox.showinfo("Info", "Select a file first.")
             return
-        self._load_preview(self._current_path)
+        self._start_dmd_generation(self._current_path)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  AUTO-ACTION
@@ -622,23 +629,52 @@ class PreviewPanel(ctk.CTkFrame):
         self._btn_auto.configure(state="disabled", text="⏳ Auto…")
         start_s, end_s = self._get_trim()
         s = self.app_state
+        
+        tw, th = self._get_target_dims()
+
+        # Check smart ratio bypass
+        bypass_active = s.v_smart_ratio_bypass.get() if hasattr(s, "v_smart_ratio_bypass") else True
+        is_perfect_ratio = False
+        is_original_mode = False
+        print(f"target_width: {s.v_target_width.get()}")
+        
         try:
-            tw = int(s.v_target_width.get() or 128)
+            if str(s.v_target_width.get()) == "0" or str(s.v_target_height.get()) == "0":
+                is_original_mode = True
         except Exception:
-            tw = 128
+            pass
+            
         try:
-            th = int(s.v_target_height.get() or 32)
+            if getattr(self, "_current_path", None):
+                from src.engine.conversion.ffmpeg_utils import get_metadata
+                src_w, src_h, _, _ = get_metadata(self._current_path)
+                if src_w and src_h and tw and th:
+                    if abs((src_w / src_h) - (tw / th)) < 0.05:
+                        is_perfect_ratio = True
         except Exception:
-            th = 32
+            pass
+
+        if is_original_mode or (bypass_active and is_perfect_ratio):
+            self._on_auto_bypass()
+            return
+
         cfg = AutoActionConfig.from_app_state(s, start_s=start_s, end_s=end_s, target_width=tw, target_height=th)
         threading.Thread(target=self._generate_auto_preview,
                          args=(src, cfg), daemon=True).start()
 
     def _generate_auto_preview(self, src, cfg):
         try:
+            self.after(0, lambda: self._conv_progress.configure(mode="indeterminate"))
+            self.after(0, lambda: self._conv_progress.start())
+            
             ok, out_mp4, msg = preprocess_video_for_dmd(
                 src, cfg
             )
+            
+            self.after(0, lambda: self._conv_progress.stop())
+            self.after(0, lambda: self._conv_progress.configure(mode="determinate"))
+            self.after(0, lambda: self._conv_progress.set(0))
+            
             if not ok or not out_mp4:
                 self.after(0, lambda: self._on_auto_fail(msg))
                 return
@@ -704,7 +740,7 @@ class PreviewPanel(ctk.CTkFrame):
             self._auto_tmpdir = None
         self._auto_canvas.delete("all")
         self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
-                                      text="⏭️  Bypassed\\n(Original or perfect ratio)",
+                                      text="⏭️  Bypassed\n(Original or perfect ratio)",
                                       fill="#2ecc71", font=("Helvetica", 12), justify="center")
         self._auto_info.configure(text="Auto Action is skipped. Color Boost & FPS only.")
         self._flush_auto_pending()
@@ -758,7 +794,7 @@ class PreviewPanel(ctk.CTkFrame):
         if not self._current_path:
             from tkinter import messagebox; messagebox.showinfo("Info", "Select a file first.")
             return
-        self._load_preview(self._current_path)
+        self._start_dmd_generation(self._current_path)
 
     def _start_dmd_generation(self, src, is_already_converted=False):
         if self._dmd_rendering:
@@ -811,10 +847,20 @@ class PreviewPanel(ctk.CTkFrame):
             if is_already_converted:
                 out_gif = src
             else:
-                out_gif = os.path.join(tmpdir, "preview.gif")
+                out_gif = os.path.join(tmpdir, "preview.mp4")
+                
+                self.after(0, lambda: self._conv_progress.configure(mode="indeterminate"))
+                self.after(0, lambda: self._conv_progress.start())
+                
                 success, msg = process_file(
-                    src, out_gif, params, start_s, end_s
+                    src, out_gif, params, start_s, end_s,
+                    callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self._log(_m, _lv))
                 )
+                
+                self.after(0, lambda: self._conv_progress.stop())
+                self.after(0, lambda: self._conv_progress.configure(mode="determinate"))
+                self.after(0, lambda: self._conv_progress.set(0))
+                
                 if not success or not os.path.isfile(out_gif):
                     self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
                     return
@@ -874,6 +920,7 @@ class PreviewPanel(ctk.CTkFrame):
             self._btn_dmd.configure(state="normal", text="🔬 DMD")
             self._stop_dmd_preview()
             self._dmd_tmpdir = tmpdir
+            self._dmd_cached_out = out_gif
             self._dmd_pil_frames = pil_frames
             self._dmd_frames = [None] * len(pil_frames)
             self._dmd_delays = delays
@@ -961,8 +1008,8 @@ class PreviewPanel(ctk.CTkFrame):
             "noise_reduction": s.v_noise_reduction.get(),
             "film_grain":      int(s.v_film_grain.get()),
             "vignette":        s.v_vignette.get(),
-            "target_width":    self._get_target_dims()[0],
-            "target_height":   self._get_target_dims()[1],
+            "target_width":    s.v_target_width.get(),
+            "target_height":   s.v_target_height.get(),
             "smart_ratio_bypass": getattr(s, "v_smart_ratio_bypass", None) and s.v_smart_ratio_bypass.get(),
             "text_overlay_enabled": s.v_text_overlay_enabled.get(),
             "text_content":    s.v_text_content.get(),

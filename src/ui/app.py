@@ -107,6 +107,11 @@ class DMDConverterApp(ctk.CTk):
                 self.preview_panel._btn_convert.configure(state="normal")
             else:
                 self.preview_panel._btn_convert.configure(state="disabled")
+        
+        def _cancel_debounce(*_):
+            self.preview_controller._cancel_pending()
+            
+        EventBus.subscribe(EventType.PREVIEW_SOURCE_CHANGED, _cancel_debounce)
         EventBus.subscribe(EventType.PREVIEW_SOURCE_CHANGED, _on_selection_changed)
 
         # ── Log panel (bottom, retractable) ──────────────────────────────────

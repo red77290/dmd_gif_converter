@@ -129,6 +129,10 @@ def _build_parser() -> argparse.ArgumentParser:
              "Combined with trim-start to place the window anywhere in the source.",
     )
     ag.add_argument(
+        "--no-smart-ratio-bypass", action="store_false", dest="smart_ratio_bypass", default=True,
+        help="Disable the automatic bypass of auto-action when the source ratio matches the target ratio."
+    )
+    ag.add_argument(
         "--auto-action", action="store_true", default=DEFAULT_PARAMS["auto_action_enabled"],
         help="Enable pre-ffmpeg cinematic auto framing (default: disabled).",
     )

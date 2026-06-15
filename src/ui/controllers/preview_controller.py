@@ -71,5 +71,5 @@ class PreviewController(IController):
     def _trigger_refresh(self) -> None:
         """Actually kick off the DMD preview render (called after debounce)."""
         self._pending_job = None
-        if self._view and hasattr(self._view, "_generate_dmd_preview"):
-            self._view._generate_dmd_preview()  # type: ignore[union-attr]
+        if self._view and hasattr(self._view, "refresh_all_previews"):
+            self._view.refresh_all_previews()  # type: ignore[union-attr]
