@@ -1,5 +1,5 @@
-import tkinter as tk
 import customtkinter as ctk
+import tkinter as tk
 import re
 
 class ConversionSettingsPanel(ctk.CTkFrame):
@@ -91,6 +91,22 @@ class ConversionSettingsPanel(ctk.CTkFrame):
 
         section("⚡  Parallelism")
         slider_row("Workers (CPU)", self.app_state.v_workers, 1, 16, "{:.0f}", " workers", steps=15)
+
+        section("📐  Dimensions")
+        dim_row = ctk.CTkFrame(self, fg_color="transparent")
+        dim_row.pack(fill="x", padx=8, pady=2)
+        cb_ratio_bypass = ctk.CTkCheckBox(
+            dim_row,
+            text="Bypass framing for equivalent ratio",
+            variable=self.app_state.v_smart_ratio_bypass,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa",
+        )
+        cb_ratio_bypass.pack(side="left")
+
+        from src.ui.widgets import _InfoBadge
+        badge = _InfoBadge(dim_row)
+        badge.configure(text="Bypass framing/cropping and apply only Render FPS and Color Boost when the source video ratio matches the target ratio. By definition, selecting 'Original' resolution will always trigger this bypass.")
+        badge.pack(side="left", padx=5)
 
         section("📜  Scroll")
         slider_row("Scroll speed",    self.app_state.v_scroll_speed,        4.0, 80.0, "{:.0f}", " px/s")
