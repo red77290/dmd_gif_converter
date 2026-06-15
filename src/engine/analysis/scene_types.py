@@ -1,3 +1,4 @@
+from typing import Optional
 """Scene type classification for the auto-action framing engine.
 
 Provides a vocabulary of scene types (similar to colorimetry ``mode``) and a
