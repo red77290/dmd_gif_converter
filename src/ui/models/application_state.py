@@ -25,6 +25,8 @@ class ApplicationState(IModel):
         self._var_map: Dict[str, tk.Variable] = {}
         
         # Pre-initialize target dimensions as StringVar to prevent Tkinter TclError on empty Entry
+        self.v_smart_ratio_bypass = tk.BooleanVar(value=True)
+
         self.v_target_width = tk.StringVar(value="128")
         self.v_target_height = tk.StringVar(value="32")
         self._var_map["v_target_width"] = self.v_target_width
