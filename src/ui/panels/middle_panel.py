@@ -61,7 +61,7 @@ class MiddlePanel(ctk.CTkFrame):
         self._target_preset_menu = ctk.CTkOptionMenu(
             res_frame,
             variable=self.app_state.v_target_preset,
-            values=["128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "256x64 (2x2)", "Custom"],
+            values=["128x32 (1x1)", "256x32 (2x1)", "128x64 (1x2)", "256x64 (2x2)", "Original", "Custom"],
             command=self._on_target_preset_change,
             height=24
         )
@@ -264,7 +264,11 @@ class MiddlePanel(ctk.CTkFrame):
         SettingsWindow(self, self.app_state)
 
     def _on_target_preset_change(self, preset):
-        if preset != "Custom":
+        if preset == "Original":
+            self.app_state.v_target_width.set(0)
+            self.app_state.v_target_height.set(0)
+            self._custom_res_frame.grid_forget()
+        elif preset != "Custom":
             width, height = map(int, preset.split(" ")[0].split("x"))
             self.app_state.v_target_width.set(width)
             self.app_state.v_target_height.set(height)
