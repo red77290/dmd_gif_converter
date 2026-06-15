@@ -16,6 +16,7 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 
 from src.ui.models.application_state import ApplicationState
 from src.ui.events.event_bus import EventBus, EventType
+from src.ui.controllers.preview_controller import PreviewController
 
 logger = logging.getLogger(__name__)
 
