@@ -25,10 +25,12 @@ from src.ui.panels.middle_panel import MiddlePanel
 from src.ui.preview.preview_panel import PreviewPanel
 from src.ui.panels.ai_moments_panel import AiMomentsPanel
 
+from src.ui.constants import APP_VERSION
+
 class DMDConverterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("🎞️  DMD GIF Converter  v6.3.0")
+        self.title(f"🎞️  DMD GIF Converter  v{APP_VERSION}")
         self.geometry("1300x920")
         self.minsize(980, 720)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
