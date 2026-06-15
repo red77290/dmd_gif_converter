@@ -373,29 +373,39 @@ class PreviewPanel(ctk.CTkFrame):
             scale -= 1
         return int(w * scale), int(h * scale), scale
 
-    def _get_final_canvas_size(self):
+    def _get_target_dims(self):
         try:
             w = int(self.app_state.v_target_width.get())
             h = int(self.app_state.v_target_height.get())
+            if w == 0 or h == 0:
+                from src.engine.conversion.ffmpeg_utils import get_metadata
+                if getattr(self, "_current_path", None):
+                    mw, mh, _, _ = get_metadata(self._current_path)
+                    if mw and mh:
+                        return mw, mh
+                return 128, 32
+            return w, h
         except Exception:
-            w, h = 128, 32
+            return 128, 32
+
+    def _get_final_canvas_size(self):
+        w, h = self._get_target_dims()
         led = getattr(self.app_state, "v_led_sim", None)
         if led and led.get():
             dw, dh, _ = self._compute_led_sim_display_size()
         else:
             dw, dh = int(w * DMD_DISPLAY_SCALE_FACTOR), int(h * DMD_DISPLAY_SCALE_FACTOR)
-        MAX_W, MAX_H = 640, 360
+        MAX_W, MAX_H = 512, 160
         if dw > MAX_W or dh > MAX_H:
             s = min(MAX_W / dw, MAX_H / dh)
             dw, dh = int(dw * s), int(dh * s)
         return dw, dh
 
     def _update_dmd_canvas_size(self, *_):
-        try:
-            if not self.winfo_exists() or not self._dmd_canvas.winfo_exists():
-                return
-            w, h = self.app_state.v_target_width.get(), self.app_state.v_target_height.get()
-        except Exception:
+        if not self.winfo_exists() or not getattr(self, "_dmd_canvas", None) or not self._dmd_canvas.winfo_exists():
+            return
+        w, h = self._get_target_dims()
+        if w == 0 or h == 0:
             return
         nw, nh = self._get_final_canvas_size()
         self._dmd_canvas.configure(width=nw, height=nh)
@@ -685,6 +695,20 @@ class PreviewPanel(ctk.CTkFrame):
         self._auto_info.configure(text=msg)
         self._flush_auto_pending()
 
+    def _on_auto_bypass(self):
+        self._auto_rendering = False
+        self._btn_auto.configure(state="normal", text="🎯 Auto")
+        import shutil, os
+        if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
+        self._auto_canvas.delete("all")
+        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+                                      text="⏭️  Bypassed\\n(Original or perfect ratio)",
+                                      fill="#2ecc71", font=("Helvetica", 12), justify="center")
+        self._auto_info.configure(text="Auto Action is skipped. Color Boost & FPS only.")
+        self._flush_auto_pending()
+
     def _flush_auto_pending(self):
         pending, self._auto_pending_src = self._auto_pending_src, None
         if pending and self._current_path:
@@ -937,8 +961,9 @@ class PreviewPanel(ctk.CTkFrame):
             "noise_reduction": s.v_noise_reduction.get(),
             "film_grain":      int(s.v_film_grain.get()),
             "vignette":        s.v_vignette.get(),
-            "target_width":    s.v_target_width.get(),
-            "target_height":   s.v_target_height.get(),
+            "target_width":    self._get_target_dims()[0],
+            "target_height":   self._get_target_dims()[1],
+            "smart_ratio_bypass": getattr(s, "v_smart_ratio_bypass", None) and s.v_smart_ratio_bypass.get(),
             "text_overlay_enabled": s.v_text_overlay_enabled.get(),
             "text_content":    s.v_text_content.get(),
             "text_font_size":  s.v_text_font_size.get(),
