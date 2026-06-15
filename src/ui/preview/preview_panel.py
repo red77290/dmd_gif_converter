@@ -612,7 +612,15 @@ class PreviewPanel(ctk.CTkFrame):
         self._btn_auto.configure(state="disabled", text="⏳ Auto…")
         start_s, end_s = self._get_trim()
         s = self.app_state
-        cfg = AutoActionConfig.from_app_state(s, start_s=start_s, end_s=end_s)
+        try:
+            tw = int(s.v_target_width.get() or 128)
+        except Exception:
+            tw = 128
+        try:
+            th = int(s.v_target_height.get() or 32)
+        except Exception:
+            th = 32
+        cfg = AutoActionConfig.from_app_state(s, start_s=start_s, end_s=end_s, target_width=tw, target_height=th)
         threading.Thread(target=self._generate_auto_preview,
                          args=(src, cfg), daemon=True).start()
 
