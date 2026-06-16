@@ -117,11 +117,11 @@ class DMDConverterApp(ctk.CTk):
 
         # Enable "Convert selected" button when a file is selected in LeftPanel
         def _on_selection_changed(payload):
-            path = (payload or {}).get("path")
-            if path and not self.preview_panel._busy:
-                self.preview_panel._btn_convert.configure(state="normal")
+            if self.left_panel._selected_iid:
+                if not getattr(self.preview_panel, "_busy", False):
+                    self.preview_panel.controls._btn_conv_sel.configure(state="normal")
             else:
-                self.preview_panel._btn_convert.configure(state="disabled")
+                self.preview_panel.controls._btn_conv_sel.configure(state="disabled")
         
         def _cancel_debounce(*_):
             self.preview_controller._cancel_pending()

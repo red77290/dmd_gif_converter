@@ -130,12 +130,13 @@ class AdvancedSettingsPanel(ctk.CTkFrame):
             text_color="#7799aa", font=ctk.CTkFont(size=10), justify="left",
         ).pack(padx=12, pady=(8, 6), anchor="w")
 
-        adv_slider(self._manual_frame, "Zoom",     self.app_state.v_zoom,     0.5, 4.0,
-                   "{:.2f}", "×", steps=70)
-        adv_slider(self._manual_frame, "X offset", self.app_state.v_manual_x, 0,  512,
-                   "{:.0f}", " px", steps=512, is_int=True)
-        adv_slider(self._manual_frame, "Y offset", self.app_state.v_manual_y, 0,  512,
-                   "{:.0f}", " px", steps=512, is_int=True)
+        self._manual_sliders = []
+        self._manual_sliders.append(adv_slider(self._manual_frame, "Zoom",     self.app_state.v_zoom,     0.5, 4.0,
+                   "{:.2f}", "×", steps=70, tooltip_text="Zoom factor for manual positioning.\nValues > 1.0 zoom in, < 1.0 zoom out."))
+        self._manual_sliders.append(adv_slider(self._manual_frame, "X offset", self.app_state.v_manual_x, 0,  512,
+                   "{:.0f}", " px", steps=512, is_int=True, tooltip_text="Horizontal pan offset in pixels.\nAvailable range depends on the current Zoom level."))
+        self._manual_sliders.append(adv_slider(self._manual_frame, "Y offset", self.app_state.v_manual_y, 0,  512,
+                   "{:.0f}", " px", steps=512, is_int=True, tooltip_text="Vertical pan offset in pixels.\nAvailable range depends on the current Zoom level."))
 
         self._on_scroll_enabled_change()
 
@@ -144,6 +145,11 @@ class AdvancedSettingsPanel(ctk.CTkFrame):
                 state = "disabled" if self.app_state.v_action_enabled.get() else "normal"
                 if self._cb_scroll_enabled and self._cb_scroll_enabled.winfo_exists():
                     self._cb_scroll_enabled.configure(state=state)
+                for sl in self._manual_sliders:
+                    if sl and sl.winfo_exists():
+                        sl.configure(state=state)
+                        if hasattr(sl, "entry_widget") and sl.entry_widget.winfo_exists():
+                            sl.entry_widget.configure(state=state)
             except Exception:
                 pass
 
@@ -163,11 +169,11 @@ class AdvancedSettingsPanel(ctk.CTkFrame):
         ).pack(padx=14, pady=(0, 6), anchor="w")
 
         adv_slider(parent, "Hue shift",       self.app_state.v_hue_shift,       -180.0, 180.0,
-                   "{:.0f}", "°", steps=360)
+                   "{:.0f}", "°", steps=360, tooltip_text="Shift the color hue by degrees (e.g. 180° inverts colors).")
         adv_slider(parent, "Noise reduction", self.app_state.v_noise_reduction,   0.0,   8.0,
-                   "{:.1f}", "")
+                   "{:.1f}", "", tooltip_text="Smooths out blocky compression artifacts.\nHigh values may blur fine details.")
         adv_slider(parent, "Film grain",      self.app_state.v_film_grain,        0,    50,
-                   "{:.0f}", "", steps=50, is_int=True)
+                   "{:.0f}", "", steps=50, is_int=True, tooltip_text="Adds artificial film grain texture.\nHelps reduce banding on the LED matrix.")
 
         vig_row = ctk.CTkFrame(parent, fg_color="transparent")
         vig_row.pack(fill="x", padx=14, pady=(4, 8))
@@ -177,6 +183,8 @@ class AdvancedSettingsPanel(ctk.CTkFrame):
             variable=self.app_state.v_vignette, font=ctk.CTkFont(size=12),
         )
         self._cb_vignette.pack(side="left")
+        from src.ui.widgets import ToolTip
+        ToolTip(self._cb_vignette, "Darkens the corners of the image to focus attention on the center.\nEffective for atmospheric/cinema modes.")
 
     def _on_scroll_enabled_change(self):
         if self.app_state.v_scroll_enabled.get():
