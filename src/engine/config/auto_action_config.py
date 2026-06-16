@@ -63,6 +63,7 @@ class AutoActionConfig:
     end_s: Optional[float] = None
     target_width: int = 128           # Target output width for DMD
     target_height: int = 32          # Target output height for DMD
+    is_batch: bool = False           # Context flag: True if running within an 8-worker batch
 
     # ══════════════════════════════════════════════════════════════════════════
     #  Factory & serialisation — SINGLE SOURCE OF TRUTH

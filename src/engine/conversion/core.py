@@ -797,6 +797,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         if callback:
             callback(msg, level)
     action_cfg = AutoActionConfig.from_params(p)
+    action_cfg.is_batch = True
 
     def _preprocess(filename):
         src = os.path.join(str(folder_in), filename)
