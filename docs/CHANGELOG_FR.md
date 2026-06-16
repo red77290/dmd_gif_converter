@@ -10,6 +10,10 @@
 - **🚀 Faux positifs `WIDE_SHOT` corrigés** : Les jeux avec une caméra de suivi parfaite (variance quasi-nulle) ne sont plus pénalisés et pris à tort pour des plans larges cinématiques ou des menus statiques.
 
 ## [7.0.0] - Architecture & Performances (V7)
+- **🚀 Architecture Refactorisée (MVC)** : Découpage complet du monolithe `preview_panel.py` vers un modèle MVC propre avec `main_panel.py` et des contrôleurs dédiés (`SourceController`, `AutoController`, `DmdController`). Cela améliore la maintenance sans impacter l'expérience utilisateur.
+- **🚀 Threads ONNX Dynamiques** : Les threads YOLO s'adaptent désormais au contexte ! L'allocation passe instantanément à 2 threads pour les batchs (pour éviter la saturation du CPU) et à 8 threads pour l'Auto Action autonome ou les AI Moments, offrant un gain de temps massif.
+- **🚀 Scoreboard Visuel AI Moments** : Amélioration des logs terminaux d'AI Moments avec des métriques détaillées, des moyennes de frames, de la stabilité, du jitter, le tout dans un format tabulaire clair.
+- **🚀 Universal FFmpegPipeReader** : Remplacement de toutes les instances bloquantes de `cv2.VideoCapture` par le nouveau `FFmpegPipeReader` accéléré matériellement. Cela supprime tous les freezes sur l'ensemble de l'application (Batch, Auto Tracking, UI Previews).
 - **🚀 Accélération Matérielle** : Détection et intégration automatique des encodeurs matériels (`h264_videotoolbox` pour macOS Apple Silicon, `h264_nvenc` pour NVIDIA, `h264_qsv` pour Intel) via `hardware_accel.py`, améliorant drastiquement les vitesses d'encodage H.264.
 - **🚀 Correction Crash OpenCV (macOS)** : Résolution d'un crash critique `SIGABRT`/`SIGSEGV` lors de l'utilisation de `cv2.VideoCapture` avec de multiples threads (8 workers) en implémentant un Monkey Patch `SafeVideoCapture` avec un verrouillage global (`threading.Lock`).
 - **🚀 Épuisement des Threads ONNX** : Limitation globale du nombre de threads utilisés par `onnxruntime` (`intra_op_num_threads=2`, `inter_op_num_threads=1`) pour éviter l'épuisement du CPU et les freezes système en mode batch "Convert All".

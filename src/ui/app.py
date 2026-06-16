@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 from src.ui.panels.left_panel import LeftPanel
 from src.ui.panels.middle_panel import MiddlePanel
-from src.ui.preview.preview_panel import PreviewPanel
+from src.ui.preview.main_panel import PreviewPanel
 from src.ui.panels.ai_moments_panel import AiMomentsPanel
 
 from src.ui.constants import APP_VERSION

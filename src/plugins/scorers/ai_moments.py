@@ -75,7 +75,19 @@ class AiMomentsEngine:
         analyze_fps = float(self.options.get("analyze_fps", 5.0))
         if analyze_fps <= 0:
             analyze_fps = 5.0
-        frame_step = max(1, int(fps / analyze_fps))
+            
+        # Use FFmpegPipeReader with target_fps for massive performance boost
+        from src.engine.auto_action.reader import FFmpegPipeReader
+        reader = FFmpegPipeReader(self.video_path)
+        ok, msg = reader.open(target_fps=analyze_fps)
+        if not ok:
+            logger.error(f"[AI MOMENT] Could not open video: {msg}")
+            return []
+
+        fps = reader.fps
+        total_frames = reader.total_frames
+        duration = total_frames / fps if fps > 0 else 0
+        frame_step = 1 # We already requested target_fps from FFmpeg
         
         # Determine sliding window sizes from min to max duration
         dur_min = float(self.options.get("dur_min", 2.0))
@@ -90,44 +102,47 @@ class AiMomentsEngine:
         window_frames_list = [max(1, int(wd * analyze_fps)) for wd in window_durations]
         
         # 1. Extract Signals
+        logger.info(f"[AI MOMENT] Signal Extraction started (Target FPS: {analyze_fps:.1f})")
         self.progress_cb("Signal Extraction", 0.0)
         
         signals = []
         idx = 0
         while not self._cancel:
-            ret, frame = cap.read()
+            ret, frame = reader.read()
             if not ret:
                 break
             
-            if idx % frame_step == 0:
-                # Downscale for performance during analysis
-                small = cv2.resize(frame, (320, 180))
-                
-                # Use Layer 1 pure measurement
-                sig = self.signal_engine.score_frame(small, frame_idx=idx)
-                
-                # We store the time manually for moment creation
-                sig_with_time = (sig, idx / fps)
-                signals.append(sig_with_time)
+            # Downscale for performance during analysis
+            small = cv2.resize(frame, (320, 180))
+            
+            # Use Layer 1 pure measurement
+            sig = self.signal_engine.score_frame(small, frame_idx=idx)
+            
+            # We store the time manually for moment creation
+            sig_with_time = (sig, idx / fps)
+            signals.append(sig_with_time)
                 
             idx += 1
-            # Update progress every 1 second of video instead of every 5 seconds
             if idx % int(fps) == 0:
-                self.progress_cb("Signal Extraction", 0.4 * (idx / total_frames))
+                self.progress_cb("Signal Extraction", 0.4 * (idx / max(1, total_frames)))
                 
-        cap.release()
+        reader.release()
         
         if not signals or self._cancel:
+            logger.info("[AI MOMENT] Cancelled or no signals extracted.")
             return []
             
+        logger.info(f"[AI MOMENT] Signal Extraction complete. Found {len(signals)} signal points.")
         self.progress_cb("Scoring Windows", 0.5)
         
         # 2. Score sliding windows
         moments = []
         step = max(1, int(analyze_fps * 1.0)) # 1 second slide
         
-        total_windows = (len(signals) // step) * len(window_frames_list)
+        total_windows = max(1, (len(signals) // step) * len(window_frames_list))
         windows_processed = 0
+
+        logger.info(f"[AI MOMENT] Scoring {total_windows} sliding windows...")
 
         for start_i in range(0, len(signals), step):
             for wf in window_frames_list:
@@ -141,8 +156,6 @@ class AiMomentsEngine:
                 # Evaluate individual frames with Layer 2
                 final_scores = self.final_engine.score_sequence(window_sigs)
                 
-                # Average the frame scores (ignoring dropped frames, or penalizing them)
-                # If a frame is dropped (selected=False), its score is low anyway.
                 avg_frame_score = np.mean([fs.score for fs in final_scores])
                 
                 # Evaluate temporal sequence quality (Layer 3)
@@ -169,8 +182,9 @@ class AiMomentsEngine:
                 
                 windows_processed += 1
                 if windows_processed % 10 == 0:
-                    self.progress_cb("Scoring Windows", 0.5 + 0.4 * (windows_processed / max(1, total_windows)))
+                    self.progress_cb("Scoring Windows", 0.5 + 0.4 * (windows_processed / total_windows))
 
+        logger.info(f"[AI MOMENT] Window scoring complete. Suppressing overlaps...")
         self.progress_cb("Ranking Moments", 0.95)
             
         # 3. Non-maximum suppression and Clustering Prevention
@@ -195,4 +209,16 @@ class AiMomentsEngine:
         final_results.sort(key=lambda x: x.start_time)
         
         self.progress_cb("Done", 1.0)
+        
+        # 4. Print Scoreboard
+        logger.info("\n" + "="*80)
+        logger.info(f" 🎯 AI MOMENTS SCOREBOARD (Top {len(final_results)})")
+        logger.info("="*80)
+        logger.info(f"{'Time':<15} | {'Score':<8} | {'Frame Avg':<10} | {'Stability':<10} | {'Jitter':<8} | {'Cont.':<8}")
+        logger.info("-" * 80)
+        for i, r in enumerate(final_results, 1):
+            t_str = f"[{r.start_time:.1f}s - {r.end_time:.1f}s]"
+            logger.info(f"{t_str:<15} | {r.overall_score:>7.1f}% | {r.scores.get('Frame Avg', 0):>9.1f}% | {r.scores.get('Stability', 0):>9.1f}% | {r.scores.get('Jitter', 0):>7.1f}% | {r.scores.get('Continuity', 0):>7.1f}%")
+        logger.info("="*80 + "\n")
+        
         return final_results

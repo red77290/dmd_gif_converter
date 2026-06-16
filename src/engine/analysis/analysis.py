@@ -111,7 +111,7 @@ def _compute_auto_crop_margins(  # noqa: C901
             continue
         # Use person detection only (no motion fallback): detect_motion relies on
         # sequential frames via MOG2, which is meaningless when using cap.set() jumps.
-        roi = detector.detect_person(frame) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector)
+        roi = detector.detect_person(frame, is_batch=cfg.is_batch) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector, is_batch=cfg.is_batch)
         if roi is not None:
             rx, ry, rw, rh = roi
             roi_tops.append(float(ry))
@@ -231,9 +231,9 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
             
             # For "person", we use the specialized detect_person. For fallback "hybrid", we use detect()
             if det_type == "person" and hasattr(detector, "detect_person"):
-                roi = detector.detect_person(frame)
+                roi = detector.detect_person(frame, is_batch=cfg.is_batch)
             else:
-                roi = detector.detect(frame, det_type)
+                roi = detector.detect(frame, det_type, is_batch=cfg.is_batch)
                 
             if roi is not None:
                 rx, ry, rw, rh = roi
