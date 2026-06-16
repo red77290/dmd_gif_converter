@@ -103,12 +103,12 @@ class SettingsPanel(ctk.CTkFrame):
         # Adding sliders via the shared adv_slider (imported from advanced_settings or a new util)
         from src.ui.settings.advanced_settings import adv_slider
         self._color_sliders = []
-        self._color_sliders.append(adv_slider(self._custom_frame, "Contrast",    self.app_state.v_contrast,    0.5,  2.5))
-        self._color_sliders.append(adv_slider(self._custom_frame, "Saturation",  self.app_state.v_saturation,  0.0,  4.0))
-        self._color_sliders.append(adv_slider(self._custom_frame, "Brightness",  self.app_state.v_brightness, -0.5,  0.5, "{:.3f}"))
-        self._color_sliders.append(adv_slider(self._custom_frame, "Gamma",       self.app_state.v_gamma,       0.1,  2.5))
-        self._color_sliders.append(adv_slider(self._custom_frame, "Sharpen Lum", self.app_state.v_sharpen_lum, 0.0,  3.0))
-        self._color_sliders.append(adv_slider(self._custom_frame, "Sharpen Chr", self.app_state.v_sharpen_chr, 0.0,  2.0))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Contrast",    self.app_state.v_contrast,    0.5,  2.5, tooltip_text="Adjusts the difference between light and dark areas. Higher = more punchy."))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Saturation",  self.app_state.v_saturation,  0.0,  4.0, tooltip_text="Adjusts the intensity of colors. Higher = more vivid."))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Brightness",  self.app_state.v_brightness, -0.5,  0.5, "{:.3f}", tooltip_text="Overall lightness of the image."))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Gamma",       self.app_state.v_gamma,       0.1,  2.5, tooltip_text="Adjusts mid-tones. Lower = brighter shadows, Higher = darker shadows."))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Sharpen Lum", self.app_state.v_sharpen_lum, 0.0,  3.0, tooltip_text="Sharpens the brightness details (edges)."))
+        self._color_sliders.append(adv_slider(self._custom_frame, "Sharpen Chr", self.app_state.v_sharpen_chr, 0.0,  2.0, tooltip_text="Sharpens color details. Use sparingly to avoid color artifacts."))
         
         self._custom_color_cache = {
             "v_contrast": self.app_state.v_contrast.get(),

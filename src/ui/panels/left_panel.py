@@ -694,12 +694,10 @@ class LeftPanel(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _log(self, message: str, level: str = "info"):
-        """Log to Python logger and publish on EventBus so the log panel can pick it up."""
+        """Log to Python logger."""
         lvl = {"debug": logging.DEBUG, "info": logging.INFO,
                "warning": logging.WARNING, "error": logging.ERROR}.get(level.lower(), logging.INFO)
         logger.log(lvl, message)
-        # Publish so any subscribed log widget can display the line
-        EventBus.publish(EventType.CONVERSION_PROGRESS, {"log": message, "level": level})
 
     # ══════════════════════════════════════════════════════════════════════════
     #  PREVIEW DELEGATION  (preview lives in PreviewPanel)

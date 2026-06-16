@@ -42,6 +42,20 @@ class DMDConverterApp(ctk.CTk):
         EventBus.subscribe(EventType.CONVERSION_PROGRESS, self._on_log_event)
         self._poll_logs()
 
+        # Log hardware acceleration on startup
+        threading.Thread(target=self._log_startup_hw_accel, daemon=True).start()
+
+    def _log_startup_hw_accel(self):
+        try:
+            from src.engine.conversion.hardware_accel import get_best_h264_encoder
+            best = get_best_h264_encoder()
+            if best != "libx264":
+                logger.info(f"🚀 Hardware Acceleration Enabled: {best}")
+            else:
+                logger.info("ℹ️ Hardware Acceleration: CPU only (libx264)")
+        except Exception:
+            pass
+
     def _poll_logs(self):
         try:
             while True:
@@ -243,12 +257,35 @@ class EventBusLogHandler(logging.Handler):
         except Exception:
             pass
 
+class WorkerFormatter(logging.Formatter):
+    def format(self, record):
+        tname = record.threadName
+        if tname == "MainThread":
+            record.worker_id = "Main"
+        elif "ThreadPoolExecutor" in tname:
+            try:
+                # "ThreadPoolExecutor-0_0" -> W1
+                worker_num = int(tname.split("_")[-1]) + 1
+                record.worker_id = f"W{worker_num}"
+            except Exception:
+                record.worker_id = "W?"
+        else:
+            record.worker_id = tname[:4]
+        return super().format(record)
+
 def main():
     import logging as _logging
     from pathlib import Path
     
     if not _logging.root.handlers:
-        log_file = Path(__file__).parent.parent.parent.parent / "dmd_converter.log"
+        import platform
+        if platform.system() == "Windows":
+            log_dir = Path(os.environ.get("APPDATA", "~")) / "DMD_Converter"
+        else:
+            log_dir = Path.home() / ".dmd_converter"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "dmd_converter.log"
+        
         _logging.basicConfig(
             level=_logging.DEBUG,
             format="%(asctime)s [%(levelname)-7s] %(name)s — %(message)s",
@@ -261,7 +298,7 @@ def main():
     has_eb_handler = any(isinstance(h, EventBusLogHandler) for h in _logging.root.handlers)
     if not has_eb_handler:
         eb_handler = EventBusLogHandler()
-        eb_handler.setFormatter(_logging.Formatter("%(asctime)s [%(levelname)-7s] %(name)s — %(message)s", datefmt="%H:%M:%S"))
+        eb_handler.setFormatter(WorkerFormatter("%(asctime)s [%(levelname)-7s] [%(worker_id)s] %(name)s — %(message)s", datefmt="%H:%M:%S"))
         eb_handler.setLevel(_logging.DEBUG)
         _logging.root.addHandler(eb_handler)
 

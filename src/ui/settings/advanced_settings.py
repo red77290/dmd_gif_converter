@@ -1,14 +1,19 @@
 import customtkinter as ctk
 
 def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
-               steps=None, is_int=False):
+               steps=None, is_int=False, tooltip_text=None):
     import tkinter as tk
     import re
     f = ctk.CTkFrame(par, fg_color="transparent")
     f.pack(fill="x", padx=10, pady=2)
     f.grid_columnconfigure(1, weight=1)
-    ctk.CTkLabel(f, text=label, width=145, anchor="w",
-                 font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+    lbl = ctk.CTkLabel(f, text=label, width=145, anchor="w",
+                 font=ctk.CTkFont(size=12))
+    lbl.grid(row=0, column=0, padx=(4, 6))
+    
+    if tooltip_text:
+        from src.ui.widgets import ToolTip
+        ToolTip(lbl, tooltip_text)
     kw = dict(from_=from_, to=to, variable=var)
     if steps is not None:
         kw["number_of_steps"] = steps
