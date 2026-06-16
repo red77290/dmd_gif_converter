@@ -1,7 +1,7 @@
 import tkinter as tk
 import customtkinter as ctk
 import re
-from src.ui.widgets import _InfoBadge
+from src.ui.widgets import _InfoBadge, ToolTip
 
 class AutoActionSettingsPanel(ctk.CTkFrame):
     def __init__(self, parent, app_state):
