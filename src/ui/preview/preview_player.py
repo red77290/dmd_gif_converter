@@ -299,6 +299,9 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             return
         nw, nh = self._get_final_canvas_size()
         self._dmd_canvas.configure(width=nw, height=nh)
+        self._last_dmd_w = nw
+        self._last_dmd_h = nh
+        
         if hasattr(self, "_dmd_title_label"):
             sim = "  💡" if (getattr(self.app_state, "v_led_sim", None) and
                              self.app_state.v_led_sim.get()) else ""
