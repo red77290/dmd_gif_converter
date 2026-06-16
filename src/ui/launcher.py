@@ -17,10 +17,17 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+import argparse
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument("--debug", action="store_true")
+args, _ = parser.parse_known_args()
+
+log_level = logging.DEBUG if args.debug else logging.INFO
+
 # Fallback module-level logger
 log_file = Path(__file__).parent.parent.parent.parent / "dmd_converter.log"
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=log_level,
     format="%(asctime)s [%(levelname)-7s] [UI] %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
