@@ -577,14 +577,9 @@ class MiddlePanel(ctk.CTkFrame):
             EventBus.publish(EventType.PREVIEW_REFRESH_REQUESTED, {"action": action})
 
     def _log(self, message: str, level: str = "info"):
-        """Log to Python logger (and optionally forward to EventBus)."""
+        """Log to Python logger."""
         lvl = {"debug": logging.DEBUG, "info": logging.INFO,
                "warning": logging.WARNING, "error": logging.ERROR}.get(level.lower(), logging.INFO)
         logger.log(lvl, message)
-        try:
-            from src.ui.events.event_bus import EventBus, EventType
-            EventBus.publish(EventType.CONVERSION_PROGRESS, {"log": message, "level": level})
-        except Exception:
-            pass
 
 

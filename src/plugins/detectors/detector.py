@@ -160,8 +160,14 @@ class _FrameDetector(AbstractDetector):
                     self._onnx_session = None
                     return
                 
+                sess_options = ort.SessionOptions()
+                sess_options.intra_op_num_threads = 2
+                sess_options.inter_op_num_threads = 2
+                
                 session = ort.InferenceSession(
-                    model_path, providers=["CPUExecutionProvider"]
+                    model_path, 
+                    sess_options=sess_options,
+                    providers=["CPUExecutionProvider"]
                 )
                 inputs = session.get_inputs()[0]
                 model_h = inputs.shape[2]

@@ -16,6 +16,41 @@ except Exception:
     _analyze_and_compensate = None
 from src.engine.conversion.ffmpeg_utils import _check_drawtext, _apply_text_overlay_pillow, snap_to_clean_fps, get_metadata
 from src.engine.conversion.quality import evaluate_gif_quality
+from src.engine.conversion.hardware_accel import get_best_h264_encoder
+import cv2
+
+# Make cv2.VideoCapture thread-safe globally to prevent libavcodec abort traps during concurrent creation/release
+_original_video_capture = cv2.VideoCapture
+_cv2_global_lock = threading.Lock()
+
+class SafeVideoCapture:
+    def __init__(self, *args, **kwargs):
+        with _cv2_global_lock:
+            self._cap = _original_video_capture(*args, **kwargs)
+            
+    def __getattr__(self, item):
+        return getattr(self._cap, item)
+        
+    def read(self, *args, **kwargs):
+        return self._cap.read(*args, **kwargs)
+        
+    def set(self, *args, **kwargs):
+        return self._cap.set(*args, **kwargs)
+        
+    def get(self, *args, **kwargs):
+        return self._cap.get(*args, **kwargs)
+        
+    def isOpened(self):
+        return self._cap.isOpened()
+        
+    def release(self):
+        with _cv2_global_lock:
+            if hasattr(self, "_cap") and self._cap is not None:
+                self._cap.release()
+                self._cap = None
+
+cv2.VideoCapture = SafeVideoCapture
+
 logger = logging.getLogger(__name__)
 
 
@@ -609,7 +644,11 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     # When auto_action is enabled the preprocessed MP4 already has the exact
     # right duration (intro + tracking + short tail).  Playing it exactly once
     # without any -t cap or -stream_loop avoids ffmpeg padding glitches at the end.
-    cmd = ["ffmpeg", "-y"]
+    import multiprocessing
+    max_workers = int(params.get("max_workers", 2) if params else 2)
+    ffmpeg_threads = max(1, multiprocessing.cpu_count() // max_workers)
+    
+    cmd = ["ffmpeg", "-y", "-threads", str(ffmpeg_threads)]
     if trim_start > 0:
         cmd += ["-ss", str(trim_start)]
     
@@ -621,7 +660,13 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     cmd += ["-filter_complex", filter_graph, "-map", "[out]"]
     
     if is_mp4:
-        cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+        best_encoder = get_best_h264_encoder()
+        if best_encoder == "libx264":
+            cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+        else:
+            # For hardware encoders like nvenc/qsv/videotoolbox, preset 'ultrafast' or '-crf 23' might not be supported identically
+            # so we use a high bitrate instead to guarantee quality and speed
+            cmd += ["-c:v", best_encoder, "-b:v", "5M"]
     else:
         cmd += ["-gifflags", "-offsetting-transdiff", "-f", "gif"]
         
@@ -740,6 +785,12 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     # ── Two-phase path (auto_action enabled) ──────────────────────────────────
     # Phase 1: run OpenCV preprocessing for all files in parallel.
     # This avoids interleaving heavy HOG detection with ffmpeg on the same cores.
+    try:
+        import cv2
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
+        
     def log(msg, level="info"):
         _terminal_log(msg, level)
         getattr(logger, level)(msg)

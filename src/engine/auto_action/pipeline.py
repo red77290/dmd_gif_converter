@@ -15,6 +15,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
     """Create an auto-framed temporary MP4 and return (ok, out_path, message)."""
     try:
         import cv2
+        cv2.setNumThreads(1)
     except Exception:
         return False, None, "OpenCV not installed (install opencv-python to enable auto action framing)."
 
@@ -93,18 +94,18 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
     # State variables
     read_q = queue.Queue(maxsize=16)
     write_q = queue.Queue(maxsize=16)
-    pipe_alive = [True]
+    stop_event = threading.Event()
 
     def reader_thread():
         try:
             reader.set_time(float(initial_start_s) * 1000.0)
-            while pipe_alive[0]:
+            while not stop_event.is_set():
                 if cancel_event and cancel_event.is_set():
                     break
                 ok, frame = reader.read()
                 if not ok:
                     break
-                while pipe_alive[0]:
+                while not stop_event.is_set():
                     try:
                         read_q.put(frame, timeout=0.1)
                         break
@@ -126,7 +127,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
             if intro_frames > 0:
                 cy_top = crop_h_src / 2.0
                 for i in range(intro_frames):
-                    if not pipe_alive[0] or (cancel_event and cancel_event.is_set()):
+                    if stop_event.is_set() or (cancel_event and cancel_event.is_set()):
                         break
                     t_linear = i / max(1, intro_frames - 1)
                     t = t_linear * t_linear * (3.0 - 2.0 * t_linear)
@@ -134,7 +135,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
                     from src.engine.auto_action.interfaces import CamRect
                     cam_intro = CamRect(cx, cy, crop_w_full, crop_h_src)
                     out_frame = renderer.render(first_frame_for_intro, cam_intro)
-                    while pipe_alive[0]:
+                    while not stop_event.is_set():
                         try:
                             write_q.put(out_frame, timeout=0.1)
                             break
@@ -153,7 +154,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
             src_idx = 0
             
             # ── Phase 2: Action tracking ──────────────────────────────────────────────
-            while pipe_alive[0]:
+            while not stop_event.is_set():
                 if cancel_event and cancel_event.is_set():
                     break
                 try:
@@ -185,7 +186,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
                 last_frame = frame
                 
                 out_frame = renderer.render(frame, cam, roi=tracker.last_roi)
-                while pipe_alive[0]:
+                while not stop_event.is_set():
                     try:
                         write_q.put(out_frame, timeout=0.1)
                         break
@@ -199,7 +200,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
                 max_extra = max(1, int(reader.fps * 0.3))
                 settle_px = 1.0
                 extra = 0
-                while extra < max_extra and pipe_alive[0]:
+                while extra < max_extra and not stop_event.is_set():
                     if cancel_event and cancel_event.is_set():
                         break
                     
@@ -208,7 +209,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
                         
                     cam_prev = cam_next
                     out_frame = renderer.render(last_frame, cam_next, is_tail=True)
-                    while pipe_alive[0]:
+                    while not stop_event.is_set():
                         try:
                             write_q.put(out_frame, timeout=0.1)
                             break
@@ -236,9 +237,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
     frame_idx = 0
     
     try:
-        while pipe_alive[0]:
+        while not stop_event.is_set():
             if cancel_event and cancel_event.is_set():
-                pipe_alive[0] = False
+                stop_event.set()
                 break
             try:
                 out_frame = write_q.get(timeout=0.2)
@@ -250,14 +251,14 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
             if out_frame is None:
                 break
             if not writer.write_frame(out_frame):
-                pipe_alive[0] = False
+                stop_event.set()
                 break
             frame_idx += 1
             if callback and (frame_idx == 1 or frame_idx % 25 == 0):
                 tot = reader.total_frames or "?"
                 log(f"Tracking targets: frame {frame_idx}/{tot}", "debug")
     finally:
-        pipe_alive[0] = False
+        stop_event.set()
         writer_ok, stderr_hint = writer.close()
         reader.release()
 

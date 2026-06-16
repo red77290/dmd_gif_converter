@@ -382,8 +382,10 @@ class ActionsPanel(ctk.CTkFrame):
         if not hasattr(self, "_log_box"):
             return
             
-        levels = {"debug": 10, "info": 20, "warning": 30, "error": 40}
-        msg_lvl = levels.get(level.lower(), 20)
+        import logging
+        levels = {"debug": logging.DEBUG, "info": logging.INFO, "warning": logging.WARNING, "error": logging.ERROR}
+        msg_lvl = levels.get(level.lower(), logging.INFO)
+        logger.log(msg_lvl, message)
         
         if not hasattr(self, "_all_logs"):
             self._all_logs = []
@@ -391,7 +393,7 @@ class ActionsPanel(ctk.CTkFrame):
         self._all_logs.append((msg_lvl, message))
         
         current_lvl_str = getattr(self, "v_log_level", None)
-        current_lvl = levels.get(current_lvl_str.get().lower(), 20) if current_lvl_str else 20
+        current_lvl = levels.get(current_lvl_str.get().lower(), logging.INFO) if current_lvl_str else logging.INFO
         
         if msg_lvl >= current_lvl:
             try:
