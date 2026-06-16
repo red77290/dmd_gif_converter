@@ -150,7 +150,7 @@ SUPPORTED_EXTENSIONS = {
 # ── Default parameters ─────────────────────────────────────────────────────────
 DEFAULT_PARAMS = {
     # Parallelism
-    "max_workers": 2,
+    "max_workers": 0,
     # Source folder auto-detection (CLI mode only)
     "folder_prefix": "gifs_",
     # Scroll
@@ -646,6 +646,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     # without any -t cap or -stream_loop avoids ffmpeg padding glitches at the end.
     import multiprocessing
     max_workers = int(params.get("max_workers", 2) if params else 2)
+    if max_workers <= 0:
+        max_workers = max(1, min(16, (multiprocessing.cpu_count() or 4) // 2))
     ffmpeg_threads = max(1, multiprocessing.cpu_count() // max_workers)
     
     cmd = ["ffmpeg", "-y", "-threads", str(ffmpeg_threads)]
@@ -754,7 +756,10 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         logger.warning(f"No supported files found in {folder_in}")
         return []
 
-    max_workers = p["max_workers"]
+    max_workers = p.get("max_workers", 0)
+    if max_workers <= 0:
+        max_workers = max(1, min(16, (os.cpu_count() or 4) // 2))
+
     auto_enabled = bool(p.get("auto_action_enabled", False))
 
     # ── Single-phase path (auto_action disabled — unchanged behaviour) ─────────

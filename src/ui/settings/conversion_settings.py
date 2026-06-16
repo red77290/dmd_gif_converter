@@ -63,6 +63,7 @@ class ConversionSettingsPanel(ctk.CTkFrame):
             entry.bind("<FocusIn>",  _on_focus_in)
             entry.bind("<FocusOut>", _commit)
             entry.bind("<Return>",   _commit)
+            sl.entry_widget = entry
             return sl
 
         section("🎨  Content mode")
@@ -90,7 +91,64 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         _update_mode_menu_state()
 
         section("⚡  Parallelism")
-        slider_row("Workers (CPU)", self.app_state.v_workers, 1, 16, "{:.0f}", " workers", steps=15)
+        workers_frame = ctk.CTkFrame(self, fg_color="transparent")
+        workers_frame.pack(fill="x", padx=8, pady=2)
+        
+        cb_auto_workers = ctk.CTkCheckBox(
+            workers_frame,
+            text="Auto",
+            variable=self.app_state.v_auto_workers,
+            font=ctk.CTkFont(size=12), text_color="#aaddaa", width=60
+        )
+        cb_auto_workers.pack(side="left", padx=(0, 10))
+        
+        # Manually create the slider for workers so we can disable it
+        wf_inner = ctk.CTkFrame(workers_frame, fg_color="transparent")
+        wf_inner.pack(side="left", fill="x", expand=True)
+        wf_inner.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(wf_inner, text="Workers (CPU)", width=100, anchor="w",
+                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+                     
+        sl_workers = ctk.CTkSlider(wf_inner, from_=1, to=16, number_of_steps=15, variable=self.app_state.v_workers)
+        sl_workers.grid(row=0, column=1, sticky="ew", padx=4)
+        
+        workers_lbl_sv = tk.StringVar(value="{:.0f} workers".format(self.app_state.v_workers.get()))
+        workers_entry = ctk.CTkEntry(wf_inner, textvariable=workers_lbl_sv, width=72, justify="right",
+                             font=ctk.CTkFont(size=11))
+        workers_entry.grid(row=0, column=2, padx=(4, 4))
+        
+        def _update_workers_lbl(*_):
+            if not getattr(workers_entry, "_is_focused", False):
+                workers_lbl_sv.set("{:.0f} workers".format(self.app_state.v_workers.get()))
+        self.app_state.v_workers.trace_add("write", _update_workers_lbl)
+        
+        def _commit_workers(*_):
+            workers_entry._is_focused = False
+            raw = workers_lbl_sv.get().strip()
+            import re
+            try:
+                m = re.match(r'^([+-]?\d*\.?\d+)', raw)
+                val = float(m.group(1)) if m else float(raw)
+                val = max(1, min(16, val))
+                self.app_state.v_workers.set(val)
+            except Exception:
+                pass
+            _update_workers_lbl()
+            
+        workers_entry.bind("<FocusIn>", lambda e: setattr(workers_entry, "_is_focused", True))
+        workers_entry.bind("<FocusOut>", _commit_workers)
+        workers_entry.bind("<Return>", _commit_workers)
+        
+        def _update_workers_state(*_):
+            try:
+                state = "disabled" if self.app_state.v_auto_workers.get() else "normal"
+                sl_workers.configure(state=state)
+                workers_entry.configure(state=state)
+            except Exception:
+                pass
+                
+        self.app_state.v_auto_workers.trace_add("write", _update_workers_state)
+        _update_workers_state()
 
         section("📐  Dimensions")
         dim_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -109,10 +167,25 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         badge.pack(side="left", padx=5)
 
         section("📜  Scroll")
-        slider_row("Scroll speed",    self.app_state.v_scroll_speed,        4.0, 80.0, "{:.0f}", " px/s")
-        slider_row("Top crop (%)",    self.app_state.v_top_crop,      0.0,  0.5, "{:.0%}")
-        slider_row("Bottom crop (%)", self.app_state.v_bottom_crop,   0.0,  0.5, "{:.0%}")
-        slider_row("Scroll cycles",   self.app_state.v_scroll_cycles, 0.0,  5.0, "{:.2f}", " cyc")
+        self._scroll_sliders = []
+        self._scroll_sliders.append(slider_row("Scroll speed",    self.app_state.v_scroll_speed,        4.0, 80.0, "{:.0f}", " px/s"))
+        self._scroll_sliders.append(slider_row("Top crop (%)",    self.app_state.v_top_crop,      0.0,  0.5, "{:.0%}"))
+        self._scroll_sliders.append(slider_row("Bottom crop (%)", self.app_state.v_bottom_crop,   0.0,  0.5, "{:.0%}"))
+        self._scroll_sliders.append(slider_row("Scroll cycles",   self.app_state.v_scroll_cycles, 0.0,  5.0, "{:.2f}", " cyc"))
+
+        def _update_scroll_state(*_):
+            try:
+                state = "disabled" if self.app_state.v_action_enabled.get() else "normal"
+                for sl in self._scroll_sliders:
+                    if sl and sl.winfo_exists():
+                        sl.configure(state=state)
+                        if hasattr(sl, "entry_widget") and sl.entry_widget.winfo_exists():
+                            sl.entry_widget.configure(state=state)
+            except Exception:
+                pass
+                
+        self.app_state.v_action_enabled.trace_add("write", _update_scroll_state)
+        _update_scroll_state()
 
         section("🎬  Render FPS")
         slider_row("FPS minimum", self.app_state.v_fps_min, 5.0,  30.0, "{:.1f}", " fps")

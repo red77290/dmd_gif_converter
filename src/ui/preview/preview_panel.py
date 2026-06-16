@@ -139,8 +139,10 @@ class PreviewPanel(ctk.CTkFrame):
             self.after(0, fn)
 
     def _on_resize(self, event):
-        # We handle canvas resizing in their own Configure events now.
-        pass
+        # Trigger DMD canvas re-scale when panel width changes significantly
+        if abs(event.width - getattr(self, "_last_panel_w", 0)) > 20:
+            self._last_panel_w = event.width
+            self.after(100, self._update_dmd_canvas_size)
 
     def _on_canvas_resize(self, event, canvas_id):
         w, h = event.width, event.height
@@ -295,13 +297,34 @@ class PreviewPanel(ctk.CTkFrame):
         # Sync canvas to actual initial size (LED sim may already be ON by default)
         self.after(0, self._update_dmd_canvas_size)
 
+    # ══════════════════════════════════════════════════════════════════════════
+    #  ACTIONS SECTION  (convert / batch / stop)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_actions_section(self, parent):
+        outer = ctk.CTkFrame(parent, fg_color="transparent")
+        outer.grid(row=1, column=0, sticky="ew", padx=10, pady=4)
+        outer.grid_columnconfigure(0, weight=1)
+        
+        # Diagnosis frame
+        self._diagnosis_frame = ctk.CTkFrame(outer, fg_color="#1a1a2e", corner_radius=6)
+        self._diagnosis_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self._diagnosis_frame.grid_columnconfigure(1, weight=1)
+        self._lbl_score = ctk.CTkLabel(self._diagnosis_frame, text="",
+                                       font=ctk.CTkFont(size=18, weight="bold"))
+        self._lbl_score.grid(row=0, column=0, padx=12, pady=10)
+        self._lbl_reasons = ctk.CTkLabel(self._diagnosis_frame, text="",
+                                         justify="left", anchor="w")
+        self._lbl_reasons.grid(row=0, column=1, sticky="w", padx=10)
+        self._diagnosis_frame.grid_remove()
+
         # Trim frame
-        self._trim_frame = ctk.CTkFrame(pf, fg_color="#16213e")
-        self._trim_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 8))
+        self._trim_frame = ctk.CTkFrame(outer, fg_color="#16213e")
+        self._trim_frame.grid(row=1, column=0, sticky="ew", pady=(0, 4))
         self._trim_frame.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(self._trim_frame, text="✂️  Trim  (single-file only)",
                      font=ctk.CTkFont(size=11, weight="bold"), text_color="#7ec8e3"
-                     ).grid(row=0, column=0, columnspan=4, padx=10, pady=(8, 4), sticky="w")
+                     ).grid(row=0, column=0, columnspan=4, padx=10, pady=(4, 2), sticky="w")
         ctk.CTkLabel(self._trim_frame, text="Start", width=44,
                      font=ctk.CTkFont(size=11)).grid(row=1, column=0, padx=(10, 4), pady=2)
         self._sl_start = ctk.CTkSlider(self._trim_frame, from_=0, to=1,
@@ -316,7 +339,7 @@ class PreviewPanel(ctk.CTkFrame):
         self._sl_end = ctk.CTkSlider(self._trim_frame, from_=0, to=1,
                                      variable=self.app_state.v_trim_end,
                                      command=self._on_end_drag)
-        self._sl_end.grid(row=2, column=1, sticky="ew", padx=4, pady=(2, 8))
+        self._sl_end.grid(row=2, column=1, sticky="ew", padx=4, pady=(2, 6))
         self._lbl_end = ctk.CTkLabel(self._trim_frame, text="0.0 s", width=54,
                                      font=ctk.CTkFont(size=11))
         self._lbl_end.grid(row=2, column=2, padx=4)
@@ -325,26 +348,10 @@ class PreviewPanel(ctk.CTkFrame):
                       ).grid(row=1, column=3, rowspan=2, padx=(4, 10))
         self._trim_frame.grid_remove()
 
-        # Diagnosis frame
-        self._diagnosis_frame = ctk.CTkFrame(pf, fg_color="#1a1a2e", corner_radius=6)
-        self._diagnosis_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(4, 8))
-        self._diagnosis_frame.grid_columnconfigure(1, weight=1)
-        self._lbl_score = ctk.CTkLabel(self._diagnosis_frame, text="",
-                                       font=ctk.CTkFont(size=18, weight="bold"))
-        self._lbl_score.grid(row=0, column=0, padx=12, pady=10)
-        self._lbl_reasons = ctk.CTkLabel(self._diagnosis_frame, text="",
-                                         justify="left", anchor="w")
-        self._lbl_reasons.grid(row=0, column=1, sticky="w", padx=10)
-        self._diagnosis_frame.grid_remove()
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  ACTIONS SECTION  (convert / batch / stop)
-    # ══════════════════════════════════════════════════════════════════════════
-
-    def _build_actions_section(self, parent):
-        af = ctk.CTkFrame(parent, fg_color="#0d1420", corner_radius=8,
+        # Action section
+        af = ctk.CTkFrame(outer, fg_color="#0d1420", corner_radius=8,
                           border_width=1, border_color="#1a3a2a")
-        af.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 8))
+        af.grid(row=2, column=0, sticky="ew", pady=(0, 4))
         af.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -417,14 +424,15 @@ class PreviewPanel(ctk.CTkFrame):
         )
         self._btn_stop.grid(row=5, column=0, padx=4, pady=(2, 6), sticky="ew")
 
-    def _compute_led_sim_display_size(self):
+    def _compute_led_sim_display_size(self, max_w=None):
         try:
             w, h = self._get_target_dims()
-            
         except Exception:
             w, h = 128, 32
+            
+        max_width = max_w if max_w else LED_SIM_MAX_W
         scale = int(LED_SIM_SCALE)
-        while w * scale > LED_SIM_MAX_W and scale > 2:
+        while w * scale > max_width and scale > 2:
             scale -= 1
         return int(w * scale), int(h * scale), scale
 
@@ -446,12 +454,22 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _get_final_canvas_size(self):
         w, h = self._get_target_dims()
+        
+        available_w = self.winfo_width()
+        MAX_W = max(200, available_w - 60) if available_w > 10 else 512
+        MAX_H = 160
+        
         led = getattr(self.app_state, "v_led_sim", None)
         if led and led.get():
-            dw, dh, _ = self._compute_led_sim_display_size()
+            dw, dh, _ = self._compute_led_sim_display_size(max_w=MAX_W)
         else:
-            dw, dh = int(w * DMD_DISPLAY_SCALE_FACTOR), int(h * DMD_DISPLAY_SCALE_FACTOR)
-        MAX_W, MAX_H = 512, 160
+            # Use the same max bounds so toggling LED Sim doesn't cause a massive jump
+            scale_w = MAX_W / max(1, w)
+            scale_h = MAX_H / max(1, h)
+            # Cap scale to 6x so it doesn't get ridiculously large on huge monitors
+            s = min(scale_w, scale_h, 6.0)
+            dw, dh = int(w * s), int(h * s)
+
         if dw > MAX_W or dh > MAX_H:
             s = min(MAX_W / dw, MAX_H / dh)
             dw, dh = int(dw * s), int(dh * s)
@@ -756,6 +774,9 @@ class PreviewPanel(ctk.CTkFrame):
                 src, cfg
             )
             
+            if msg:
+                self._log(f"[ACTION] {os.path.basename(src)} — {msg}", "info")
+            
             self.after(0, lambda: self._conv_progress.stop())
             self.after(0, lambda: self._conv_progress.configure(mode="determinate"))
             self.after(0, lambda: self._conv_progress.set(0))
@@ -799,7 +820,8 @@ class PreviewPanel(ctk.CTkFrame):
         self._auto_frames = [None] * len(pil_frames)
         self._auto_delays = delays
         self._auto_idx = 0
-        self._auto_info.configure(text=f"{msg}  ·  {len(pil_frames)} frames")
+        summary_line = msg.split('\n')[-1] if msg else "Auto action complete"
+        self._auto_info.configure(text=f"{summary_line}  ·  {len(pil_frames)} frames")
         self._animate_auto()
         self._flush_auto_pending()
         

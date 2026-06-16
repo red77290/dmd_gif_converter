@@ -3,11 +3,20 @@
 ## [V7.0.0] - 2026-06-13
 
 ### Modifié
+- **🚀 Restauration du Multithreading Massif** : La conversion de masse (batch processing) utilise de nouveau un pool de workers (`concurrent.futures.ThreadPoolExecutor`), réduisant massivement le temps de traitement pour les gros répertoires.
+- **🚀 Allocation Intelligente des Cœurs (Auto-Workers)** : Par défaut, l'application analyse désormais votre processeur et réserve une marge de sécurité (`max(1, min(16, os.cpu_count() // 2))`) pour empêcher le PC de figer pendant les lourdes conversions.
 - **🚀 Optimisation de l'UX des conversions parallèles** : Résolution d'un problème d'affichage où les conversions en parallèle (dossier ou liste) semblaient s'exécuter de manière séquentielle, car le prétraitement OpenCV/YOLO s'exécutait en arrière-plan sans retour visuel. Ajout de rapports de progression image par image via un callback dans `preprocess_video_for_dmd` et correction d'une incohérence de signature dans `ConversionController`.
 - **🚀 Correction du profil `FIGHTING_2D`** : Restauration de `fighting_2d` avec l'activation de `platformer_mode=True` pour éliminer le bug d'ancrage de la caméra. Les jeux de combat restent désormais cloués au sol comme les jeux de plateforme.
 - **🚀 Résolution du bug de ciblage de plateforme** : Le profil `platformer` ignore désormais les blocs flottants (fausses détections géantes), tandis que le profil `fighting_2d` décale naturellement la caméra vers le haut pour garantir que la tête des personnages géants reste visible. La matrice de scoring différencie désormais parfaitement les deux genres.
 - **🚀 Protection contre les faux plafonds** : YOLO ne peut plus confondre les blocs du plafond avec le joueur. Le détecteur rejette désormais les détections dans les 40% supérieurs de l'écran lors de l'initialisation du sol, et ignore les sauts verticaux impossibles (>50% de l'écran).
 - **🚀 Faux positifs `WIDE_SHOT` corrigés** : Les jeux avec une caméra de suivi parfaite (variance quasi-nulle) ne sont plus pénalisés et pris à tort pour des plans larges cinématiques ou des menus statiques.
+- **🚀 Parité Globale des Logs** : Intégration d'un système de log unifié via `EventBus` qui réplique parfaitement les logs terminaux dans l'UI `LogConsole` (y compris les décisions internes de l'Auto-Action) en temps réel.
+- **🚀 Cache des Décisions (Bypass)** : L'application récupère désormais correctement le fichier `_decision.json` préexistant lors du bypass d'une vidéo déjà traitée, affichant la matrice de décision dans la console sans avoir besoin de relancer l'inférence YOLO.
+- **🚀 UI Log Console Améliorée** : La console de log intégrée dans l'interface est désormais 3 fois plus grande par défaut (hauteur augmentée de 90px à 250px) pour une meilleure lisibilité.
+- **🚀 Correction Zoom LED (Simulateur)** : Résolution d'un saut de taille ("zoom in") indésirable sur la prévisualisation vidéo lors de l'activation/désactivation du mode LED Simulator.
+- **🚀 Bug de Performance AI Moments (YOLO)** : Correction d'une régression du moteur Scoring V2 où le détecteur YOLO était exécuté sur toutes les frames même lorsque l'option "Character" était désactivée, ralentissant l'extraction. La vitesse a été restaurée x10.
+- **🚀 AI Moments Progress Bar** : Ajout d'une barre de progression ASCII (`[█████████-------] 50%`) propre dans les logs de l'UI pour suivre l'extraction temporelle tous les 5% sans spammer la console.
+- **🚀 Protection Crash Tkinter (AI Moments)** : Sécurisation de la mise à jour de la progression asynchrone pour éviter un crash `_tkinter.TclError` si l'utilisateur ferme la popup AI Moments en cours de route.
 
 ## [7.0.0] - Architecture & Performances (V7)
 - **🚀 Architecture Refactorisée (MVC)** : Découpage complet du monolithe `preview_panel.py` vers un modèle MVC propre avec `main_panel.py` et des contrôleurs dédiés (`SourceController`, `AutoController`, `DmdController`). Cela améliore la maintenance sans impacter l'expérience utilisateur.

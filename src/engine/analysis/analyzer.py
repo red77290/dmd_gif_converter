@@ -12,7 +12,7 @@ class VideoAnalyzer:
         self.cfg = cfg
         
         # Output dimensions
-        self.out_w = frame_w
+        self.out_w = max(2, int(round(frame_w / 2.0)) * 2)
         target_aspect_ratio = float(cfg.target_width) / cfg.target_height
         self.out_h = max(8, int(round(frame_w / target_aspect_ratio / 2)) * 2)
         
@@ -30,7 +30,7 @@ class VideoAnalyzer:
         self.smart_reasons: List[str] = []
         self.scoreboard: List[str] = []
         
-    def analyze(self, cap) -> None:
+    def analyze(self, src_path: str) -> None:
         """Runs smart/auto crop analysis and updates configuration variables."""
         _auto_bc = getattr(self.cfg, "auto_bottom_crop", False)
         _auto_tc = getattr(self.cfg, "auto_top_crop", False)
@@ -46,7 +46,7 @@ class VideoAnalyzer:
         
         if _smart or _auto_str or _auto_sm or _auto_pillarbox or _auto_scene:
             try:
-                _decision = _smart_auto_crop_decision(cap, self.cfg, self.frame_w, self.frame_h)
+                _decision = _smart_auto_crop_decision(src_path, self.cfg, self.frame_w, self.frame_h)
                 
                 if _smart:
                     _auto_bc                  = _decision["auto_bottom_crop"]
@@ -96,7 +96,7 @@ class VideoAnalyzer:
                     detector_for_scan = _FrameDetector()
                     computed_top, computed_bottom, self.face_priority_mode = \
                         _compute_auto_crop_margins(
-                            cap, detector_for_scan, self.cfg, self.frame_w, self.frame_h
+                            src_path, detector_for_scan, self.cfg, self.frame_w, self.frame_h
                         )
                 if _auto_tc:
                     self.tcp = computed_top

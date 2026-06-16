@@ -230,7 +230,10 @@ class ActionsPanel(ctk.CTkFrame):
         import concurrent.futures
         self.after(0, lambda: self._set_busy(True))
         total = len(tasks)
-        max_workers = int(params.get("max_workers", 2))
+        max_workers = int(params.get("max_workers", 0))
+        if max_workers <= 0:
+            import os as _os
+            max_workers = max(1, min(16, (_os.cpu_count() or 4) // 2))
         self.after(0, lambda w=max_workers: self._log(f"🚀  Convert all: {total} files using {w} workers..."))
         
         done_count = [0]

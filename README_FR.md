@@ -14,7 +14,7 @@ Marre de recadrer manuellement vos vidéos pour votre matrice LED basse résolut
 - **🎥 Caméra Cinématique par IA** : Utilise YOLOv8 pour suivre les sujets, effectuer des panoramiques dynamiques et recadrer intelligemment le sol et le plafond afin de garder l'action centrée.
 - **🎨 Smart Color Boost** : Détecte automatiquement les scènes sombres ou délavées et injecte la quantité parfaite de luminosité, de contraste et de saturation pour que vos GIFs soient éclatants.
 - **🧠 Matrice de Score Continue** : Évalue intelligemment chaque scène (Platformer, Talking Closeup, Action) pour sélectionner le profil de caméra parfait sans aucune intervention manuelle.
-- **⚡ Accélération Matérielle** : Détecte et utilise automatiquement les encodeurs matériels (VideoToolbox sur macOS, NVENC/QSV/AMF sur Windows/Linux) pour accélérer le traitement vidéo jusqu'à 4x.
+- **⚡ Accélération Matérielle & Multithreading** : Détecte et utilise automatiquement les encodeurs matériels (VideoToolbox sur macOS, NVENC/QSV/AMF sur Windows/Linux) et exploite toute la puissance de votre processeur (auto-workers intelligents) pour accélérer le traitement vidéo massif jusqu'à 10x.
 - **🪄 Magie du Texte** : Ajoutez des superpositions de texte en pixel-art avec des animations intégrées (défilement, clignotement) directement sur vos vidéos.
 
 > **Curieux de savoir ce qui a changé récemment ?** Consultez le [Journal des mises à jour (Changelog)](docs/CHANGELOG_FR.md).

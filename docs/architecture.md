@@ -354,7 +354,7 @@ classDiagram
 
     class VideoReader {
         -src_path: str
-        -cap: VideoCapture
+        -reader: FFmpegPipeReader
         +fps: float
         +frame_w: int
         +frame_h: int
@@ -572,7 +572,7 @@ sequenceDiagram
 
 ### 6.2 The Tracking Engine Pipeline (Async/Queue)
 
-The processing loop `preprocess_video_for_dmd` utilizes a Producer-Consumer threading pattern with `queue.Queue`. It separates video file reading (`cv2.VideoCapture`), frame analysis/tracking (YOLO + scoring + tracking), and encoding (`ffmpeg`) into distinct threads. This eliminates the I/O bottleneck where tracking was stalling during I/O blocking. (AI Framing)
+The processing loop `preprocess_video_for_dmd` utilizes a Producer-Consumer threading pattern with `queue.Queue`. It separates video file reading (`FFmpegPipeReader`), frame analysis/tracking (YOLO + scoring + tracking), and encoding (`ffmpeg`) into distinct threads. This eliminates the I/O bottleneck where tracking was stalling during I/O blocking. (AI Framing)
 
 This is the core of the system — a 3-phase loop that produces an intermediary MP4 at the source's native resolution, with the AI-controlled camera already applied.
 
@@ -644,7 +644,7 @@ sequenceDiagram
     participant VA as VideoAnalyzer
     participant SC as _SceneClassifier
     participant DET as _FrameDetector
-    participant CAP as VideoCapture
+    participant CAP as FFmpegPipeReader
 
     VA->>SC: analyze(cap, cfg, frame_w, frame_h)
     SC->>DET: DetectorFactory.create()
@@ -924,7 +924,7 @@ PYTHONPATH=. pytest tests/ -v
 **Mocking strategy:**
 
 Because the Auto Action layer uses subprocesses and OpenCV, tests rely on:
-- `unittest.mock.patch("cv2.VideoCapture")` — fake video source
+- `unittest.mock.patch("FFmpegPipeReader")` — fake video source
 - `unittest.mock.patch("src.auto_action.writer.subprocess.Popen")` — fake FFmpeg output pipe
 - `unittest.mock.patch("src.auto_action.reader.subprocess.run")` — fake GIF pre-conversion
 - `unittest.mock.patch("src.auto_action.detector._FrameDetector.detect")` — fake YOLO output
@@ -1019,8 +1019,8 @@ The converter injects OS-specific hardware encoders into the FFmpeg pipeline dyn
 - NVIDIA: `h264_nvenc`
 - Intel: `h264_qsv`
 
-### 12.2 Global Thread Safety (`SafeVideoCapture`)
-OpenCV's `cv2.VideoCapture` is fundamentally unsafe when multiple threads instantiate it simultaneously (causing `SIGABRT` / `SIGSEGV` on macOS). The system uses a globally patched `SafeVideoCapture` with a strict `threading.Lock` to serialize video demuxing.
+### 12.2 Global Thread Safety (`FFmpegPipeReader`)
+OpenCV's `FFmpegPipeReader` is fundamentally unsafe when multiple threads instantiate it simultaneously (causing `SIGABRT` / `SIGSEGV` on macOS). The system uses a globally patched `FFmpegPipeReader` with a strict `threading.Lock` to serialize video demuxing.
 
 ### 12.3 Thread Pooling Caps
 Deep Learning inference (YOLO / ONNX) will cannibalize all CPU cores if unbound, leading to GUI freezes during batch processing. The `onnxruntime` sessions are strictly capped globally (`intra_op_num_threads=2`, `inter_op_num_threads=1`).

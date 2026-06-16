@@ -23,8 +23,10 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)-7s] [UI] %(message)s",
     datefmt="%H:%M:%S",
-    filename=str(log_file),
-    filemode="w",
+    handlers=[
+        logging.FileHandler(str(log_file), mode='w'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
 

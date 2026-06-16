@@ -58,6 +58,8 @@ class ConversionController(IController):
     def _run_conversion(self, files: Optional[list]) -> None:
         """Background worker that calls the converter for each file."""
         from src.engine.conversion.core import process_file
+        import concurrent.futures
+        import os
 
         if self._model is None:
             return
@@ -66,48 +68,50 @@ class ConversionController(IController):
         output_dir = self._model.get("v_output_dir", "")
         trim_start = self._model.get("v_trim_start", 0.0)
         trim_end   = self._model.get("v_trim_end", 0.0)
+        
+        v_auto_workers = self._model.get("v_auto_workers", True)
+        if v_auto_workers:
+            max_workers = max(1, min(16, (os.cpu_count() or 4) // 2))
+        else:
+            max_workers = max(1, self._model.get("v_max_workers", 4))
 
         files = files or []
         
         from src.engine.conversion.services.job_expander import expand_conversion_jobs
         jobs = expand_conversion_jobs(files, params)
         total_jobs = len(jobs)
+        
+        completed_jobs = 0
 
-        for i, (iid, src_path, job_params, suffix) in enumerate(jobs):
+        def process_single_job(i, iid, src_path, job_params, suffix):
             if self._cancel_flag:
-                logger.info("Conversion cancelled at job %d/%d", i + 1, total_jobs)
-                break
-
+                return iid, False, "Cancelled", out_path if 'out_path' in locals() else None
+                
             import os
             from pathlib import Path
             filename = os.path.basename(src_path)
             
-            # Apply suffix if we have one (e.g. _top1 from auto-cutter)
             base_name = Path(filename).stem
             if suffix:
                 base_name += suffix
             out_name = base_name + ".gif"
             
-            out_path = os.path.join(output_dir, out_name) if output_dir else \
-                       os.path.join(os.path.dirname(src_path), "dmd_out", out_name)
+            out_path = os.path.join(output_dir, out_name) if output_dir else                        os.path.join(os.path.dirname(src_path), "dmd_out", out_name)
 
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
             start_s = job_params.get("trim_start")
             end_s   = job_params.get("trim_end")
             
-            # Fallback to model values if not in job_params explicitly
             if start_s is None: start_s = trim_start if trim_start > 0 else None
             if end_s is None:   end_s   = trim_end   if trim_end   > 0 else None
 
             def _callback(msg: str, level: str = "info") -> None:
                 if self._view:
-                    # Pass the message to the view
                     self._view.after(0, lambda m=msg, l=level: getattr(self._view, "_log")(m, l))
                 else:
                     getattr(logger, level)(msg)
 
-            # Pre-processing for Auto Action
             pre_src = src_path
             tmpdir = None
             auto_action_was_enabled = job_params.get("auto_action_enabled", False)
@@ -138,13 +142,28 @@ class ConversionController(IController):
                 import shutil
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
-            if self._view:
-                if success:
-                    self._view.after(0, lambda p=out_path, _id=iid: self._view.on_conversion_success(p, _id))
-                else:
-                    self._view.after(0, lambda e=msg, _id=iid: self._view.on_conversion_error(e, _id))
-                # Update progress based on jobs
-                self._view.after(0, lambda c=i+1, t=total_jobs: self._view.on_conversion_progress(c, t))
+            return iid, success, msg, out_path
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for i, (iid, src_path, job_params, suffix) in enumerate(jobs):
+                futures.append(executor.submit(process_single_job, i, iid, src_path, job_params, suffix))
+            
+            for future in concurrent.futures.as_completed(futures):
+                if self._cancel_flag:
+                    break
+                try:
+                    iid, success, msg, out_path = future.result()
+                    if self._view:
+                        if success:
+                            self._view.after(0, lambda p=out_path, _id=iid: self._view.on_conversion_success(p, _id))
+                        else:
+                            self._view.after(0, lambda e=msg, _id=iid: self._view.on_conversion_error(e, _id))
+                        
+                        completed_jobs += 1
+                        self._view.after(0, lambda c=completed_jobs, t=total_jobs: self._view.on_conversion_progress(c, t))
+                except Exception as e:
+                    logger.error(f"Job failed: {e}", exc_info=True)
 
         if self._view:
             self._view.after(0, self._view.on_conversion_finished)

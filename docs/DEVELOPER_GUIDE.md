@@ -15,30 +15,30 @@ The codebase is divided into two main domains:
 ### The 3 Core Layers
 
 #### 1. The Model Layer (`src/ui/models/`)
-The `ApplicationState` acts as the single source of truth for the UI. It stores all user preferences, slider values, and toggles using `tkinter.Variable` objects. The UI panels observe these variables, and the conversion engine reads them when a task starts.
+The `ApplicationState` acts as the single source of truth for the UI. It stores all user preferences, slider values, and toggles using `tkinter.Variable` objects. The UI panels observe these variables, and the controllers read them when a task starts.
 
 #### 2. The Engine Layer (`src/engine/`)
 This is where the magic happens. It is subdivided into:
-- **`conversion/`**: Handles the FFmpeg command building (`core.py`) and execution. It uses hardware acceleration (`hardware_accel.py`) and evaluates GIF quality (`quality.py`).
-- **`auto_action/`**: Contains the YOLOv8 and OpenCV pipeline (`pipeline.py`). It uses a strict interface-driven approach:
-  - `IDetector`: Runs the YOLO ONNX model.
+- **`conversion/`**: Handles the FFmpeg command building (`core.py`) and execution. It uses hardware acceleration (`hardware_accel.py`) and utilizes massive multithreading via `concurrent.futures.ThreadPoolExecutor` for parallel processing.
+- **`auto_action/`**: Contains the YOLOv8 and FFmpegPipeReader pipeline (`pipeline.py`). It uses a strict interface-driven approach:
+  - `IDetector`: Runs the YOLO ONNX model (now using dynamic threads depending on batch vs standalone execution).
   - `ITracker`: Handles subject smoothing, zooming, and bounding box logic.
-  - `IRenderer`: Crops the frames and handles the background subtraction / black padding.
+  - `IRenderer`: Crops the frames using fast resizing instead of heavy OpenCV operations.
 
-#### 3. The Event Bus (`src/ui/events/event_bus.py`)
-Because the Engine runs in background threads and the UI runs in the main thread, they communicate via the `EventBus`. The Engine emits events (e.g., `CONVERSION_PROGRESS`, `CONVERSION_COMPLETED`), and the UI subscribes to these events to update progress bars, log consoles, and lists asynchronously.
+#### 3. The Controllers (`src/ui/controllers/`)
+Instead of an Event Bus, the UI is decoupled from the engine through Controllers (`ConversionController`, `AutoController`, `SourceController`). The UI sends user actions to the controllers, which then spawn background threads to communicate with the Engine.
 
 ---
 
 ## 🚦 Application Flow (How a Conversion Works)
 
 1. **User Action**: The user clicks "Convert All" in the `LeftPanel`.
-2. **Event Dispatch**: The UI emits a `CONVERSION_START_REQUESTED` event.
-3. **App Controller**: The `app.py` catches this event and spawns a background `threading.Thread`.
-4. **Engine Execution**: The background thread calls `process_file()` in `src/engine/conversion/core.py`.
-5. **AI Processing**: If Auto-Action is enabled, `core.py` first calls the `auto_action/pipeline.py` to generate an intermediate cropped `.mp4` file.
+2. **Controller Dispatch**: The UI triggers `ConversionController.on_action("convert_all")`.
+3. **Multithreading**: The controller spawns a `concurrent.futures.ThreadPoolExecutor` based on the user's CPU core count (`max(1, min(16, os.cpu_count() // 2))`).
+4. **Engine Execution**: The worker pool calls `process_file()` in `src/engine/conversion/core.py` concurrently for multiple files.
+5. **AI Processing**: If Auto-Action is enabled, `core.py` first calls the `auto_action/pipeline.py` which spawns `FFmpegPipeReader` for non-blocking I/O video decoding.
 6. **FFmpeg Encoding**: `core.py` builds the complex FFmpeg `-filter_complex` string based on the `ApplicationState` (colorimetry, zoom, pixel-art text) and executes it.
-7. **Updates**: Throughout the process, the Engine logs its state. The `app.py` receives these logs via Virtual Events (`<<LogEvent>>`) and updates the UI safely.
+7. **Updates**: Throughout the process, the Engine triggers callbacks passed by the Controller, which then safely updates the UI using `widget.after(0, ...)`.
 
 ---
 

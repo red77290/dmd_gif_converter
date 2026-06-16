@@ -23,12 +23,16 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         parent = self
         
         def adv_slider(par, label, var, from_, to, fmt="{:.2f}", suffix="",
-                       steps=None, is_int=False):
+                       steps=None, is_int=False, tooltip_text=None):
             f = ctk.CTkFrame(par, fg_color="transparent")
             f.pack(fill="x", padx=10, pady=2)
             f.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(f, text=label, width=145, anchor="w",
-                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+            lbl = ctk.CTkLabel(f, text=label, width=145, anchor="w",
+                         font=ctk.CTkFont(size=12))
+            lbl.grid(row=0, column=0, padx=(4, 6))
+            if tooltip_text:
+                from src.ui.widgets import ToolTip
+                ToolTip(lbl, tooltip_text)
             kw = dict(from_=from_, to=to, variable=var)
             if steps is not None:
                 kw["number_of_steps"] = steps
@@ -90,6 +94,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
         )
         self._cb_auto_action_enabled.pack(side="left")
+        ToolTip(self._cb_auto_action_enabled, "Master switch for Cinematic Auto-Framing.\nUses YOLO AI to track the subject and dynamically frame the 128x32 view.")
         self.app_state.lmh_widgets.append(self._cb_auto_action_enabled)
         _b1 = _InfoBadge(auto_row)
         _b1.configure(text="Applies automatic cinematic camera panning and zooming to focus on the action.\n(Forced ON when Let me handle it is active)")
@@ -148,13 +153,15 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
         )
         self._cb_dmd_readability_score_enabled.pack(side="left", padx=(10, 0))
+        ToolTip(self._cb_dmd_readability_score_enabled, "Limits automatic zooms based on the resulting image's visibility and readability on a DMD display.\nPrevents zooming into blurry messes.")
         _add_dep(self._cb_dmd_readability_score_enabled)
         _b2 = _InfoBadge(row_frame)
         _b2.configure(text="Limits automatic zooms based on the resulting image's visibility and readability on a DMD display.\n(Forced ON when Let me handle it is active)")
         _b2.pack(side="left", padx=(0, 8))
 
         self._slider_action_strength = adv_slider(parent, "Action strength", self.app_state.v_action_strength, 0.0, 1.0,
-                   "{:.2f}", "", steps=100)
+                   "{:.2f}", "", steps=100,
+                   tooltip_text="How aggressively the camera tracks the subject.\n0.0 = Very loose tracking (camera barely moves).\n1.0 = Very tight tracking (camera locks onto subject).")
         _add_dep(self._slider_action_strength)
                    
         strength_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -166,6 +173,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_strength.pack(side="left")
+        ToolTip(self._cb_auto_strength, "Automatically determines tracking strength based on scene content.\nOverrides the manual Action strength slider.")
         _add_dep(self._cb_auto_strength)
         
         def _toggle_auto_strength(*_):
@@ -174,7 +182,8 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         self.app_state.v_action_auto_strength.trace_add("write", _toggle_auto_strength)
 
         self._slider_action_smoothness = adv_slider(parent, "Camera smooth", self.app_state.v_action_smoothness, 0.0, 0.98,
-                   "{:.2f}", "", steps=98)
+                   "{:.2f}", "", steps=98,
+                   tooltip_text="Adds inertia to camera movements to prevent motion sickness.\n0.0 = No smoothing (instant jump cuts).\n0.98 = Maximum cinematic smoothing (very slow camera pans).")
         _add_dep(self._slider_action_smoothness)
                    
         smoothness_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -186,6 +195,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_smoothness.pack(side="left")
+        ToolTip(self._cb_auto_smoothness, "Automatically determines camera smoothness based on scene content.\nOverrides the manual Camera smooth slider.")
         _add_dep(self._cb_auto_smoothness)
 
         def _toggle_auto_smoothness(*_):
@@ -194,19 +204,23 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         self.app_state.v_action_auto_smoothness.trace_add("write", _toggle_auto_smoothness)
 
         _add_dep(adv_slider(parent, "Zoom max", self.app_state.v_action_zoom_max, 1.0, 3.0,
-                   "{:.2f}", "×", steps=100))
+                   "{:.2f}", "×", steps=100,
+                   tooltip_text="The absolute maximum zoom multiplier allowed.\nPrevents the camera from zooming in too much and degrading video quality.\n3.0x means the image can be magnified up to 300%."))
         
         pad_sl = adv_slider(parent, "ROI padding", self.app_state.v_action_padding, 0.0, 0.6,
-                   "{:.2f}", "", steps=60)
+                   "{:.2f}", "", steps=60, 
+                   tooltip_text="Adds extra space (margin) around the tracked subject.\n0.0 = No margin (subject touches the screen edges).\n0.20 = Adds 20% breathing room around the subject.")
         self._action_dependent_widgets.append(pad_sl)
         
         intro_sl = adv_slider(parent, "Intro panoramic", self.app_state.v_action_intro_duration, 0.0, 5.0,
-                   "{:.1f}", " s", steps=50)
+                   "{:.1f}", " s", steps=50,
+                   tooltip_text="Wait a few seconds before zooming in on the subject.\nUseful for establishing context (showing the full wide scene) before the action starts.")
         self._action_dependent_widgets.append(intro_sl)
                    
         # Fast Tracking / Subsampling (not disabled by Let Me Handle It)
         self._slider_subsample = adv_slider(parent, "Fast Tracking (Speedup)", self.app_state.v_action_subsample_frames, 1, 10,
-                   "{:.0f}", " frames", steps=9)
+                   "{:.0f}", " frames", steps=9,
+                   tooltip_text="Performance optimization. Skips AI detection on X frames out of X.\nExample: 3 means AI runs 3x faster with almost no visual penalty since frames are interpolated.")
         subsample_row = ctk.CTkFrame(parent, fg_color="transparent")
         subsample_row.pack(fill="x", padx=14, pady=(0, 4))
         _b_sub = _InfoBadge(subsample_row)
@@ -227,6 +241,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12, weight="bold"), text_color="#88ddff",
         )
         self._cb_smart_auto_crop.pack(side="left")
+        ToolTip(self._cb_smart_auto_crop, "Automatically analyzes the scene to optimize bottom crop, top crop, and floor tracking.")
         _add_dep(self._cb_smart_auto_crop)
         _b3 = _InfoBadge(smart_row)
         _b3.configure(text="Automatically analyzes the scene to optimize bottom crop, top crop, and floor tracking.\n(Forced ON when Let me handle it is active)")
@@ -245,6 +260,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             width=200,
         )
         self._scene_type_menu.pack(side="left")
+        ToolTip(self._scene_type_menu, "Forces a specific content profile.\nChanges how the AI expects the subject to move (e.g. Platformer vs Fighting game).")
         _add_dep(self._scene_type_menu)
 
         scene_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -256,6 +272,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_scene_type.pack(side="left")
+        ToolTip(self._cb_auto_scene_type, "Automatically detects the type of content (e.g., Platformer, Talking Closeup) and applies optimal heuristics.")
         _add_dep(self._cb_auto_scene_type)
 
         def _toggle_auto_scene_type(*_):
@@ -273,6 +290,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_dynamic_scene.pack(side="left")
+        ToolTip(self._cb_dynamic_scene, "Detects camera cuts and scene changes to instantly reset tracking, preventing slow pans across completely different scenes.")
         self.app_state.lmh_widgets.append(self._cb_dynamic_scene)
         _add_dep(self._cb_dynamic_scene)
 
@@ -285,10 +303,12 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_pillarbox.pack(side="left")
+        ToolTip(self._cb_auto_pillarbox, "Automatically detects and crops out black bars on the sides of the video (pillarboxing) to improve tracking accuracy.")
         _add_dep(self._cb_auto_pillarbox)
 
         self._slider_bottom_crop = adv_slider(parent, "Bottom crop (%)", self.app_state.v_action_bottom_crop_pct, 0.0, 0.5,
-                   "{:.0%}", "", steps=50)
+                   "{:.0%}", "", steps=50,
+                   tooltip_text="Ignores the bottom X% of the video when detecting subjects.\nUseful for hiding UI elements, subtitles, or static HUDs in games.")
         _add_dep(self._slider_bottom_crop)
         bottom_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
         bottom_auto_row.pack(fill="x", padx=14, pady=(0, 2))
@@ -299,6 +319,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_bottom_crop.pack(side="left")
+        ToolTip(self._cb_auto_bottom_crop, "Automatically hides the bottom UI/HUD of games by detecting static text and health bars.")
         _add_dep(self._cb_auto_bottom_crop)
 
         def _toggle_auto_bottom_crop(*_):
@@ -308,7 +329,8 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         self.app_state.v_action_auto_bottom_crop.trace_add("write", _toggle_auto_bottom_crop)
 
         self._slider_top_crop = adv_slider(parent, "Top crop (%)", self.app_state.v_action_top_crop_pct, 0.0, 0.5,
-                   "{:.0%}", "", steps=50)
+                   "{:.0%}", "", steps=50,
+                   tooltip_text="Ignores the top X% of the video when detecting subjects.\nUseful for hiding upper HUD elements or sky/ceiling areas.")
         _add_dep(self._slider_top_crop)
         top_auto_row = ctk.CTkFrame(parent, fg_color="transparent")
         top_auto_row.pack(fill="x", padx=14, pady=(0, 2))
@@ -319,6 +341,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_top_crop.pack(side="left")
+        ToolTip(self._cb_auto_top_crop, "Automatically hides the top UI/HUD of games or irrelevant sky areas.")
         _add_dep(self._cb_auto_top_crop)
 
         def _toggle_auto_top_crop(*_):
@@ -328,7 +351,8 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         self.app_state.v_action_auto_top_crop.trace_add("write", _toggle_auto_top_crop)
 
         self._slider_vertical_bias = adv_slider(parent, "Vertical bias", self.app_state.v_action_vertical_bias, -1.0, 1.0,
-                   "{:.2f}", "", steps=100)
+                   "{:.2f}", "", steps=100,
+                   tooltip_text="Shifts the camera center vertically without altering the zoom level.\n-1.0 = Pan camera up (focus on sky/ceiling).\n+1.0 = Pan camera down (focus on floor/feet).")
         _add_dep(self._slider_vertical_bias)
 
         auto_floor_row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -340,6 +364,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#ffe08a",
         )
         self._cb_auto_floor.pack(side="left")
+        ToolTip(self._cb_auto_floor, "Automatically detects the floor/ground level and biases the camera downwards to keep the subject's feet visible.")
         _add_dep(self._cb_auto_floor)
 
         def _toggle_auto_floor(*_):

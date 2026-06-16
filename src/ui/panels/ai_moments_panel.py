@@ -553,6 +553,9 @@ class AiMomentsPanel(ctk.CTkFrame):
         self.after(100, lambda: self._on_ai_analysis_complete(results))
 
     def _update_ai_progress(self, task_name: str, progress: float):
+        if not hasattr(self, '_ai_progress_bar') or not self._ai_progress_bar.winfo_exists():
+            return
+            
         self._ai_progress_bar.set(progress)
         self._ai_progress_lbl.configure(text=f"{int(progress * 100)}%")
         

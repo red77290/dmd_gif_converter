@@ -1,6 +1,8 @@
 # DMD GIF Converter — Changelog
 
 ## [7.0.0] - Architecture & Performances (V7)
+- **🚀 Restored Massive Multithreading**: The batch conversion mode once again uses a worker pool (`concurrent.futures.ThreadPoolExecutor`), massively reducing processing time for large directories.
+- **🚀 Intelligent Core Allocation (Auto-Workers)**: By default, the application now profiles your CPU and reserves a safety margin (`max(1, min(16, os.cpu_count() // 2))`) to prevent the PC from freezing during heavy conversions.
 - **🚀 Hardware Acceleration**: Auto-detection and injection of hardware encoders (`h264_videotoolbox` for macOS Apple Silicon, `h264_nvenc` for NVIDIA, `h264_qsv` for Intel) via `hardware_accel.py`, drastically improving H.264 encoding speeds.
 - **🚀 Fixed OpenCV macOS Crash**: Resolved a critical `SIGABRT`/`SIGSEGV` crash when using `cv2.VideoCapture` with multiple threads (8 workers) by implementing a `SafeVideoCapture` monkey patch with global `threading.Lock`.
 - **🚀 ONNX Threading Exhaustion**: Capped the global number of threads used by `onnxruntime` (`intra_op_num_threads=2`, `inter_op_num_threads=1`) to prevent CPU starvation and system freezes during "Convert All" batch mode.
@@ -24,7 +26,14 @@
 - **🚀 Fixed `FIGHTING_2D` Scene Profile**: Restored `fighting_2d` and added `platformer_mode=True` to eliminate the flooring bug that previously caused fighting games to lose the floor. 
 - **🚀 Fixed Platformer Flooring Bug**: The `platformer` profile now explicitly ignores floating blocks (which falsely created huge bounding boxes), while the `fighting_2d` profile natively shifts the camera up to protect huge character heads. The two genres are now perfectly differentiated in the scoring matrix.
 - **🚀 Fixed Ceiling Pareidolia**: YOLO's tendency to mistake ceiling blocks for players in platformers is now blocked. The detector actively rejects tracking boxes in the upper 40% of the screen when establishing an initial floor, and rejects sudden 50% vertical jumps when a floor is already established.
-- **🚀 Fixed `WIDE_SHOT` False Positives**: Game characters that are perfectly centered by a follow-camera (having near-zero variance) are no longer misclassified as cinematic wide shots or static menus.
+- **🚀 `WIDE_SHOT` false positives fixed**: Games with a perfect tracking camera (near-zero variance) are no longer penalized and mistakenly taken for cinematic wide shots or static menus.
+- **🚀 Global Logs Parity**: Integrated a unified logging system via `EventBus` that perfectly replicates terminal logs in the UI `LogConsole` (including internal Auto-Action decisions) in real-time.
+- **🚀 Decision Cache (Bypass)**: The application now correctly retrieves the pre-existing `_decision.json` file when bypassing an already processed video, displaying the decision matrix in the console without needing to rerun YOLO inference.
+- **🚀 Improved UI Log Console**: The built-in log console is now 3x larger by default (height increased from 90px to 250px) for better readability.
+- **🚀 LED Simulator Zoom Fix**: Resolved an unwanted "zoom in" size jump on the video preview when toggling the LED Simulator mode.
+- **🚀 AI Moments Performance Bug (YOLO)**: Fixed a V2 Scoring Engine regression where the YOLO detector was executed on all frames even when the "Character" option was disabled, slowing down extraction. Speed restored x10.
+- **🚀 AI Moments Progress Bar**: Added a clean ASCII progress bar (`[█████████-------] 50%`) in the UI logs to track time extraction every 5% without spamming the console.
+- **🚀 Tkinter Crash Protection (AI Moments)**: Secured the async progress update to prevent a `_tkinter.TclError` crash if the user closes the AI Moments popup while background extraction is running.
 - **🏗️ Strict Type Safety**: Replaced primitive tuples with `NamedTuple` (`CamRect`, `BoundingBox`) to prevent cognitive errors with index positional access.
 - **🏗️ Component Composition**: Fully removed UI Mixins (God Object anti-pattern) in favor of strict Composition across all interface panels.
 - **⚡ Async I/O Pipeline**: Overhauled the `preprocess_video_for_dmd` pipeline to use a `queue.Queue` Producer/Consumer model, running OpenCV, YOLO, and FFmpeg in dedicated threads.

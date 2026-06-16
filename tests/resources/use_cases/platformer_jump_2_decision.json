@@ -1,10 +1,10 @@
 {
-  "task_id": "16D96",
+  "task_id": "DC917",
   "file_info": {
     "filename": "platformer_jump_2.gif",
     "video_width": 320,
     "video_height": 278,
-    "duration_frames": 27
+    "duration_frames": 29
   },
   "camera_params": {
     "strength": {
@@ -17,13 +17,13 @@
     }
   },
   "raw_signals": {
-    "tall_ratio": 1.075,
-    "fill_ratio": 0.30935251798561153,
-    "body_aspect": 1.72,
+    "tall_ratio": 1.1,
+    "fill_ratio": 0.31654676258992803,
+    "body_aspect": 1.76,
     "floor_in_lower": true,
-    "floor_var_score": 0.06665002870333396,
-    "x_variance": 0.06608342981734765,
-    "y_variance": 0.0019831341925403458
+    "floor_var_score": 0.032893068312541296,
+    "x_variance": 0.06552052674861497,
+    "y_variance": 0.0005711208549651241
   },
   "decisions": {
     "face_priority": {

@@ -58,7 +58,7 @@ _FACE_PRIORITY_H_RATIO: float = 0.80
 
 
 def _compute_auto_crop_margins(  # noqa: C901
-    cap,
+    src_path: str,
     detector,
     cfg,
     frame_w: int,
@@ -71,13 +71,14 @@ def _compute_auto_crop_margins(  # noqa: C901
     except ImportError:
         return 0.0, 0.0, False
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    if total_frames <= 0:
+    from src.engine.conversion.ffmpeg_utils import get_metadata
+    from src.engine.auto_action.reader import FFmpegPipeReader
+    
+    w, h, fps_orig, duration_s = get_metadata(src_path)
+    if not duration_s or duration_s <= 0:
         return 0.0, 0.0, False
 
-    # VNext Priority 7: Smart Auto Crop Optimizer
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    duration_s = total_frames / max(1.0, float(fps))
+    total_frames = int(duration_s * (fps_orig or 25.0))
     if duration_s < 10.0:
         sample_count = min(total_frames, int(duration_s * 5))
     elif duration_s < 60.0:
@@ -89,40 +90,36 @@ def _compute_auto_crop_margins(  # noqa: C901
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     dmd_crop_h   = frame_w / target_ratio
 
-    FACE_FRAC: float = 0.28
-
-    step = max(1, total_frames // sample_count)
     roi_tops: list[float]    = []
     roi_bottoms: list[float] = []
     roi_heights: list[float] = []
     roi_widths: list[float]  = []
     face_priority_count: int = 0
 
-    saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
+    target_fps = float(sample_count) / duration_s
+    reader = FFmpegPipeReader(src_path)
+    ok, _ = reader.open(target_fps=target_fps)
+    if not ok:
+        return 0.0, 0.0, False
 
-    # Use total_frames (not total_frames-1) so that 1-frame GIFs are also sampled.
-    for i in range(0, min(total_frames, sample_count * step), step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
-        ok, frame = cap.read()
-        if not ok or frame is None:
-            continue
-        # Skip frames that are too dark for reliable detection (e.g. fade-in)
-        if _is_dark_frame(frame):
-            continue
-        # Use person detection only (no motion fallback): detect_motion relies on
-        # sequential frames via MOG2, which is meaningless when using cap.set() jumps.
-        roi = detector.detect_person(frame, is_batch=cfg.is_batch) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector, is_batch=cfg.is_batch)
-        if roi is not None:
-            rx, ry, rw, rh = roi
-            roi_tops.append(float(ry))
-            roi_heights.append(float(rh))
-            roi_widths.append(float(rw))
-
-            roi_bottoms.append(float(ry + rh))
-            if rh > dmd_crop_h * _FACE_PRIORITY_H_RATIO:
-                face_priority_count += 1
-
-    cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
+    try:
+        for _ in range(sample_count + 5):
+            ok, frame = reader.read()
+            if not ok or frame is None:
+                break
+            if _is_dark_frame(frame):
+                continue
+            roi = detector.detect_person(frame, is_batch=cfg.is_batch) if hasattr(detector, "detect_person") else detector.detect(frame, cfg.detector, is_batch=cfg.is_batch)
+            if roi is not None:
+                rx, ry, rw, rh = roi
+                roi_tops.append(float(ry))
+                roi_heights.append(float(rh))
+                roi_widths.append(float(rw))
+                roi_bottoms.append(float(ry + rh))
+                if rh > dmd_crop_h * _FACE_PRIORITY_H_RATIO:
+                    face_priority_count += 1
+    finally:
+        reader.release()
 
     if not roi_tops:
         return 0.0, 0.0, False
@@ -159,7 +156,7 @@ def _compute_auto_crop_margins(  # noqa: C901
     return top_pct, bottom_pct, face_priority
 
 
-def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count: int = 80) -> dict:
+def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sample_count: int = 80) -> dict:
     from src.plugins.detectors.detector import _FrameDetector
     try:
         detector = _FrameDetector()
@@ -186,13 +183,14 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
     if not (cfg.smart_auto_crop or getattr(cfg, "auto_strength", False) or getattr(cfg, "auto_smoothness", False) or getattr(cfg, "auto_pillarbox_crop", False)):
         return {**_EMPTY, "reasons": ["smart features disabled in config"]}
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-    if total_frames <= 0:
-        return {**_EMPTY, "reasons": ["could not determine frame count"]}
+    from src.engine.conversion.ffmpeg_utils import get_metadata
+    from src.engine.auto_action.reader import FFmpegPipeReader
+    
+    w, h, fps_orig, duration_s = get_metadata(src_path)
+    if not duration_s or duration_s <= 0:
+        return {**_EMPTY, "reasons": ["could not determine duration"]}
 
-    # VNext Priority 7: Smart Auto Crop Optimizer
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    duration_s = total_frames / max(1.0, float(fps))
+    total_frames = int(duration_s * (fps_orig or 25.0))
     if duration_s < 10.0:
         sample_count = min(total_frames, int(duration_s * 5))
     elif duration_s < 60.0:
@@ -203,12 +201,11 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
 
     target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     dmd_crop_h   = frame_w / target_ratio
-    DMD_CROP_H_FACTOR = _FACE_PRIORITY_H_RATIO  # synchronized with _compute_auto_crop_margins
+    DMD_CROP_H_FACTOR = _FACE_PRIORITY_H_RATIO
     FACE_FRAC = 0.28
-
-    step = max(1, total_frames // sample_count)
+    
+    target_fps = float(sample_count) / duration_s
     check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False)
-    saved_pos = cap.get(cv2.CAP_PROP_POS_FRAMES)
 
     def _run_scan(det_type: str):
         _roi_tops: list[float]         = []
@@ -222,41 +219,46 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         _frame_lefts: list[float]      = []
         _frame_rights: list[float]     = []
         
-        for i in range(0, min(total_frames, sample_count * step), step):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
-            ok, frame = cap.read()
-            if not ok or frame is None: continue
-            if _is_dark_frame(frame):
-                continue
+        reader = FFmpegPipeReader(src_path)
+        ok, _ = reader.open(target_fps=target_fps)
+        if not ok:
+            return [], [], [], [], [], [], [], [], [], []
             
-            # For "person", we use the specialized detect_person. For fallback "hybrid", we use detect()
-            if det_type == "person" and hasattr(detector, "detect_person"):
-                roi = detector.detect_person(frame, is_batch=cfg.is_batch)
-            else:
-                roi = detector.detect(frame, det_type, is_batch=cfg.is_batch)
+        try:
+            for _ in range(sample_count + 5):
+                ok, frame = reader.read()
+                if not ok or frame is None: break
+                if _is_dark_frame(frame): continue
                 
-            if roi is not None:
-                rx, ry, rw, rh = roi
-                _roi_tops.append(float(ry))
-                _roi_bottoms_feet.append(float(ry + rh))
-                _roi_heights.append(float(rh))
-                _roi_widths.append(float(rw))
-                _x_centers.append(float(rx + rw / 2.0))
-                _y_centers.append(float(ry + rh / 2.0))
-                _fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
-                _roi_bottoms_fp.append(float(ry + rh))
+                if det_type == "person" and hasattr(detector, "detect_person"):
+                    roi = detector.detect_person(frame, is_batch=cfg.is_batch)
+                else:
+                    roi = detector.detect(frame, det_type, is_batch=cfg.is_batch)
                     
-            if check_pillarbox:
-                small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
-                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-                _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
-                coords = np.argwhere(thresh > 0)
-                if coords.size > 0:
-                    y_min, x_min = coords.min(axis=0)
-                    y_max, x_max = coords.max(axis=0)
-                    _frame_lefts.append(x_min / 128.0)
-                    _frame_rights.append(x_max / 128.0)
-                    
+                if roi is not None:
+                    rx, ry, rw, rh = roi
+                    _roi_tops.append(float(ry))
+                    _roi_bottoms_feet.append(float(ry + rh))
+                    _roi_heights.append(float(rh))
+                    _roi_widths.append(float(rw))
+                    _x_centers.append(float(rx + rw / 2.0))
+                    _y_centers.append(float(ry + rh / 2.0))
+                    _fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
+                    _roi_bottoms_fp.append(float(ry + rh))
+                        
+                if check_pillarbox:
+                    small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
+                    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
+                    coords = np.argwhere(thresh > 0)
+                    if coords.size > 0:
+                        y_min, x_min = coords.min(axis=0)
+                        y_max, x_max = coords.max(axis=0)
+                        _frame_lefts.append(x_min / 128.0)
+                        _frame_rights.append(x_max / 128.0)
+        finally:
+            reader.release()
+            
         return _roi_tops, _roi_bottoms_feet, _roi_bottoms_fp, _roi_heights, _roi_widths, _x_centers, _y_centers, _fill_ratios, _frame_lefts, _frame_rights
 
     best_detector = cfg.detector
@@ -267,8 +269,6 @@ def _smart_auto_crop_decision(cap, cfg, frame_w: int, frame_h: int, sample_count
         best_detector = "hybrid"
         (roi_tops, roi_bottoms_feet, roi_bottoms_fp, roi_heights, roi_widths, 
          x_centers, y_centers, fill_ratios, frame_lefts, frame_rights) = _run_scan(best_detector)
-
-    cap.set(cv2.CAP_PROP_POS_FRAMES, saved_pos)
 
     _auto_scene = getattr(cfg, "auto_scene_type", False)
     if not roi_tops:
