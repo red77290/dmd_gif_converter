@@ -1,5 +1,5 @@
 {
-  "task_id": "FCDE2",
+  "task_id": "7D998",
   "file_info": {
     "filename": "platformer_jump_1.gif",
     "video_width": 640,
@@ -17,13 +17,13 @@
     }
   },
   "raw_signals": {
-    "tall_ratio": 0.86875,
-    "fill_ratio": 0.24645390070921985,
-    "body_aspect": 1.094488188976378,
+    "tall_ratio": 0.89375,
+    "fill_ratio": 0.25354609929078015,
+    "body_aspect": 1.1171875,
     "floor_in_lower": true,
-    "floor_var_score": 0.20193058670826444,
-    "x_variance": 0.04258576369351627,
-    "y_variance": 0.025946112402033098
+    "floor_var_score": 0.1822832093503088,
+    "x_variance": 0.04662217919516101,
+    "y_variance": 0.02518319353337956
   },
   "decisions": {
     "face_priority": {

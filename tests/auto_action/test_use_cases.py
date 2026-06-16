@@ -78,6 +78,7 @@ class TestUseCases(unittest.TestCase):
              patch("src.plugins.detectors.detector._FrameDetector.detect", side_effect=mock_detect, autospec=True):
             
             success, out_path, msg = preprocess_video_for_dmd(gif_path, cfg)
+            print(f'DEBUG {filename}: {success} {out_path} {msg}')
             
         self.assertTrue(success, f"Pipeline failed on {filename}: {msg}")
         

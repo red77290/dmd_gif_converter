@@ -139,6 +139,16 @@ class AdvancedSettingsPanel(ctk.CTkFrame):
 
         self._on_scroll_enabled_change()
 
+        def _update_adv_scroll_state(*_):
+            try:
+                state = "disabled" if self.app_state.v_action_enabled.get() else "normal"
+                if self._cb_scroll_enabled and self._cb_scroll_enabled.winfo_exists():
+                    self._cb_scroll_enabled.configure(state=state)
+            except Exception:
+                pass
+
+        self.app_state.v_action_enabled.trace_add("write", _update_adv_scroll_state)
+        _update_adv_scroll_state()
         # ── SECTION 4: VISUAL EFFECTS ─────────────────────────────────────────
         ctk.CTkLabel(
             parent, text="━━  ✨  Visual Effects",

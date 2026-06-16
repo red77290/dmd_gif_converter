@@ -14,6 +14,7 @@ Tired of manually cropping and adjusting videos for your low-res LED matrix? Thi
 - **🎥 Cinematic Auto-Action Framing**: Uses YOLOv8 AI to track subjects, pan the camera dynamically, and crop the floor/ceiling to keep the action perfectly centered.
 - **🎨 Smart Color Boost**: Automatically detects dark or washed-out scenes and injects the perfect amount of brightness, contrast, and saturation so your GIFs pop on LED panels.
 - **🧠 Continuous Scoring Matrix**: Intelligently scores your scene (Platformer, Talking Closeup, Action) to select the perfect camera profile without any manual intervention.
+- **⚡ Hardware Acceleration & Multithreading**: Auto-detects and uses hardware encoders (VideoToolbox on macOS, NVENC/QSV/AMF on Windows/Linux) and utilizes intelligent CPU auto-workers to massively accelerate batch video processing up to 10x.
 - **🪄 Text Magic**: Add retro pixel-art text overlays with built-in animations directly onto your videos.
 
 > **Curious about what changed recently?** Check out the [Release Changelog](docs/CHANGELOG.md).

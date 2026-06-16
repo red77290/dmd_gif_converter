@@ -4,6 +4,7 @@ from dataclasses import dataclass
 class ConversionConfig:
     mode: str = "pixel_art"
     workers: int = 2
+    auto_workers: bool = True
     scroll_speed: float = 24.0
     bottom_crop: float = 0.15
     top_crop: float = 0.0

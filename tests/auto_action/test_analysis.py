@@ -12,6 +12,16 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
+
+def patch_analysis_funcs(func):
+    def wrapper(*args, **kwargs):
+        with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mock_meta:
+            with patch('src.engine.auto_action.reader.FFmpegPipeReader') as mock_reader:
+                kwargs['mock_meta'] = mock_meta
+                kwargs['mock_reader'] = mock_reader
+                return func(*args, **kwargs)
+    return wrapper
+
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -35,16 +45,20 @@ def _make_frame(brightness: int = 128, h: int = 100, w: int = 200) -> np.ndarray
 
 
 def _make_cap(total_frames: int = 60, fps: float = 30.0, frame_brightness: int = 128):
-    """Return a mock cv2.VideoCapture that yields bright/dark frames."""
+    """Return a mock FFmpegPipeReader that yields bright/dark frames."""
     cap = MagicMock()
-    cap.get.side_effect = lambda prop: {
-        0: 0.0,          # CAP_PROP_POS_FRAMES
-        5: fps,          # CAP_PROP_FPS
-        7: float(total_frames),  # CAP_PROP_FRAME_COUNT
-    }.get(prop, 0.0)
-
     frame = _make_frame(brightness=frame_brightness)
+    
     cap.read.return_value = (True, frame)
+    cap.open.return_value = (True, "")
+    
+    def iter_frames():
+        for _ in range(total_frames):
+            yield frame
+    cap.__iter__.return_value = iter_frames()
+    
+    cap._test_duration = float(total_frames) / fps if fps > 0 else 0
+    cap._test_fps = fps
     return cap
 
 
@@ -172,7 +186,13 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         det.detect_person.return_value = None
         det.detect.return_value = None
 
-        top, bot, fp = _compute_auto_crop_margins(cap, det, cfg, 400, 1080)
+        with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+
+            mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+
+            mr.return_value = cap
+
+            top, bot, fp  = _compute_auto_crop_margins('dummy.mp4', det, cfg, 400, 1080)
         self.assertAlmostEqual(top, 0.0)
         self.assertAlmostEqual(bot, 0.0)
         self.assertFalse(fp)
@@ -183,7 +203,13 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         cfg = _make_cfg()
         det = self._make_detector()
 
-        top, bot, fp = _compute_auto_crop_margins(cap, det, cfg, 400, 1080)
+        with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+
+            mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+
+            mr.return_value = cap
+
+            top, bot, fp  = _compute_auto_crop_margins('dummy.mp4', det, cfg, 400, 1080)
         # Toutes les frames sont sombres → aucune ne passe → pas de ROI
         det.detect_person.assert_not_called()
         self.assertAlmostEqual(top, 0.0)
@@ -195,7 +221,13 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         cfg = _make_cfg()
         det = self._make_detector(roi=(10, 50, 80, 500))
 
-        _compute_auto_crop_margins(cap, det, cfg, 400, 1080)
+        with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+
+            mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+
+            mr.return_value = cap
+
+            _compute_auto_crop_margins('dummy.mp4', det, cfg, 400, 1080)
 
         self.assertTrue(det.detect_person.called,
                         "detect_person doit être appelé dans le scan (pas detect)")
@@ -213,7 +245,13 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         # ROI très tall: ry=10, rh=420 → rh > dmd_crop_h * 0.80
         det = self._make_detector(roi=(10, 10, 80, 420))
 
-        _, _, fp = _compute_auto_crop_margins(cap, det, cfg, frame_w=400, frame_h=1080)
+        with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+
+            mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+
+            mr.return_value = cap
+
+            _, _, fp  = _compute_auto_crop_margins('dummy.mp4', det, cfg, frame_w=400, frame_h=1080)
         self.assertTrue(fp, "face_priority doit se déclencher pour un ROI tall (régression TALL_FACTOR)")
 
     def test_face_priority_does_not_trigger_with_small_roi(self):
@@ -223,7 +261,13 @@ class TestComputeAutoCropMargins(unittest.TestCase):
         # ROI petit: rh=20px, dmd_crop_h=100px → rh < 80px → pas face_priority
         det = self._make_detector(roi=(10, 10, 80, 20))
 
-        _, _, fp = _compute_auto_crop_margins(cap, det, cfg, frame_w=400, frame_h=1080)
+        with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+
+            mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+
+            mr.return_value = cap
+
+            _, _, fp  = _compute_auto_crop_margins('dummy.mp4', det, cfg, frame_w=400, frame_h=1080)
         self.assertFalse(fp, "Un ROI petit ne doit pas déclencher face_priority")
 
 
@@ -244,7 +288,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
                         auto_smoothness=False, auto_pillarbox_crop=False)
 
         with patch(self._DETECTOR_PATCH):
-            result = _smart_auto_crop_decision(cap, cfg, 400, 1080)
+            with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+                mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+                mr.return_value = cap
+                result = _smart_auto_crop_decision('dummy.mp4', cfg, 400, 1080)
 
         self.assertFalse(result["face_priority"])
         self.assertFalse(result["auto_bottom_crop"])
@@ -259,7 +306,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         mock_det.detect.return_value = None
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
-            result = _smart_auto_crop_decision(cap, cfg, 400, 1080)
+            with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+                mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+                mr.return_value = cap
+                result = _smart_auto_crop_decision('dummy.mp4', cfg, 400, 1080)
 
         self.assertFalse(result["face_priority"])
         self.assertIn("no detections", result["reasons"][0])
@@ -279,7 +329,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         mock_det.detect.side_effect = rois
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
-            result = _smart_auto_crop_decision(cap, cfg, frame_w=400, frame_h=1080)
+            with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+                mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+                mr.return_value = cap
+                result = _smart_auto_crop_decision('dummy.mp4', cfg, frame_w=400, frame_h=1080)
 
         self.assertTrue(result["face_priority"],
                         "face_priority doit se déclencher (TALL_FACTOR régression)")
@@ -300,7 +353,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         mock_det.detect.side_effect = rois
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
-            result = _smart_auto_crop_decision(cap, cfg, frame_w=400, frame_h=1080)
+            with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+                mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+                mr.return_value = cap
+                result = _smart_auto_crop_decision('dummy.mp4', cfg, frame_w=400, frame_h=1080)
 
         self.assertTrue(result["face_priority"],
                         f"With rh=82 and rw=50, FULL_BODY_TALL should trigger face_priority.")
@@ -320,7 +376,10 @@ class TestSmartAutoCropDecision(unittest.TestCase):
         mock_det.detect.side_effect = rois
 
         with patch(self._DETECTOR_PATCH, return_value=mock_det):
-            result = _smart_auto_crop_decision(cap, cfg, frame_w=400, frame_h=1080)
+            with patch('src.engine.conversion.ffmpeg_utils.get_metadata') as mm, patch('src.engine.auto_action.reader.FFmpegPipeReader') as mr:
+                mm.return_value = (400, 1080, cap._test_fps, cap._test_duration)
+                mr.return_value = cap
+                result = _smart_auto_crop_decision('dummy.mp4', cfg, frame_w=400, frame_h=1080)
 
         self.assertTrue(result["face_priority"],
                         "Les vidéos courtes doivent aussi déclencher face_priority")

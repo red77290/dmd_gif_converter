@@ -31,11 +31,13 @@ class AiMomentsEngine:
         self._cancel = False
         
         # Initialize Scoring V2 components
-        try:
-            from src.plugins.detectors.detector import _FrameDetector
-            detector = _FrameDetector()
-        except Exception:
-            detector = None
+        detector = None
+        if self.options.get("crit_character", False):
+            try:
+                from src.plugins.detectors.detector import _FrameDetector
+                detector = _FrameDetector()
+            except Exception as e:
+                logger.warning(f"Failed to load detector: {e}")
             
         use_optical_flow = self.options.get("crit_action", False)
         self.signal_engine = SignalScoringEngine(detector=detector, optical_flow=use_optical_flow)
@@ -107,6 +109,7 @@ class AiMomentsEngine:
         
         signals = []
         idx = 0
+        last_log_pct = 0.0
         while not self._cancel:
             ret, frame = reader.read()
             if not ret:
@@ -125,6 +128,14 @@ class AiMomentsEngine:
             idx += 1
             if idx % int(fps) == 0:
                 self.progress_cb("Signal Extraction", 0.4 * (idx / max(1, total_frames)))
+                
+            pct = (idx / max(1, total_frames)) * 100
+            if pct - last_log_pct >= 5.0 or idx == total_frames:
+                bar_len = 30
+                filled = int(bar_len * pct / 100)
+                bar = "█" * filled + "-" * (bar_len - filled)
+                logger.info(f"[AI MOMENT] Signal Extraction: [{bar}] {pct:.1f}% ({idx}/{total_frames})")
+                last_log_pct = pct
                 
         reader.release()
         
