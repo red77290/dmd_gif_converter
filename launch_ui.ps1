@@ -108,7 +108,7 @@ if (-not (Test-Path $VenvPy)) {
 
 # ── Launch the UI ─────────────────────────────────────────────────────────────
 Write-Host "==> Starting DMD GIF Converter..." -ForegroundColor Green
-& $VenvPy -m src.ui.launcher
+& $VenvPy -m src.ui.launcher $args
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

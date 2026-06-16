@@ -32,19 +32,46 @@ class AiMomentsEngine:
         
         # Initialize Scoring V2 components
         detector = None
-        if self.options.get("crit_character", False):
-            try:
-                from src.plugins.detectors.detector import _FrameDetector
-                detector = _FrameDetector()
-            except Exception as e:
-                logger.warning(f"Failed to load detector: {e}")
+        # Always try to load the detector for AI Moments, even if crit_character is off, 
+        # so we can PENALIZE frames with no subjects (like text/credits) if needed!
+        try:
+            from src.plugins.detectors.detector import _FrameDetector
+            detector = _FrameDetector()
+        except Exception as e:
+            logger.warning(f"Failed to load detector: {e}")
             
+        # Prepare Signal Engine
         use_optical_flow = self.options.get("crit_action", False)
-        self.signal_engine = SignalScoringEngine(detector=detector, optical_flow=use_optical_flow)
+        use_detector = detector if self.options.get("crit_character", False) else None
+        self.signal_engine = SignalScoringEngine(detector=use_detector, optical_flow=use_optical_flow)
         
-        # Determine strategy from options (default: balanced_v2)
-        strategy_name = self.options.get("scoring_strategy", "balanced_v2")
-        self.final_engine = FinalScoringEngine(strategy_name)
+        # Build dynamic strategy based on user checkboxes and sliders
+        w_act = (self.options.get("w_action", 70.0) / 100.0) if self.options.get("crit_action", False) else 0.0
+        w_char = (self.options.get("w_character", 40.0) / 100.0) if self.options.get("crit_character", False) else 0.0
+        w_ep = (self.options.get("w_epic", 100.0) / 100.0) if self.options.get("crit_epic", False) else 0.0
+        w_dm = (self.options.get("w_dmd", 100.0) / 100.0) if self.options.get("crit_dmd", False) else 0.0
+        self._loop_weight = (self.options.get("w_loopable", 70.0) / 100.0) if self.options.get("crit_loopable", False) else 0.0
+
+        from src.engine.scoring.final_scoring_engine import ScoringStrategy
+        strategy = ScoringStrategy(
+            name="ai_moments_dynamic",
+            w_motion=0.5 * w_act,
+            w_stability=0.0,
+            w_entropy=0.2,
+            w_contrast=0.3,
+            w_edge_density=0.2 * w_dm if w_dm > 0 else 0.1,
+            w_subject=0.5 * w_char if w_char > 0 else 0.1,
+            w_subject_centering=0.3 * w_char if w_char > 0 else 0.0,
+            w_readability=0.4 * w_dm if w_dm > 0 else 0.0,
+            w_attention=0.4 * w_ep if w_ep > 0 else 0.0,
+            w_saliency=0.3 * w_ep if w_ep > 0 else 0.1,
+            selection_threshold=20.0,
+            penalize_dark_frames=True,
+            # We ONLY penalize no-detection if Character is explicitly checked.
+            penalize_no_detection=self.options.get("crit_character", False),
+            no_detection_penalty=20.0 * w_char if w_char > 0 else 0.0,
+        )
+        self.final_engine = FinalScoringEngine(strategy)
         
         self.quality_evaluator = QualityEvaluator()
 
@@ -173,7 +200,7 @@ class AiMomentsEngine:
                 report = self.quality_evaluator.evaluate_from_signals(window_sigs)
                 
                 # Combine scores
-                temporal_bonus = (report.overall_temporal or 50.0) * 0.2
+                temporal_bonus = (report.overall_temporal or 50.0) * (0.2 * self._loop_weight)
                 overall = min(100.0, avg_frame_score + temporal_bonus)
                 
                 moments.append(AiMoment(

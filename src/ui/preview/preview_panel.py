@@ -171,27 +171,26 @@ class PreviewPanel(ctk.CTkFrame):
         self.controls._sl_start.configure(to=dur)
         self.controls._sl_end.configure(to=dur)
         self.app_state.v_trim_start.set(0.0)
-        init_end = min(self.app_state.v_max_duration.get(), dur) \
-            if self.app_state.v_max_dur_enabled.get() else dur
-        self.app_state.v_trim_end.set(init_end)
+        self.app_state.v_trim_end.set(dur)
         self.controls._lbl_start.configure(text="0.0 s")
-        self.controls._lbl_end.configure(text=f"{init_end:.1f} s")
-        self.controls._sl_end.configure(
-            state="disabled" if self.app_state.v_max_dur_enabled.get() else "normal")
+        self.controls._lbl_end.configure(text=f"{dur:.1f} s")
+        self.controls._sl_end.configure(state="normal")
+
+    def _invalidate_auto_cache_and_refresh(self):
+        if getattr(self.player, "_auto_tmpdir", None):
+            import shutil, os
+            if os.path.isdir(self.player._auto_tmpdir):
+                shutil.rmtree(self.player._auto_tmpdir, ignore_errors=True)
+            self.player._auto_tmpdir = None
+        self._schedule_pipeline_refresh()
 
     def _on_start_drag(self, val):
         v = float(val)
         end = self.app_state.v_trim_end.get()
-        if self.app_state.v_max_dur_enabled.get():
-            max_dur = self.app_state.v_max_duration.get()
-            v = min(v, max(0.0, self.player._source_duration - max_dur))
-            self.app_state.v_trim_start.set(v)
-            new_end = min(v + max_dur, self.player._source_duration)
-            self.app_state.v_trim_end.set(new_end)
-            self.controls._lbl_end.configure(text=f"{new_end:.1f} s")
-        elif v >= end:
+        if v >= end:
             self.app_state.v_trim_start.set(max(0.0, end - 0.05))
         self.controls._lbl_start.configure(text=f"{self.app_state.v_trim_start.get():.1f} s")
+        self._invalidate_auto_cache_and_refresh()
 
     def _on_end_drag(self, val):
         v = float(val)
@@ -199,12 +198,14 @@ class PreviewPanel(ctk.CTkFrame):
         if v <= start:
             self.app_state.v_trim_end.set(min(self.player._source_duration, start + 0.05))
         self.controls._lbl_end.configure(text=f"{self.app_state.v_trim_end.get():.1f} s")
+        self._invalidate_auto_cache_and_refresh()
 
     def _reset_trim(self):
         self.app_state.v_trim_start.set(0.0)
         self.app_state.v_trim_end.set(self.player._source_duration)
         self.controls._lbl_start.configure(text="0.0 s")
         self.controls._lbl_end.configure(text=f"{self.player._source_duration:.1f} s")
+        self._invalidate_auto_cache_and_refresh()
 
     def _get_trim(self):
         s = self.app_state.v_trim_start.get()
