@@ -91,6 +91,7 @@ class AbstractDetector(IDetector):
         roi_persistence_score: float = 1.0,
         platformer_mode: bool = False,
         expected_floor_y: Optional[float] = None,
+        is_batch: bool = False,
     ) -> Optional[BoundingBox]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
@@ -102,19 +103,19 @@ class AbstractDetector(IDetector):
         if mode == "person":
             p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
                                    roi_persistence_score=roi_persistence_score,
-                                   platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+                                   platformer_mode=platformer_mode, expected_floor_y=expected_floor_y, is_batch=is_batch)
             return p if p is not None else self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
 
         if mode == "motion":
             m = self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
             return m if m is not None else self.detect_person(
                 frame, multi_fusion=multi_fusion, min_conf=min_conf,
-                roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+                roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y, is_batch=is_batch)
 
         # hybrid: merge both
         p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
                                 roi_persistence_score=roi_persistence_score,
-                                platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+                                platformer_mode=platformer_mode, expected_floor_y=expected_floor_y, is_batch=is_batch)
         m = self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
         if p and m:
             x1 = min(p[0], m[0])
@@ -138,61 +139,87 @@ class _FrameDetector(AbstractDetector):
         self.bg_sub = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=36)
         self._try_load_onnx()
 
-    _shared_session = None
+    _shared_session_fast = None
+    _shared_session_batch = None
     _shared_model_h = 640
     _shared_model_w = 640
     _shared_model_type = ""
     _session_lock = __import__("threading").Lock()
 
+    def _create_session(self, model_path: str, num_threads: int):
+        import onnxruntime as ort
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = num_threads
+        sess_options.inter_op_num_threads = 2
+        
+        session = ort.InferenceSession(
+            model_path, 
+            sess_options=sess_options,
+            providers=["CPUExecutionProvider"]
+        )
+        return session
+
     def _try_load_onnx(self) -> None:
         with self._session_lock:
-            if _FrameDetector._shared_session is not None:
-                self._onnx_session = _FrameDetector._shared_session
+            if _FrameDetector._shared_session_fast is not None:
+                self._onnx_session_fast = _FrameDetector._shared_session_fast
+                self._onnx_session_batch = _FrameDetector._shared_session_batch
                 self._model_h = _FrameDetector._shared_model_h
                 self._model_w = _FrameDetector._shared_model_w
                 self.model_type = _FrameDetector._shared_model_type
                 return
 
             try:
-                import onnxruntime as ort
                 model_path = _ensure_yolo_model()
                 if model_path is None:
-                    self._onnx_session = None
+                    self._onnx_session_fast = None
+                    self._onnx_session_batch = None
                     return
                 
-                sess_options = ort.SessionOptions()
-                sess_options.intra_op_num_threads = 2
-                sess_options.inter_op_num_threads = 2
+                import os
+                cpu_cores = os.cpu_count() or 4
+                fast_threads = min(8, max(1, cpu_cores))
+                batch_threads = max(1, min(2, cpu_cores // 2))
                 
-                session = ort.InferenceSession(
-                    model_path, 
-                    sess_options=sess_options,
-                    providers=["CPUExecutionProvider"]
-                )
-                inputs = session.get_inputs()[0]
+                session_fast = self._create_session(model_path, fast_threads)
+                session_batch = self._create_session(model_path, batch_threads)
+                
+                inputs = session_fast.get_inputs()[0]
                 model_h = inputs.shape[2]
                 model_w = inputs.shape[3]
                 if not isinstance(model_h, int) or not isinstance(model_w, int):
                     model_h, model_w = 640, 640
                 
-                _FrameDetector._shared_session = session
+                _FrameDetector._shared_session_fast = session_fast
+                _FrameDetector._shared_session_batch = session_batch
                 _FrameDetector._shared_model_h = model_h
                 _FrameDetector._shared_model_w = model_w
                 _FrameDetector._shared_model_type = "onnx"
 
-                self._onnx_session = session
+                self._onnx_session_fast = session_fast
+                self._onnx_session_batch = session_batch
                 self._model_h = model_h
                 self._model_w = model_w
                 self.model_type = "onnx"
             except Exception:
-                self._onnx_session = None
+                self._onnx_session_fast = None
+                self._onnx_session_batch = None
                 self._model_h = 640
                 self._model_w = 640
                 self.model_type = ""
 
+    def _get_active_session(self, is_batch: bool = False):
+        if is_batch:
+            return self._onnx_session_batch
+        return self._onnx_session_fast
+
     def _detect_yolo(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
                      roi_persistence_score: float = 1.0, platformer_mode: bool = False,
-                     expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
+                     expected_floor_y: Optional[float] = None, is_batch: bool = False) -> Optional[BoundingBox]:
+        session = self._get_active_session(is_batch)
+        if session is None:
+            return None
+            
         cv2 = self.cv2
         h, w = frame.shape[:2]
 
@@ -200,8 +227,8 @@ class _FrameDetector(AbstractDetector):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         img = np.transpose(img, (2, 0, 1))[np.newaxis]
 
-        input_name = self._onnx_session.get_inputs()[0].name
-        pred = self._onnx_session.run(None, {input_name: img})[0][0]
+        input_name = session.get_inputs()[0].name
+        pred = session.run(None, {input_name: img})[0][0]
 
         boxes_raw = pred[:4].T
         class_prob = pred[4:].T
@@ -263,16 +290,17 @@ class _FrameDetector(AbstractDetector):
         return BoundingBox(x, y, bw, bh)
 
     def _detect_yolo_multi(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
-                            roi_persistence_score: float = 1.0) -> List:
-        if self._onnx_session is None:
+                            roi_persistence_score: float = 1.0, is_batch: bool = False) -> List:
+        session = self._get_active_session(is_batch)
+        if session is None:
             return []
         cv2 = self.cv2
         h, w = frame.shape[:2]
         img = cv2.resize(frame, (self._model_w, self._model_h), interpolation=cv2.INTER_LINEAR)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         img = np.transpose(img, (2, 0, 1))[np.newaxis]
-        input_name = self._onnx_session.get_inputs()[0].name
-        pred = self._onnx_session.run(None, {input_name: img})[0][0]
+        input_name = session.get_inputs()[0].name
+        pred = session.run(None, {input_name: img})[0][0]
         boxes_raw     = pred[:4].T
         person_scores = pred[4:].T[:, 0]
 
@@ -302,17 +330,20 @@ class _FrameDetector(AbstractDetector):
                       min_conf: float = _YOLO_CONF_THRESH,
                       roi_persistence_score: float = 1.0,
                       platformer_mode: bool = False,
-                      expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
-        if self._onnx_session is None:
+                      expected_floor_y: Optional[float] = None,
+                      is_batch: bool = False) -> Optional[BoundingBox]:
+        if self._get_active_session(is_batch) is None:
             return None
         if multi_fusion:
             hits = self._detect_yolo_multi(frame, min_conf=min_conf,
-                                            roi_persistence_score=roi_persistence_score)
+                                            roi_persistence_score=roi_persistence_score,
+                                            is_batch=is_batch)
             return _fuse_rois(hits, roi_persistence_score=roi_persistence_score) if hits else None
         return self._detect_yolo(frame, min_conf=min_conf,
                                   roi_persistence_score=roi_persistence_score,
                                   platformer_mode=platformer_mode,
-                                  expected_floor_y=expected_floor_y)
+                                  expected_floor_y=expected_floor_y,
+                                  is_batch=is_batch)
 
     def detect_motion(self, frame: np.ndarray, platformer_mode: bool = False,
                       expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
