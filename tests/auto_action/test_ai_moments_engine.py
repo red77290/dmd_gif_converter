@@ -5,8 +5,16 @@ import numpy as np
 from src.plugins.scorers.ai_moments import AiMomentsEngine, AiMoment
 
 class TestAiMomentsEngine(unittest.TestCase):
+    @patch('src.engine.auto_action.reader.subprocess.Popen')
+    @patch('src.engine.conversion.ffmpeg_utils.get_metadata')
     @patch('cv2.VideoCapture')
-    def test_run_analysis_basic(self, mock_cv2_cap):
+    def test_run_analysis_basic(self, mock_cv2_cap, mock_get_metadata, mock_popen):
+        mock_get_metadata.return_value = (320, 180, 25.0, 10.0)
+        
+        mock_proc = MagicMock()
+        dummy_frame = np.random.randint(0, 255, (180, 320, 3), dtype=np.uint8)
+        mock_proc.stdout.read.side_effect = [dummy_frame.tobytes()] * 250 + [b""]
+        mock_popen.return_value = mock_proc
         # Mock video capture
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
@@ -68,8 +76,20 @@ class TestAiMomentsEngine(unittest.TestCase):
                 overlap = not (r1.end_time < r2.start_time + 1.0 or r1.start_time > r2.end_time - 1.0)
                 self.assertFalse(overlap, "Moments overlap too much")
 
+    @patch('src.engine.auto_action.reader.subprocess.Popen')
+    @patch('src.engine.conversion.ffmpeg_utils.get_metadata')
     @patch('cv2.VideoCapture')
-    def test_cancel_analysis(self, mock_cv2_cap):
+    def test_cancel_analysis(self, mock_cv2_cap, mock_get_metadata, mock_popen):
+        mock_get_metadata.return_value = (100, 100, 25.0, 10.0)
+        
+        mock_proc = MagicMock()
+        import time
+        def slow_read(*args, **kwargs):
+            time.sleep(0.02)
+            return np.zeros((100, 100, 3), dtype=np.uint8).tobytes()
+            
+        mock_proc.stdout.read.side_effect = slow_read
+        mock_popen.return_value = mock_proc
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
         mock_cap_instance.get.return_value = 25.0

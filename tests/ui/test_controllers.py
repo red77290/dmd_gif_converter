@@ -12,7 +12,7 @@ class TestConversionController(unittest.TestCase):
         cc._view = MagicMock()
         cc._model = MagicMock()
         cc._model.build_params.return_value = {}
-        cc._model.get.return_value = ""
+        cc._model.get.side_effect = lambda k, d=None: d
         return cc
 
     def test_bind_sets_view_and_model(self):

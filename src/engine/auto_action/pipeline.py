@@ -38,17 +38,21 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
     if cfg.detector.lower() not in available_detectors():
         cfg.detector = "person"
 
+    log("Analyzing video content (smart crop/scene detection)...", "debug")
+    # 1. Analyzer
+    from src.engine.conversion.ffmpeg_utils import get_metadata
+    w, h, f_fps, dur = get_metadata(src_path)
+    if not w or not h:
+        return False, None, "Could not get video metadata."
+    analyzer = VideoAnalyzer(w, h, cfg)
+    analyzer.analyze(src_path)
+
     log("Opening video reader...", "debug")
-    # 1. Reader
+    # 2. Reader
     reader = VideoReader(src_path)
     ok, msg = reader.open()
     if not ok:
         return False, None, msg
-
-    log("Analyzing video content (smart crop/scene detection)...", "debug")
-    # 2. Analyzer
-    analyzer = VideoAnalyzer(reader.frame_w, reader.frame_h, cfg)
-    analyzer.analyze(reader.cap)
 
     import logging
     logger = logging.getLogger(__name__)

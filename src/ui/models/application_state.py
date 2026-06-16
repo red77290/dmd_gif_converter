@@ -46,6 +46,7 @@ class ApplicationState(IModel):
         self.v_search_ratio   = tk.StringVar(value="All")
         self.v_action_enabled = tk.BooleanVar(value=False)
         self.v_per_gif_config = tk.BooleanVar(value=False)
+        self.v_auto_workers = tk.BooleanVar(value=True)
 
         # UI state helpers
         self.per_gif_global_snapshot: Dict[str, Any] = {}

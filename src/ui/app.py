@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 
 from src.ui.panels.left_panel import LeftPanel
 from src.ui.panels.middle_panel import MiddlePanel
-from src.ui.preview.main_panel import PreviewPanel
+from src.ui.preview.preview_panel import PreviewPanel
 from src.ui.panels.ai_moments_panel import AiMomentsPanel
+from src.ui.panels.log_console import LogConsole
 
 from src.ui.constants import APP_VERSION
 
@@ -129,121 +130,14 @@ class DMDConverterApp(ctk.CTk):
         EventBus.subscribe(EventType.PREVIEW_SOURCE_CHANGED, _on_selection_changed)
 
         # ── Log panel (bottom, retractable) ──────────────────────────────────
-        self._all_logs: list = []          # (level_int, message) — full history
-        self._log_visible: bool = True
-        self._log_levels = {"debug": 10, "info": 20, "warning": 30, "error": 40}
-        self.v_log_level = tk.StringVar(value="INFO")
-
-        self._log_outer = ctk.CTkFrame(self, fg_color="#0a0a14", corner_radius=0)
-        self._log_outer.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
-        self._log_outer.grid_columnconfigure(0, weight=1)
-
-        # Header bar (always visible)
-        log_header = ctk.CTkFrame(self._log_outer, fg_color="#0d0d1a", corner_radius=0)
-        log_header.grid(row=0, column=0, sticky="ew")
-        log_header.grid_columnconfigure(1, weight=1)
-
-        self._btn_log_toggle = ctk.CTkButton(
-            log_header, text="▼  Log", width=70, height=22,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="transparent", hover_color="#1a1a2e",
-            text_color="#556677", anchor="w",
-            command=self.toggle_log_panel,
-        )
-        self._btn_log_toggle.grid(row=0, column=0, padx=(6, 4), pady=2, sticky="w")
-
-        # Level filter dropdown
-        ctk.CTkLabel(
-            log_header, text="Filter:",
-            font=ctk.CTkFont(size=10), text_color="#445566"
-        ).grid(row=0, column=2, padx=(0, 2), pady=2)
-        self._log_level_menu = ctk.CTkOptionMenu(
-            log_header,
-            variable=self.v_log_level,
-            values=["DEBUG", "INFO", "WARNING", "ERROR"],
-            width=90, height=22,
-            font=ctk.CTkFont(size=10),
-            command=self._on_log_level_change,
-        )
-        self._log_level_menu.grid(row=0, column=3, padx=(0, 4), pady=2)
-
-        ctk.CTkButton(
-            log_header, text="Clear", width=46, height=22,
-            font=ctk.CTkFont(size=10), fg_color="#2a2a3a", hover_color="#e74c3c",
-            command=self._clear_log,
-        ).grid(row=0, column=4, padx=(0, 6), pady=2)
-
-        # Collapsible body
-        self._log_body = ctk.CTkFrame(self._log_outer, fg_color="transparent")
-        self._log_body.grid(row=1, column=0, sticky="ew")
-
-        self._log_box = ctk.CTkTextbox(
-            self._log_body, height=90,
-            font=ctk.CTkFont(family="Courier", size=11),
-            fg_color="#0a0a14", text_color="#8899aa",
-            state="disabled", wrap="word",
-        )
-        self._log_box.pack(fill="x", padx=6, pady=(2, 4))
+        self.log_console = LogConsole(self)
+        self.log_console.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
 
     def _on_log_event(self, payload):
         self._log_queue.put(payload)
 
     def _process_log_event(self, payload):
-        if not payload or "log" not in payload:
-            return
-        msg = payload["log"]
-        level = payload.get("level", "info").lower()
-        level_int = self._log_levels.get(level, 20)
-        self._all_logs.append((level_int, level, msg))
-        # Only display if passes current filter
-        current_min = self._log_levels.get(self.v_log_level.get().lower(), 20)
-        if level_int >= current_min:
-            self._append_log_line(msg, level)
-
-    def _append_log_line(self, msg: str, level: str = "info"):
-        colors = {"debug": "#445566", "info": "#8899aa",
-                  "warning": "#f39c12", "error": "#e74c3c"}
-        try:
-            self._log_box.configure(state="normal")
-            self._log_box.insert("end", msg + "\n")
-            self._log_box.configure(state="disabled")
-            self._log_box.see("end")
-        except Exception:
-            pass
-
-    def _on_log_level_change(self, _value=None):
-        """Re-render the log box from full history using the new filter level."""
-        current_min = self._log_levels.get(self.v_log_level.get().lower(), 20)
-        try:
-            self._log_box.configure(state="normal")
-            self._log_box.delete("1.0", "end")
-            for level_int, level, msg in self._all_logs:
-                if level_int >= current_min:
-                    self._log_box.insert("end", msg + "\n")
-            self._log_box.configure(state="disabled")
-            self._log_box.see("end")
-        except Exception:
-            pass
-
-    def toggle_log_panel(self):
-        """Show or hide the log body (retractable panel)."""
-        if self._log_visible:
-            self._log_body.grid_remove()
-            self._btn_log_toggle.configure(text="▶  Log")
-            self._log_visible = False
-        else:
-            self._log_body.grid()
-            self._btn_log_toggle.configure(text="▼  Log")
-            self._log_visible = True
-
-    def _clear_log(self):
-        self._all_logs.clear()
-        try:
-            self._log_box.configure(state="normal")
-            self._log_box.delete("1.0", "end")
-            self._log_box.configure(state="disabled")
-        except Exception:
-            pass
+        self.log_console.process_log_event(payload)
 
     def _on_close(self):
         EventBus.clear()
@@ -286,12 +180,16 @@ def main():
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "dmd_converter.log"
         
+        import sys
+        
         _logging.basicConfig(
             level=_logging.DEBUG,
             format="%(asctime)s [%(levelname)-7s] %(name)s — %(message)s",
             datefmt="%H:%M:%S",
-            filename=str(log_file),
-            filemode="w",
+            handlers=[
+                _logging.FileHandler(str(log_file), mode='w'),
+                _logging.StreamHandler(sys.stdout)
+            ]
         )
     
     # Always ensure EventBus gets the logs if not already added
