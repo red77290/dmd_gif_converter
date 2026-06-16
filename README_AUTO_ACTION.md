@@ -1,4 +1,4 @@
-# Auto Action Framing (v7.0.0)
+# Auto Action Framing (v7.1.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
@@ -25,7 +25,7 @@ It creates an intermediate video that follows action/person areas at the target 
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
 
-**v7.0.0 improvements:**
+**v7.1.0 improvements:**
 - **Tracker Pipeline Architecture**: The monolithic `TrackingEngine` was completely refactored into a modular Pipeline pattern (Chain of Responsibility) using 12 discrete, testable stages (e.g., `DetectionStage`, `FaceClippingStage`, `LookAheadStage`).
 - **Letterbox drifting fix**: Integrated strict letterbox boundary containment to prevent the camera from panning into black bars on widescreen cinema clips, resolving eye cutoff issues on cinematic clips (such as characters like Doc/Marty in Back to the Future).
 - **Dynamic Logging**: Added real-time `[DYNAMIC]` logs tracking every camera cut and continuous scoring profile activation.

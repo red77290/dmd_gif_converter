@@ -36,7 +36,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 
 | Parameter | CLI flag | Default | Description |
 |---|---|---|---|
-| `max_workers` | `--workers` | `2` | Parallel ffmpeg processes |
+| `max_workers` | `--workers` | `auto` | Parallel ffmpeg processes (auto scales to cores/2) |
 | `scroll_speed` | `--scroll-speed` | `24.0` | Scroll speed (px/s) |
 | `bottom_crop_pct` | `--bottom-crop` | `0.15` | Bottom fraction ignored (feet/floor) |
 | `scroll_cycles` | `--scroll-cycles` | `1.5` | Cycle count + fractional stop position (see below) |
@@ -141,15 +141,9 @@ The integer part is the number of complete **round-trips** (down→up); the frac
 | `2.0` | 2 round-trips, hold at top |
 
 ### `--workers` tuning
+By default, the converter uses an automatic optimal worker count (`cpu_cores / 2`).
 
-| Machine | Recommended |
-|---|---|
-| MacBook Pro M-series (10+ cores) | `6`–`8` |
-| Desktop SSD, 8+ cores, 16 GB+ | `6`–`8` |
-| Desktop SSD, 4 cores, 8 GB | `3`–`4` |
-| Laptop or HDD | `2` |
-
-> Workers are CPU-bound (ffmpeg palette generation + dithering). Going beyond 8 workers rarely helps and increases memory pressure.  
+If you have a powerful multi-core CPU and SSD, you can override this limit. Be aware that FFmpeg scales poorly after 8 concurrent instances unless you have exceptional I/O throughput. Going beyond 8 workers rarely helps and increases memory pressure.  
 > In UI mode, each parallel worker's log is prefixed with `[W1]`, `[W2]`, etc. for easy isolation in the log panel.
 
 ### Terminal logs — launcher vs direct invocation

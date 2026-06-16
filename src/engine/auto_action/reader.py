@@ -72,6 +72,10 @@ class FFmpegPipeReader:
                 _gif_result = subprocess.run(_gif_conv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120)
                 if _gif_result.returncode == 0 and os.path.isfile(_gif_mp4):
                     self.src_path = _gif_mp4
+                    # ffmpeg scale=trunc(iw/2)*2 may have changed dimensions
+                    self.frame_w = (w // 2) * 2
+                    self.frame_h = (h // 2) * 2
+                    self._frame_bytes = self.frame_w * self.frame_h * 3
                 else:
                     shutil.rmtree(self._gif_pre_tmpdir, ignore_errors=True)
                     self._gif_pre_tmpdir = None
@@ -82,7 +86,6 @@ class FFmpegPipeReader:
 
         cmd = [
             "ffmpeg", "-y",
-            "-hwaccel", "auto",
             "-i", self.src_path,
             "-f", "image2pipe",
             "-vcodec", "rawvideo",

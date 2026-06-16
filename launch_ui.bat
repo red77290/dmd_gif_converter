@@ -117,7 +117,7 @@ if not exist "%VENV%\Scripts\python.exe" (
 
 :: ── Launch the UI ─────────────────────────────────────────────────────────────
 echo =^> Starting DMD GIF Converter...
-"%VENV%\Scripts\python.exe" %UI%
+"%VENV%\Scripts\python.exe" %UI% %*
 
 if errorlevel 1 (
     echo.

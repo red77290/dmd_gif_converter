@@ -46,7 +46,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
     """Animated preview + conversion actions."""
 
     def __init__(self, parent, app_state, **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+        super().__init__(parent, fg_color="transparent", height=1, **kwargs)
         self.panel = parent
         self.app_state = app_state
 
@@ -234,6 +234,13 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         self._canvas = self._src_canvas
         self._preview_info = self._src_info
 
+        # Forward mouse wheel from standard tk.Canvas to CTkScrollableFrame parent
+        for c in (self._src_canvas, self._auto_canvas, self._dmd_canvas):
+            if hasattr(self, "_mouse_wheel_all"):
+                c.bind("<MouseWheel>", self._mouse_wheel_all, add="+")
+                c.bind("<Button-4>", self._mouse_wheel_all, add="+")
+                c.bind("<Button-5>", self._mouse_wheel_all, add="+")
+
         self.app_state.v_target_width.trace_add("write", self._update_dmd_canvas_size)
         self.app_state.v_target_height.trace_add("write", self._update_dmd_canvas_size)
 
@@ -284,7 +291,10 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         MAX_H = 160
         
         led = getattr(self.app_state, "v_led_sim", None)
-        dw, dh, _ = self._compute_led_sim_display_size(max_w=MAX_W)
+        if led and led.get():
+            dw, dh, _ = self._compute_led_sim_display_size(max_w=MAX_W)
+        else:
+            dw, dh = int(w * DMD_DISPLAY_SCALE_FACTOR), int(h * DMD_DISPLAY_SCALE_FACTOR)
 
         if dw > MAX_W or dh > MAX_H:
             s = min(MAX_W / dw, MAX_H / dh)
@@ -302,6 +312,9 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         self._last_dmd_w = nw
         self._last_dmd_h = nh
         
+        # Force scroll region update in case geometry manager delays
+        self.after(50, lambda: self._parent_canvas.configure(scrollregion=self._parent_canvas.bbox("all")))
+        
         if hasattr(self, "_dmd_title_label"):
             sim = "  💡" if (getattr(self.app_state, "v_led_sim", None) and
                              self.app_state.v_led_sim.get()) else ""
@@ -317,11 +330,16 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             hover_color="#7a6400" if is_on else "#2a2a4a",
             text="💡 LED Sim ✓" if is_on else "💡 LED Sim")
         self._update_dmd_canvas_size()
-        self._dmd_frames = [None] * len(self._dmd_pil_frames) if hasattr(self, "_dmd_pil_frames") else []
-        if getattr(self, "_dmd_cached_out", None) and os.path.isfile(self._dmd_cached_out):
-            self._start_dmd_generation(self._dmd_cached_out, is_already_converted=True)
-        elif self._current_path and not self._dmd_rendering:
-            self._start_dmd_generation(self._current_path)
+        
+        # If we already have PIL frames, just clear the ImageTk cache so the running _animate_dmd loop recreates them.
+        if getattr(self, "_dmd_pil_frames", None):
+            self._dmd_frames = [None] * len(self._dmd_pil_frames)
+        else:
+            self._dmd_frames = []
+            if getattr(self, "_dmd_cached_out", None) and os.path.isfile(self._dmd_cached_out):
+                self._start_dmd_generation(self._dmd_cached_out, is_already_converted=True)
+            elif self._current_path and not self._dmd_rendering:
+                self._start_dmd_generation(self._current_path)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  IDLE DRAW
@@ -408,6 +426,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _stop_src_preview(self):
+        self._src_gen_id = getattr(self, "_src_gen_id", 0) + 1
         if self._src_job:
             self.after_cancel(self._src_job)
             self._src_job = None
@@ -440,9 +459,15 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                 delays.append(delay_ms)
             except Exception:
                 pass
-        self.after(0, lambda: self._on_source_frames_ready(pil_frames, delays, tmpdir, file_path))
+        self.after(0, lambda: self._on_source_frames_ready(pil_frames, delays, tmpdir, file_path, gen_id))
 
-    def _on_source_frames_ready(self, pil_frames, delays, tmpdir, file_path):
+    def _on_source_frames_ready(self, pil_frames, delays, tmpdir, file_path, gen_id=0):
+        if getattr(self, "_src_gen_id", 0) != gen_id:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            self._src_rendering = False
+            self._flush_src_pending()
+            return
+            
         if not pil_frames:
             self._src_canvas.delete("all")
             cw = max(20, self._src_canvas.winfo_width()) if self._src_canvas.winfo_width() > 10 else SRC_CANVAS_W
@@ -505,6 +530,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _stop_auto_preview(self):
+        self._auto_gen_id = getattr(self, "_auto_gen_id", 0) + 1
         if self._auto_job:
             self.after_cancel(self._auto_job)
             self._auto_job = None
@@ -523,6 +549,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         self._start_auto_generation(self._current_path)
 
     def _start_auto_generation(self, src):
+        self._auto_gen_id = getattr(self, "_auto_gen_id", 0) + 1
         if self._auto_rendering:
             self._auto_pending_src = src
             return
@@ -582,9 +609,9 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             
 
         threading.Thread(target=self._generate_auto_preview,
-                         args=(src, cfg), daemon=True).start()
+                         args=(src, cfg, self._auto_gen_id), daemon=True).start()
 
-    def _generate_auto_preview(self, src, cfg):
+    def _generate_auto_preview(self, src, cfg, gen_id):
         try:
             self.after(0, lambda: self.panel.controls._conv_progress.configure(mode="indeterminate"))
             self.after(0, lambda: self.panel.controls._conv_progress.start())
@@ -601,7 +628,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             self.after(0, lambda: self.panel.controls._conv_progress.set(0))
             
             if not ok or not out_mp4:
-                self.after(0, lambda: self._on_auto_fail(msg))
+                self.after(0, lambda: self._on_auto_fail(msg, gen_id))
                 return
             tmpdir = os.path.dirname(out_mp4)
             fps_prev = 12.5
@@ -621,12 +648,18 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                     delays.append(int(1000 / fps_prev))
                 except Exception:
                     pass
-            self.after(0, lambda: self._on_auto_ready(pil_frames, delays, tmpdir, msg))
+            self.after(0, lambda: self._on_auto_ready(pil_frames, delays, tmpdir, msg, gen_id))
         except Exception as exc:
             _m = str(exc)
-            self.after(0, lambda _msg=_m: self._on_auto_fail(_msg))
+            self.after(0, lambda _msg=_m: self._on_auto_fail(_msg, gen_id))
 
-    def _on_auto_ready(self, pil_frames, delays, tmpdir, msg):
+    def _on_auto_ready(self, pil_frames, delays, tmpdir, msg, gen_id=0):
+        if getattr(self, "_auto_gen_id", 0) != gen_id:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            self._auto_rendering = False
+            self._flush_auto_pending()
+            return
+            
         self._auto_rendering = False
         self.panel.controls._btn_auto.configure(state="normal", text="🎯 Auto")
         if not pil_frames:
@@ -648,7 +681,15 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         if self._current_path:
             self._start_dmd_generation(self._current_path)
 
-    def _on_auto_fail(self, msg):
+    def _on_auto_fail(self, msg, gen_id=0):
+        if getattr(self, "_auto_gen_id", 0) != gen_id:
+            if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
+                shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+                self._auto_tmpdir = None
+            self._auto_rendering = False
+            self._flush_auto_pending()
+            return
+            
         self._auto_rendering = False
         self.panel.controls._btn_auto.configure(state="normal", text="🎯 Auto")
         if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
@@ -729,6 +770,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _stop_dmd_preview(self):
+        self._dmd_gen_id = getattr(self, "_dmd_gen_id", 0) + 1
         if self._dmd_job:
             self.after_cancel(self._dmd_job)
             self._dmd_job = None
@@ -753,6 +795,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         self._start_dmd_generation(self._current_path)
 
     def _start_dmd_generation(self, src, is_already_converted=False):
+        self._dmd_gen_id = getattr(self, "_dmd_gen_id", 0) + 1
         if self._dmd_rendering:
             self._dmd_pending_src = src
             return
@@ -797,12 +840,13 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             dw, dh, sim_scale = self._compute_led_sim_display_size()
         else:
             dw, dh, sim_scale = cw, ch, 0
+            
         threading.Thread(
             target=self._generate_dmd_preview,
-            args=(src, params, start_s, end_s, is_already_converted),
+            args=(src, params, start_s, end_s, is_already_converted, self._dmd_gen_id),
             daemon=True).start()
 
-    def _generate_dmd_preview(self, src, params, start_s, end_s, is_already_converted=False):
+    def _generate_dmd_preview(self, src, params, start_s, end_s, is_already_converted=False, gen_id=0):
         tmpdir = tempfile.mkdtemp(prefix="dmd_dmd_")
         try:
             if is_already_converted:
@@ -810,6 +854,10 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             else:
                 out_gif = os.path.join(tmpdir, "preview.mp4")
                 
+                if getattr(self, "_dmd_gen_id", 0) != gen_id:
+                    self.after(0, lambda: self._on_dmd_fail("Aborted", tmpdir, gen_id))
+                    return
+                    
                 self.after(0, lambda: self.panel.controls._conv_progress.configure(mode="indeterminate"))
                 self.after(0, lambda: self.panel.controls._conv_progress.start())
                 
@@ -818,13 +866,22 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                     callback=lambda m, lv="info": self.after(0, lambda _m=m, _lv=lv: self.panel._log(_m, _lv))
                 )
                 
+                if getattr(self, "_dmd_gen_id", 0) != gen_id:
+                    self.after(0, lambda: self._on_dmd_fail("Aborted", tmpdir, gen_id))
+                    return
+                
                 self.after(0, lambda: self.panel.controls._conv_progress.stop())
                 self.after(0, lambda: self.panel.controls._conv_progress.configure(mode="determinate"))
                 self.after(0, lambda: self.panel.controls._conv_progress.set(0))
                 
                 if not success or not os.path.isfile(out_gif):
-                    self.after(0, lambda: self._on_dmd_fail(msg, tmpdir))
+                    self.after(0, lambda: self._on_dmd_fail(msg, tmpdir, gen_id))
                     return
+            
+            if getattr(self, "_dmd_gen_id", 0) != gen_id:
+                self.after(0, lambda: self._on_dmd_fail("Aborted", tmpdir, gen_id))
+                return
+                
             pil_frames, delays = [], []
             try:
                 if out_gif.lower().endswith(('.mp4', '.mkv', '.mov', '.avi', '.webm')):
@@ -852,20 +909,22 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                         pil_frames.append(comp)
                         delays.append(max(img.info.get("duration", 80), 20))
             except Exception as exc:
-                _m = str(exc)
-                self.after(0, lambda _msg=_m, _td=tmpdir: self._on_dmd_fail(_msg, _td))
+                self.after(0, lambda: self._on_dmd_fail(str(exc), tmpdir, gen_id))
                 return
             if not pil_frames:
-                self.after(0, lambda: self._on_dmd_fail("No frames decoded", tmpdir))
+                self.after(0, lambda: self._on_dmd_fail("No frames decoded", tmpdir, gen_id))
                 return
-            self.after(0, lambda: self._on_dmd_ready(pil_frames, delays, tmpdir, out_gif))
+            self.after(0, lambda: self._on_dmd_ready(pil_frames, delays, tmpdir, out_gif, gen_id))
         except Exception as exc:
-            import traceback
-            traceback.print_exc()
-            _m = str(exc)
-            self.after(0, lambda _msg=_m, _td=tmpdir: self._on_dmd_fail(_msg, _td))
+            self.after(0, lambda: self._on_dmd_fail(str(exc), tmpdir, gen_id))
 
-    def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif):
+    def _on_dmd_ready(self, pil_frames, delays, tmpdir, out_gif, gen_id=0):
+        if getattr(self, "_dmd_gen_id", 0) != gen_id:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            self._dmd_rendering = False
+            self._flush_dmd_pending()
+            return
+            
         try:
             self._dmd_rendering = False
             self.panel.controls._btn_dmd.configure(state="normal", text="🔬 DMD")
@@ -886,7 +945,13 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         except Exception as e:
             logger.exception("_on_dmd_ready: %s", e)
 
-    def _on_dmd_fail(self, msg, tmpdir):
+    def _on_dmd_fail(self, msg, tmpdir, gen_id=0):
+        if getattr(self, "_dmd_gen_id", 0) != gen_id:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            self._dmd_rendering = False
+            self._flush_dmd_pending()
+            return
+            
         self._dmd_rendering = False
         self.panel.controls._btn_dmd.configure(state="normal", text="🔬 DMD")
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -954,7 +1019,15 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                 self._dmd_frames[idx] = ImageTk.PhotoImage(resized)
                 
             self._dmd_canvas.delete("all")
-            self._dmd_canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._dmd_frames[idx])
+            
+            # Place the image exactly in the center of the actual canvas boundaries 
+            # to prevent it from appearing off-center if the canvas was stretched by the geometry manager.
+            actual_cw = self._dmd_canvas.winfo_width()
+            actual_ch = self._dmd_canvas.winfo_height()
+            draw_x = (actual_cw // 2) if actual_cw > 10 else (cw // 2)
+            draw_y = (actual_ch // 2) if actual_ch > 10 else (ch // 2)
+            
+            self._dmd_canvas.create_image(draw_x, draw_y, anchor="center", image=self._dmd_frames[idx])
             self._dmd_idx += 1
             self._dmd_job = self.after(
                 self._dmd_delays[idx] if self._dmd_delays else 80, self._animate_dmd)

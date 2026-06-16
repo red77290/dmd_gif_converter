@@ -674,12 +674,13 @@ class AiMomentsPanel(ctk.CTkFrame):
                     out_name = f"{base_name}_M{i+1}{ext}"
                 out_path = tmp_dir / out_name
                 
-                # Use ffmpeg to cut the moment (no -c copy to allow frame-accurate cutting)
+                # Use fast seeking and stream copy for instantaneous extraction
                 cmd = [
                     "ffmpeg", "-y",
-                    "-i", src_path,
                     "-ss", str(m.start_time),
+                    "-i", src_path,
                     "-t", str(m.end_time - m.start_time),
+                    "-c", "copy",
                     str(out_path)
                 ]
                 

@@ -65,6 +65,9 @@ class LogConsole(ctk.CTkFrame):
         
         self._drag_start_y = 0
         self._drag_start_h = 0
+        
+        # Hide by default
+        self.toggle_log_panel()
 
     def _on_sash_press(self, event):
         self._drag_start_y = event.y_root
