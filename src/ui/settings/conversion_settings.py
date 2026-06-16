@@ -15,12 +15,16 @@ class ConversionSettingsPanel(ctk.CTkFrame):
                 text_color="#7ec8e3"
             ).pack(fill="x", padx=8, pady=(12, 2), anchor="w")
 
-        def slider_row(label, var, from_, to, fmt="{:.1f}", suffix="", steps=None):
+        def slider_row(label, var, from_, to, fmt="{:.1f}", suffix="", steps=None, tooltip_text=None):
             f = ctk.CTkFrame(self, fg_color="transparent")
             f.pack(fill="x", padx=8, pady=2)
             f.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(f, text=label, width=135, anchor="w",
-                         font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+            lbl = ctk.CTkLabel(f, text=label, width=135, anchor="w",
+                         font=ctk.CTkFont(size=12))
+            lbl.grid(row=0, column=0, padx=(4, 6))
+            if tooltip_text:
+                from src.ui.widgets import ToolTip
+                ToolTip(lbl, tooltip_text)
             kw = dict(from_=from_, to=to, variable=var)
             if steps is not None:
                 kw["number_of_steps"] = steps
@@ -70,8 +74,11 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         mr = ctk.CTkFrame(self, fg_color="transparent")
         mr.pack(fill="x", padx=8, pady=2)
         mr.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(mr, text="Mode", width=135, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        lbl_mode = ctk.CTkLabel(mr, text="Mode", width=135, anchor="w",
+                     font=ctk.CTkFont(size=12))
+        lbl_mode.grid(row=0, column=0, padx=(4, 6))
+        from src.ui.widgets import ToolTip
+        ToolTip(lbl_mode, "Selects the visual processing mode.\n'cinema' = deep blacks, smooth colors\n'pixel_art' = sharp and vibrant\n'anime' = saturated and bright\n'custom' = unlocks Advanced Settings")
         self._mode_menu = ctk.CTkOptionMenu(
             mr, variable=self.app_state.v_mode,
             values=["pixel_art", "anime", "cinema", "custom"],
@@ -101,13 +108,17 @@ class ConversionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#aaddaa", width=60
         )
         cb_auto_workers.pack(side="left", padx=(0, 10))
+        ToolTip(cb_auto_workers, "Automatically determines the optimal number of CPU workers based on your system.")
+
         
         # Manually create the slider for workers so we can disable it
         wf_inner = ctk.CTkFrame(workers_frame, fg_color="transparent")
         wf_inner.pack(side="left", fill="x", expand=True)
         wf_inner.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(wf_inner, text="Workers (CPU)", width=100, anchor="w",
-                     font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(4, 6))
+        lbl_workers = ctk.CTkLabel(wf_inner, text="Workers (CPU)", width=100, anchor="w",
+                     font=ctk.CTkFont(size=12))
+        lbl_workers.grid(row=0, column=0, padx=(4, 6))
+        ToolTip(lbl_workers, "Number of concurrent CPU threads to use during conversion.\nHigher is faster but uses more system resources.")
                      
         sl_workers = ctk.CTkSlider(wf_inner, from_=1, to=16, number_of_steps=15, variable=self.app_state.v_workers)
         sl_workers.grid(row=0, column=1, sticky="ew", padx=4)
@@ -168,10 +179,10 @@ class ConversionSettingsPanel(ctk.CTkFrame):
 
         section("📜  Scroll")
         self._scroll_sliders = []
-        self._scroll_sliders.append(slider_row("Scroll speed",    self.app_state.v_scroll_speed,        4.0, 80.0, "{:.0f}", " px/s"))
-        self._scroll_sliders.append(slider_row("Top crop (%)",    self.app_state.v_top_crop,      0.0,  0.5, "{:.0%}"))
-        self._scroll_sliders.append(slider_row("Bottom crop (%)", self.app_state.v_bottom_crop,   0.0,  0.5, "{:.0%}"))
-        self._scroll_sliders.append(slider_row("Scroll cycles",   self.app_state.v_scroll_cycles, 0.0,  5.0, "{:.2f}", " cyc"))
+        self._scroll_sliders.append(slider_row("Scroll speed",    self.app_state.v_scroll_speed,        4.0, 80.0, "{:.0f}", " px/s", tooltip_text="Speed of the automatic vertical panning (pixels per second)."))
+        self._scroll_sliders.append(slider_row("Top crop (%)",    self.app_state.v_top_crop,      0.0,  0.5, "{:.0%}", tooltip_text="Percentage of the top of the video to ignore (e.g. 10% = ignore top 10%)."))
+        self._scroll_sliders.append(slider_row("Bottom crop (%)", self.app_state.v_bottom_crop,   0.0,  0.5, "{:.0%}", tooltip_text="Percentage of the bottom to ignore (useful for hiding HUDs or subtitles)."))
+        self._scroll_sliders.append(slider_row("Scroll cycles",   self.app_state.v_scroll_cycles, 0.0,  5.0, "{:.2f}", " cyc", tooltip_text="Number of times to bounce the vertical pan up and down during the video's duration.\nA value of 1.0 means it pans down once."))
 
         def _update_scroll_state(*_):
             try:
@@ -188,5 +199,5 @@ class ConversionSettingsPanel(ctk.CTkFrame):
         _update_scroll_state()
 
         section("🎬  Render FPS")
-        slider_row("FPS minimum", self.app_state.v_fps_min, 5.0,  30.0, "{:.1f}", " fps")
-        slider_row("FPS maximum", self.app_state.v_fps_max, 10.0, 60.0, "{:.1f}", " fps")
+        slider_row("FPS minimum", self.app_state.v_fps_min, 5.0,  30.0, "{:.1f}", " fps", tooltip_text="The lowest frame rate allowed for the output video/GIF.\nThe tool will drop frames down to this limit if possible to save file size.")
+        slider_row("FPS maximum", self.app_state.v_fps_max, 10.0, 60.0, "{:.1f}", " fps", tooltip_text="The highest frame rate allowed.\nHigh FPS creates smoother animations but results in larger files.")

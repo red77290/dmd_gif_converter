@@ -1,5 +1,17 @@
 # DMD GIF Converter — Changelog
 
+## [7.1.0] - 2026-06-16 (UI Refactoring & Tooltips)
+### Added
+- Comprehensive tooltips (infobulles) for all UI parameters in Conversion Settings and Advanced Settings.
+- Visual lock in Advanced Settings: Manual sliders (Zoom, X/Y Offset) and Scroll settings are disabled (greyed out) automatically when Auto Action is enabled.
+
+### Refactored
+- `PreviewPanel` completely refactored into a modular MVC architecture:
+  - `PreviewPanel`: Acts as the orchestrator and layout container.
+  - `PreviewPlayer`: Handles media loading, caching, and LED Matrix simulation rendering.
+  - `PreviewControls`: Isolates all UI widgets, buttons, and sliders.
+
+
 ## [7.0.0] - Architecture & Performances (V7)
 - **🚀 Restored Massive Multithreading**: The batch conversion mode once again uses a worker pool (`concurrent.futures.ThreadPoolExecutor`), massively reducing processing time for large directories.
 - **🚀 Intelligent Core Allocation (Auto-Workers)**: By default, the application now profiles your CPU and reserves a safety margin (`max(1, min(16, os.cpu_count() // 2))`) to prevent the PC from freezing during heavy conversions.
