@@ -350,7 +350,7 @@ class _FrameDetector(AbstractDetector):
         cv2 = self.cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        if self.prev_gray is None:
+        if self.prev_gray is None or self.prev_gray.shape != gray.shape:
             self.prev_gray = gray
             return None
 

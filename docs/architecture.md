@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v7.0.0)
+# DMD GIF Converter — Technical Architecture (v7.1.0)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -99,8 +99,12 @@ dmd_gif_converter/
 │       │   └── app_state.py          ← AppState (IModel) — single source of truth
 │       ├── controllers/
 │       │   ├── conversion_controller.py  ← ConversionController (IController)
-│       │   └── preview_controller.py    ← PreviewController (IController)
-│       ├── panels/                   ← UI Panels (Composition based)
+│       │   └── conversion_controller.py ← ConversionController (IController)
+│       ├── preview/                  ← UI Preview Components
+│       │   ├── preview_panel.py      ← Main preview layout
+│       │   ├── preview_player.py     ← Video/DMD player and threading
+│       │   └── preview_controls.py   ← Playback controls and timeline
+│       ├── panels/                   ← Other UI Panels (Composition based)
 │       ├── widgets.py                ← _InfoBadge, reusable widgets
 │       ├── dmd_led_sim.py            ← LED grid pixel simulation
 │       └── constants.py              ← APP_VERSION, colors, fonts
@@ -122,7 +126,7 @@ The system is divided into **three independent layers**, each with its own set o
 ┌────────────────────────────────────────────────────────────────────────┐
 │  UI Layer      DMDConverterApp  ←  AppState (IModel)                   │
 │  (Tkinter)     Panels (Composition) ←  ConversionController (IController)  │
-│                                 ←  PreviewController (IController)     │
+│  Controller    conversion_controller.py ← ConversionController (IController)   │
 └────────────────────────────────────┬───────────────────────────────────┘
                                      │ calls process_file() / process_folder()
 ┌────────────────────────────────────▼───────────────────────────────────┐
@@ -476,17 +480,6 @@ classDiagram
         -_run_conversion(files) void
     }
 
-    class PreviewController {
-        -_view: IView
-        -_model: IModel
-        -_pending_job: int
-        +DEBOUNCE_MS: int
-        +bind(view, model) void
-        +on_action(action, payload) void
-        +schedule_refresh() void
-        -_trigger_refresh() void
-    }
-
     class DMDConverterApp {
         +state: AppState
         -_file_data: dict
@@ -507,9 +500,18 @@ classDiagram
         +_restore_params(snap) void
     }
     class PreviewPanel {
-        +_build_middle_panel() void
+        +_controls: PreviewControls
+        +_player: PreviewPlayer
+        +pack() void
+        +load_source() void
+    }
+    class PreviewPlayer {
         +_generate_dmd_preview() void
         +_animate_dmd() void
+        +_toggle_led_sim() void
+    }
+    class PreviewControls {
+        +update_progress() void
     }
     class AiMomentsPanel {
         +_build_studio_timeline() void
@@ -519,16 +521,16 @@ classDiagram
 
     IModel <|.. AppState : implements
     IController <|.. ConversionController : implements
-    IController <|.. PreviewController : implements
     DMDConverterApp *-- LeftPanel : instantiates via Composition
     DMDConverterApp *-- SettingsPanel : instantiates via Composition
     DMDConverterApp *-- PreviewPanel : instantiates via Composition
+    PreviewPanel *-- PreviewPlayer : composes
+    PreviewPanel *-- PreviewControls : composes
     DMDConverterApp *-- AiMomentsPanel : instantiates via Composition
     DMDConverterApp --> AppState : owns
     DMDConverterApp --> ConversionController : creates
-    DMDConverterApp --> PreviewController : creates
     ConversionController --> AppState : reads model
-    PreviewController --> DMDConverterApp : calls _generate_dmd_preview
+    PreviewPlayer --> DMDConverterApp : communicates via events
 ```
 
 ---
@@ -706,19 +708,20 @@ sequenceDiagram
 sequenceDiagram
     actor User
     participant UI as DMDConverterApp (View)
-    participant PC as PreviewController
+    participant UI as DMDConverterApp (View)
+    participant PP as PreviewPlayer (UI Thread)
     participant BG as Background Thread
     participant Core as process_file()
 
     User->>UI: Changes any parameter (slider, checkbox, …)
-    UI->>PC: schedule_refresh()
-    PC->>PC: Cancel previous after() job
-    PC->>PC: Schedule new after(2000ms, _trigger_refresh)
+    UI->>PP: schedule_dmd_generation()
+    PP->>PP: Cancel previous after() job
+    PP->>PP: Schedule new after(200ms, _start_dmd_generation)
 
-    Note over PC: Debounce: resets if user keeps changing params
+    Note over PP: Debounce: resets if user keeps changing params
 
-    PC->>UI: _generate_dmd_preview() [after 2 s of inactivity]
-    UI->>BG: Thread(_render_dmd_preview)
+    PP->>UI: _generate_dmd_preview() [after 0.2s of inactivity]
+    UI->>BG: Thread(_generate_dmd_preview)
     BG->>Core: process_file(src, tmp_out, params)
     Core-->>BG: (success, gif_path)
     BG->>UI: after(0, _load_dmd_frames) [back to main thread]
@@ -788,11 +791,13 @@ BoundingBox = typing.NamedTuple('BoundingBox', [('x', int), ('y', int), ('w', in
 
 ```mermaid
 graph TD
-    subgraph "UI Layer"
-        APP[DMDConverterApp]
-        STATE[AppState]
+    subgraph "MVC Controllers"
         CC[ConversionController]
-        PC[PreviewController]
+    end
+
+    subgraph "UI View"
+        APP[DMDConverterApp]
+        PREVIEW[PreviewPlayer / PreviewPanel]
         PANELS[UI Panels (Composition)]
     end
 
@@ -1007,9 +1012,9 @@ class MyPanel(ctk.CTkFrame, IPanel):
 
 ---
 
-*Last updated: v7.0.0 — June 2026*
+*Last updated: v7.1.0 — June 2026*
 
-## 12. Concurrency & Performance Engineering (v7.0.0)
+## 12. Concurrency & Performance Engineering (v7.1.0)
 
 With the introduction of batch processing and high-performance previews, several architectural constraints were implemented to maintain system stability:
 

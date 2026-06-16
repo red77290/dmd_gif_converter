@@ -34,7 +34,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 
 | Paramètre | Flag CLI | Défaut | Description |
 |---|---|---|---|
-| `max_workers` | `--workers` | `2` | Processus ffmpeg en parallèle |
+| `max_workers` | `--workers` | `auto` | Processus ffmpeg en parallèle (auto-adapté aux cœurs/2) |
 | `scroll_speed` | `--scroll-speed` | `24.0` | Vitesse de défilement (px/s) |
 | `bottom_crop_pct` | `--bottom-crop` | `0.15` | Part du bas ignorée (pieds, sol) |
 | `scroll_cycles` | `--scroll-cycles` | `1.5` | Nombre de cycles + position d'arrêt (voir ci-dessous) |
@@ -138,14 +138,9 @@ La partie entière = nombre d'**allers-retours complets** (bas→haut) ; la part
 
 ### Réglage de `--workers`
 
-| Machine | Recommandé |
-|---|---|
-| MacBook Pro M-series (10+ cœurs) | `6`–`8` |
-| Desktop SSD, 8+ cœurs, 16 Go+ | `6`–`8` |
-| Desktop SSD, 4 cœurs, 8 Go | `3`–`4` |
-| Laptop ou disque dur (HDD) | `2` |
+Par défaut, le convertisseur utilise un nombre de workers optimal calculé automatiquement (`cœurs_cpu / 2`).
 
-> Les workers sont limités par le CPU (génération de palette + dithering ffmpeg). Au-delà de 8 workers le gain est faible et la pression mémoire augmente.  
+Si vous avez un processeur très puissant et un SSD rapide, vous pouvez forcer cette limite avec `--workers N`. Attention, au-delà de 8 workers le gain est souvent négligeable et la pression mémoire augmente drastiquement.
 > En mode UI, chaque log de worker parallèle est préfixé par `[W1]`, `[W2]`, etc. pour faciliter le filtrage.
 
 ### Logs terminal — launcher vs invocation directe
