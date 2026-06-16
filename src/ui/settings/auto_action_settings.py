@@ -195,10 +195,14 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
 
         _add_dep(adv_slider(parent, "Zoom max", self.app_state.v_action_zoom_max, 1.0, 3.0,
                    "{:.2f}", "×", steps=100))
-        _add_dep(adv_slider(parent, "ROI padding", self.app_state.v_action_padding, 0.0, 0.6,
-                   "{:.2f}", "", steps=60))
-        _add_dep(adv_slider(parent, "Intro panoramic", self.app_state.v_action_intro_duration, 0.0, 5.0,
-                   "{:.1f}", " s", steps=50))
+        
+        pad_sl = adv_slider(parent, "ROI padding", self.app_state.v_action_padding, 0.0, 0.6,
+                   "{:.2f}", "", steps=60)
+        self._action_dependent_widgets.append(pad_sl)
+        
+        intro_sl = adv_slider(parent, "Intro panoramic", self.app_state.v_action_intro_duration, 0.0, 5.0,
+                   "{:.1f}", " s", steps=50)
+        self._action_dependent_widgets.append(intro_sl)
                    
         # Fast Tracking / Subsampling (not disabled by Let Me Handle It)
         self._slider_subsample = adv_slider(parent, "Fast Tracking (Speedup)", self.app_state.v_action_subsample_frames, 1, 10,
@@ -391,9 +395,9 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=12), text_color="#aaddaa",
         )
         self._cb_bg_sub.pack(side="left")
-        self.app_state.lmh_widgets.append(self._cb_bg_sub)
+        self._action_dependent_widgets.append(self._cb_bg_sub)
         _b4 = _InfoBadge(bg_sub_row)
-        _b4.configure(text="Replaces the detected background with black to maximize contrast and reduce LED power consumption.\n(Locked when Let me handle it is ON)")
+        _b4.configure(text="Replaces the detected background with black to maximize contrast and reduce LED power consumption.")
         _b4.pack(side="left", padx=(0, 8))
 
     def refresh_states(self):

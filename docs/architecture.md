@@ -1008,3 +1008,22 @@ class MyPanel(ctk.CTkFrame, IPanel):
 ---
 
 *Last updated: v7.0.0 — June 2026*
+
+## 12. Concurrency & Performance Engineering (v7.0.0)
+
+With the introduction of batch processing and high-performance previews, several architectural constraints were implemented to maintain system stability:
+
+### 12.1 Hardware Acceleration (`hardware_accel.py`)
+The converter injects OS-specific hardware encoders into the FFmpeg pipeline dynamically:
+- macOS: `h264_videotoolbox`
+- NVIDIA: `h264_nvenc`
+- Intel: `h264_qsv`
+
+### 12.2 Global Thread Safety (`SafeVideoCapture`)
+OpenCV's `cv2.VideoCapture` is fundamentally unsafe when multiple threads instantiate it simultaneously (causing `SIGABRT` / `SIGSEGV` on macOS). The system uses a globally patched `SafeVideoCapture` with a strict `threading.Lock` to serialize video demuxing.
+
+### 12.3 Thread Pooling Caps
+Deep Learning inference (YOLO / ONNX) will cannibalize all CPU cores if unbound, leading to GUI freezes during batch processing. The `onnxruntime` sessions are strictly capped globally (`intra_op_num_threads=2`, `inter_op_num_threads=1`).
+
+### 12.4 Chained UI Preview
+To prevent redundant YOLO execution, the UI's `PreviewPanel` strictly chains the generation of the `Auto-Action` preview and the `DMD` preview. The DMD preview waits for the intermediate `action_pre.mp4` cache, entirely bypassing the YOLO engine on subsequent runs.

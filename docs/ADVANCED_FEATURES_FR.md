@@ -434,3 +434,15 @@ Pour optimiser l'utilisation du processeur pendant l'inférence YOLO, deux param
    - *Exemple* : `5.0` signifie que 5 images par seconde sont analysées. Une valeur plus basse accélère l'analyse mais réduit la précision. Une valeur plus haute détecte les micro-mouvements mais prend plus de temps.
    - *CLI* : `--ai-moments-analyze-fps 5.0`
 
+
+## Accélération Matérielle (GPU Encoders)
+
+Le moteur tente automatiquement d'utiliser les encodeurs vidéo à accélération matérielle lors du processus de rendu interne FFmpeg pour accélérer considérablement les temps de traitement et réduire l'utilisation du processeur. 
+Il effectue une détection dynamique au démarrage dans `src.engine.conversion.hardware_accel` :
+
+- **macOS (Apple Silicon / Intel)** : `h264_videotoolbox`
+- **NVIDIA GPUs** : `h264_nvenc`
+- **Intel GPUs** : `h264_qsv`
+- **Repli (Fallback)** : `libx264`
+
+L'accélération matérielle est appliquée automatiquement sans aucune configuration requise par l'utilisateur, à condition que la machine hôte dispose du GPU et des pilotes appropriés installés.

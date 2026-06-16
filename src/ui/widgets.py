@@ -126,3 +126,58 @@ class CTkChip(ctk.CTkButton):
             hover_color=self.active_hover if is_active else self.inactive_hover
         )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ToolTip — Tooltip window on hover
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ToolTip:
+    """
+    A simple tooltip for CustomTkinter widgets.
+    """
+    def __init__(self, widget, text, delay=500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.tooltip_window = None
+        self.id = None
+        
+        # Bind events
+        self.widget.bind("<Enter>", self.schedule_show)
+        self.widget.bind("<Leave>", self.hide)
+        self.widget.bind("<ButtonPress>", self.hide)
+        
+    def schedule_show(self, event=None):
+        self.id = self.widget.after(self.delay, self.show)
+
+    def show(self, event=None):
+        if self.tooltip_window or not self.text:
+            return
+            
+        x, y, cx, cy = self.widget.bbox("insert")
+        x = x + self.widget.winfo_rootx() + 25
+        y = y + cy + self.widget.winfo_rooty() + 25
+        
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        
+        # CustomTkinter styling for the tooltip
+        label = ctk.CTkLabel(
+            tw, text=self.text,
+            corner_radius=4,
+            fg_color="#1e1e2e",
+            text_color="#cdd6f4",
+            font=ctk.CTkFont(size=11),
+            padx=8, pady=4
+        )
+        label.pack()
+
+    def hide(self, event=None):
+        if self.id:
+            self.widget.after_cancel(self.id)
+            self.id = None
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+

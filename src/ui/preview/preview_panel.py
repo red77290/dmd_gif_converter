@@ -100,6 +100,10 @@ class PreviewPanel(ctk.CTkFrame):
         EventBus.subscribe(EventType.PREVIEW_SOURCE_CHANGED, self._on_source_changed)
         EventBus.subscribe(EventType.PREVIEW_REFRESH_REQUESTED, self._on_refresh_requested)
 
+        # Responsive layout bind
+        self._is_stacked = False
+        self.bind("<Configure>", self._on_resize)
+
     def set_sibling_panels(self, left_panel, middle_panel):
         """Inject sibling references so conversion can access the file list and result list."""
         self._left_panel = left_panel
@@ -134,6 +138,50 @@ class PreviewPanel(ctk.CTkFrame):
         if fn:
             self.after(0, fn)
 
+    def _on_resize(self, event):
+        # We handle canvas resizing in their own Configure events now.
+        pass
+
+    def _on_canvas_resize(self, event, canvas_id):
+        w, h = event.width, event.height
+        if w < 10 or h < 10:
+            return
+            
+        canvas = None
+        if canvas_id == "src":
+            canvas = self._src_canvas
+            if abs(w - getattr(self, "_last_src_w", 0)) > 5 or abs(h - getattr(self, "_last_src_h", 0)) > 5:
+                self._last_src_w = w
+                self._last_src_h = h
+                self._src_frames = [None] * len(self._src_pil_frames) if hasattr(self, "_src_pil_frames") else []
+        elif canvas_id == "auto":
+            canvas = self._auto_canvas
+            if abs(w - getattr(self, "_last_auto_w", 0)) > 5 or abs(h - getattr(self, "_last_auto_h", 0)) > 5:
+                self._last_auto_w = w
+                self._last_auto_h = h
+                self._auto_frames = [None] * len(self._auto_pil_frames) if hasattr(self, "_auto_pil_frames") else []
+        elif canvas_id == "dmd":
+            canvas = self._dmd_canvas
+            if abs(w - getattr(self, "_last_dmd_w", 0)) > 5 or abs(h - getattr(self, "_last_dmd_h", 0)) > 5:
+                self._last_dmd_w = w
+                self._last_dmd_h = h
+                self._dmd_frames = [None] * len(self._dmd_pil_frames) if hasattr(self, "_dmd_pil_frames") else []
+                
+        # Handle button panel responsiveness based on scroll frame width (pf is the master of self)
+        # However, we only get events for canvases here. We should bind Configure on PreviewPanel.
+        # Actually, if we just use the main window width approx or self.winfo_width(), we can rearrange `_pb`.
+        pw = self.winfo_width()
+        if hasattr(self, "_pb"):
+            if pw < 750:
+                self._pb.grid(row=1, column=0, sticky="w", pady=(4, 0))
+            else:
+                self._pb.grid(row=0, column=1, sticky="e", pady=0)
+                
+        if canvas:
+            for item in canvas.find_withtag("info_text"):
+                canvas.coords(item, w // 2, h // 2)
+                canvas.itemconfigure(item, width=max(20, w - 20))
+
     # ══════════════════════════════════════════════════════════════════════════
     #  BUILD UI
     # ══════════════════════════════════════════════════════════════════════════
@@ -160,28 +208,28 @@ class PreviewPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=14, weight="bold")
         ).grid(row=0, column=0, sticky="w")
 
-        pb = ctk.CTkFrame(tr, fg_color="transparent")
-        pb.grid(row=0, column=1, sticky="e")
+        self._pb = ctk.CTkFrame(tr, fg_color="transparent")
+        self._pb.grid(row=0, column=1, sticky="e")
         self._btn_all_prev = ctk.CTkButton(
-            pb, text="🔄 Refresh All", width=110, height=26,
+            self._pb, text="🔄 Refresh All", width=110, height=26,
             command=self.refresh_all_previews)
         self._btn_all_prev.pack(side="left", padx=2)
         self._btn_src = ctk.CTkButton(
-            pb, text="▶ Source", width=80, height=26,
+            self._pb, text="▶ Source", width=80, height=26,
             command=self.show_source_preview)
         self._btn_src.pack(side="left", padx=2)
         self._btn_auto = ctk.CTkButton(
-            pb, text="🎯 Auto", width=80, height=26,
+            self._pb, text="🎯 Auto", width=80, height=26,
             fg_color="#2b4b8a", hover_color="#234073",
             command=self.show_auto_preview)
         self._btn_auto.pack(side="left", padx=2)
         self._btn_dmd = ctk.CTkButton(
-            pb, text="🔬 DMD", width=80, height=26,
+            self._pb, text="🔬 DMD", width=80, height=26,
             fg_color="#1e6a3c", hover_color="#155230",
             command=self.show_dmd_preview)
         self._btn_dmd.pack(side="left", padx=2)
         self._btn_led_sim = ctk.CTkButton(
-            pb, text="💡 LED Sim ✓", width=90, height=26,
+            self._pb, text="💡 LED Sim ✓", width=90, height=26,
             fg_color="#5a4a00", hover_color="#7a6400",
             command=self._toggle_led_sim)
         self._btn_led_sim.pack(side="left", padx=2)
@@ -190,32 +238,34 @@ class PreviewPanel(ctk.CTkFrame):
         dc.grid(row=1, column=0, padx=6, pady=4, sticky="ew")
         dc.grid_columnconfigure((0, 1), weight=1)
 
-        src_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
-        src_wrap.grid(row=0, column=0, padx=(0, 4), pady=4, sticky="ne")
-        ctk.CTkLabel(src_wrap, text="SOURCE",
+        self._src_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        self._src_wrap.grid(row=0, column=0, padx=(0, 4), pady=4, sticky="nsew")
+        ctk.CTkLabel(self._src_wrap, text="SOURCE",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color="#556677"
                      ).pack(pady=(4, 0))
-        self._src_canvas = tk.Canvas(src_wrap, width=SRC_CANVAS_W, height=SRC_CANVAS_H,
+        self._src_canvas = tk.Canvas(self._src_wrap, width=SRC_CANVAS_W, height=SRC_CANVAS_H,
                                      bg=BG_CANVAS, highlightthickness=0)
-        self._src_canvas.pack(padx=2, pady=(2, 2))
-        self._src_info = _InfoBadge(src_wrap, width=SRC_CANVAS_W)
+        self._src_canvas.pack(padx=2, pady=(2, 2), expand=True, fill="both")
+        self._src_canvas.bind("<Configure>", lambda e: self._on_canvas_resize(e, "src"))
+        self._src_info = _InfoBadge(self._src_wrap, width=SRC_CANVAS_W)
         self._src_info.pack(pady=(0, 4))
 
-        auto_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
-        auto_wrap.grid(row=0, column=1, padx=(4, 0), pady=4, sticky="nw")
-        ctk.CTkLabel(auto_wrap, text="AUTO ACTION",
+        self._auto_wrap = ctk.CTkFrame(dc, fg_color=BG_CANVAS, corner_radius=6)
+        self._auto_wrap.grid(row=0, column=1, padx=(4, 0), pady=4, sticky="nsew")
+        ctk.CTkLabel(self._auto_wrap, text="AUTO ACTION",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color="#4f7bd9"
                      ).pack(pady=(4, 0))
-        self._auto_canvas = tk.Canvas(auto_wrap, width=AUTO_CANVAS_W, height=AUTO_CANVAS_H,
+        self._auto_canvas = tk.Canvas(self._auto_wrap, width=AUTO_CANVAS_W, height=AUTO_CANVAS_H,
                                       bg=BG_CANVAS, highlightthickness=0)
-        self._auto_canvas.pack(padx=2, pady=(2, 2))
-        self._auto_info = _InfoBadge(auto_wrap, width=AUTO_CANVAS_W)
+        self._auto_canvas.pack(padx=2, pady=(2, 2), expand=True, fill="both")
+        self._auto_canvas.bind("<Configure>", lambda e: self._on_canvas_resize(e, "auto"))
+        self._auto_info = _InfoBadge(self._auto_wrap, width=AUTO_CANVAS_W)
         self._auto_info.pack(pady=(0, 4))
 
         # dmd_wrap is a direct child of pf (row=2) to prevent it from being
         # squeezed when trim (row=3) appears and compresses the dc frame (row=1).
         dmd_wrap = ctk.CTkFrame(pf, fg_color=BG_CANVAS, corner_radius=6)
-        dmd_wrap.grid(row=2, column=0, padx=4, pady=(4, 4), sticky="n")
+        dmd_wrap.grid(row=2, column=0, padx=4, pady=(4, 4), sticky="nsew")
         self._dmd_title_label = ctk.CTkLabel(
             dmd_wrap,
             text=f"DMD OUTPUT {DEFAULT_PARAMS['target_width']}×{DEFAULT_PARAMS['target_height']}",
@@ -226,7 +276,8 @@ class PreviewPanel(ctk.CTkFrame):
             width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR),
             height=int(DEFAULT_PARAMS["target_height"] * DMD_DISPLAY_SCALE_FACTOR),
             bg=BG_CANVAS, highlightthickness=0)
-        self._dmd_canvas.pack(padx=2, pady=(2, 2))
+        self._dmd_canvas.pack(padx=2, pady=(2, 2), expand=True, fill="both")
+        self._dmd_canvas.bind("<Configure>", lambda e: self._on_canvas_resize(e, "dmd"))
         self._dmd_info = _InfoBadge(
             dmd_wrap, width=int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR))
         self._dmd_info.pack(pady=(0, 4))
@@ -441,17 +492,21 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _draw_canvas_idle(self):
         self._src_canvas.delete("all")
-        self._src_canvas.create_text(SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+        cw = max(20, self._src_canvas.winfo_width()) if self._src_canvas.winfo_width() > 10 else SRC_CANVAS_W
+        self._src_canvas.create_text(cw // 2, getattr(self, "_last_src_h", SRC_CANVAS_H) // 2,
                                      text="← Select a file to preview",
-                                     fill="#445566", font=("Helvetica", 12))
+                                     fill="#445566", font=("Helvetica", 12), justify="center",
+                                     width=cw - 20, tags="info_text")
         if hasattr(self, "_src_info"):
             self._src_info.configure(text="")
 
     def _draw_auto_canvas_idle(self):
         self._auto_canvas.delete("all")
-        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+        cw = max(20, self._auto_canvas.winfo_width()) if self._auto_canvas.winfo_width() > 10 else AUTO_CANVAS_W
+        self._auto_canvas.create_text(cw // 2, getattr(self, "_last_auto_h", AUTO_CANVAS_H) // 2,
                                       text="Auto action preview\n(disabled by default)",
-                                      fill="#334466", font=("Helvetica", 11), justify="center")
+                                      fill="#334466", font=("Helvetica", 11), justify="center",
+                                      width=cw - 20, tags="info_text")
         if hasattr(self, "_auto_info"):
             self._auto_info.configure(text="")
 
@@ -463,7 +518,8 @@ class PreviewPanel(ctk.CTkFrame):
             cw, ch = int(128 * DMD_DISPLAY_SCALE_FACTOR), int(32 * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(cw // 2, ch // 2,
                                      text="← Select a file then\n  click 🔬 Refresh DMD",
-                                     fill="#334455", font=("Helvetica", 11), justify="center")
+                                     fill="#334455", font=("Helvetica", 11), justify="center",
+                                     width=cw - 20, tags="info_text")
         if hasattr(self, "_dmd_info"):
             self._dmd_info.configure(text="")
 
@@ -477,9 +533,11 @@ class PreviewPanel(ctk.CTkFrame):
         self._stop_dmd_preview()
         for c in (self._src_canvas, self._auto_canvas, self._dmd_canvas):
             c.delete("all")
-        self._src_canvas.create_text(SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+        cw = max(20, self._src_canvas.winfo_width()) if self._src_canvas.winfo_width() > 10 else SRC_CANVAS_W
+        self._src_canvas.create_text(cw // 2, getattr(self, "_last_src_h", SRC_CANVAS_H) // 2,
                                      text="⏳  Loading preview…",
-                                     fill="#7ec8e3", font=("Helvetica", 12))
+                                     fill="#7ec8e3", font=("Helvetica", 12), justify="center",
+                                     width=cw - 20, tags="info_text")
         _, __, ___, dur = get_metadata(file_path)
         self._source_duration = dur if dur and dur > 0 else 10.0
         self._update_trim_sliders()
@@ -505,8 +563,8 @@ class PreviewPanel(ctk.CTkFrame):
             self._diagnosis_frame.grid_remove()
             threading.Thread(target=self._extract_source_frames,
                              args=(file_path,), daemon=True).start()
+            # Only start auto-generation here. It will chain to DMD generation when finished.
             self._start_auto_generation(file_path)
-            self._start_dmd_generation(file_path)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  SOURCE
@@ -550,9 +608,11 @@ class PreviewPanel(ctk.CTkFrame):
     def _on_source_frames_ready(self, pil_frames, delays, tmpdir, file_path):
         if not pil_frames:
             self._src_canvas.delete("all")
-            self._src_canvas.create_text(SRC_CANVAS_W // 2, SRC_CANVAS_H // 2,
+            cw = max(20, self._src_canvas.winfo_width()) if self._src_canvas.winfo_width() > 10 else SRC_CANVAS_W
+            self._src_canvas.create_text(cw // 2, getattr(self, "_last_src_h", SRC_CANVAS_H) // 2,
                                          text="⚠️  Preview unavailable\n(ffmpeg missing?)",
-                                         fill="#e74c3c", font=("Helvetica", 11), justify="center")
+                                         fill="#e74c3c", font=("Helvetica", 11), justify="center",
+                                         width=cw - 20, tags="info_text")
             shutil.rmtree(tmpdir, ignore_errors=True)
             return
         self._src_tmpdir = tmpdir
@@ -575,10 +635,25 @@ class PreviewPanel(ctk.CTkFrame):
             self._src_idx += 1
             self._src_job = self.after(1000, self._animate_src)
             return
+            
+        cw = getattr(self, "_last_src_w", SRC_CANVAS_W)
+        ch = getattr(self, "_last_src_h", SRC_CANVAS_H)
+        
         if self._src_frames[idx] is None:
-            self._src_frames[idx] = ImageTk.PhotoImage(self._src_pil_frames[idx])
+            pil_img = self._src_pil_frames[idx]
+            img_ratio = pil_img.width / pil_img.height
+            canvas_ratio = cw / ch
+            if img_ratio > canvas_ratio:
+                new_w = cw
+                new_h = int(cw / img_ratio)
+            else:
+                new_h = ch
+                new_w = int(ch * img_ratio)
+            resized = pil_img.resize((new_w, new_h), Image.BILINEAR)
+            self._src_frames[idx] = ImageTk.PhotoImage(resized)
+            
         self._src_canvas.delete("all")
-        self._src_canvas.create_image(0, 0, anchor="nw", image=self._src_frames[idx])
+        self._src_canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._src_frames[idx])
         self._src_idx += 1
         self._src_job = self.after(self._src_delays[idx] if self._src_delays else 80, self._animate_src)
 
@@ -623,9 +698,11 @@ class PreviewPanel(ctk.CTkFrame):
         self._auto_rendering = True
         self._stop_auto_preview()
         self._auto_canvas.delete("all")
-        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+        cw = max(20, self._auto_canvas.winfo_width()) if self._auto_canvas.winfo_width() > 10 else AUTO_CANVAS_W
+        self._auto_canvas.create_text(cw // 2, getattr(self, "_last_auto_h", AUTO_CANVAS_H) // 2,
                                       text="⏳  Generating auto-action preview…",
-                                      fill="#7aa2ff", font=("Helvetica", 11), justify="center")
+                                      fill="#7aa2ff", font=("Helvetica", 11), justify="center",
+                                      width=cw - 20, tags="info_text")
         self._btn_auto.configure(state="disabled", text="⏳ Auto…")
         start_s, end_s = self._get_trim()
         s = self.app_state
@@ -659,6 +736,14 @@ class PreviewPanel(ctk.CTkFrame):
             return
 
         cfg = AutoActionConfig.from_app_state(s, start_s=start_s, end_s=end_s, target_width=tw, target_height=th)
+        
+        # Enforce max 10 seconds for preview generation to prevent massive UI slowdowns
+        effective_start = cfg.start_s if cfg.start_s is not None else 0.0
+        effective_end = cfg.end_s if cfg.end_s is not None else getattr(self, "_source_duration", 10.0)
+        if effective_end - effective_start > 10.0:
+            cfg.end_s = effective_start + 10.0
+            
+
         threading.Thread(target=self._generate_auto_preview,
                          args=(src, cfg), daemon=True).start()
 
@@ -717,6 +802,10 @@ class PreviewPanel(ctk.CTkFrame):
         self._auto_info.configure(text=f"{msg}  ·  {len(pil_frames)} frames")
         self._animate_auto()
         self._flush_auto_pending()
+        
+        # Chain to DMD generation now that auto cache is ready
+        if self._current_path:
+            self._start_dmd_generation(self._current_path)
 
     def _on_auto_fail(self, msg):
         self._auto_rendering = False
@@ -724,12 +813,17 @@ class PreviewPanel(ctk.CTkFrame):
         if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
             shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
             self._auto_tmpdir = None
-        self._auto_canvas.delete("all")
-        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+        cw = max(20, self._auto_canvas.winfo_width()) if self._auto_canvas.winfo_width() > 10 else AUTO_CANVAS_W
+        self._auto_canvas.create_text(cw // 2, getattr(self, "_last_auto_h", AUTO_CANVAS_H) // 2,
                                       text="❌  Auto-action failed",
-                                      fill="#e74c3c", font=("Helvetica", 11))
+                                      fill="#e74c3c", font=("Helvetica", 11), justify="center",
+                                      width=cw - 20, tags="info_text")
         self._auto_info.configure(text=msg)
         self._flush_auto_pending()
+        
+        # Still try to run DMD generation even if auto failed
+        if self._current_path:
+            self._start_dmd_generation(self._current_path)
 
     def _on_auto_bypass(self):
         self._auto_rendering = False
@@ -739,11 +833,17 @@ class PreviewPanel(ctk.CTkFrame):
             shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
             self._auto_tmpdir = None
         self._auto_canvas.delete("all")
-        self._auto_canvas.create_text(AUTO_CANVAS_W // 2, AUTO_CANVAS_H // 2,
+        cw = max(20, self._auto_canvas.winfo_width()) if self._auto_canvas.winfo_width() > 10 else AUTO_CANVAS_W
+        self._auto_canvas.create_text(cw // 2, getattr(self, "_last_auto_h", AUTO_CANVAS_H) // 2,
                                       text="⏭️  Bypassed\n(Original or perfect ratio)",
-                                      fill="#2ecc71", font=("Helvetica", 12), justify="center")
+                                      fill="#2ecc71", font=("Helvetica", 12), justify="center",
+                                      width=cw - 20, tags="info_text")
         self._auto_info.configure(text="Auto Action is skipped. Color Boost & FPS only.")
         self._flush_auto_pending()
+        
+        # Chain to DMD generation
+        if self._current_path:
+            self._start_dmd_generation(self._current_path)
 
     def _flush_auto_pending(self):
         pending, self._auto_pending_src = self._auto_pending_src, None
@@ -761,10 +861,25 @@ class PreviewPanel(ctk.CTkFrame):
             self._auto_idx += 1
             self._auto_job = self.after(1000, self._animate_auto)
             return
+            
+        cw = getattr(self, "_last_auto_w", AUTO_CANVAS_W)
+        ch = getattr(self, "_last_auto_h", AUTO_CANVAS_H)
+        
         if self._auto_frames[idx] is None:
-            self._auto_frames[idx] = ImageTk.PhotoImage(self._auto_pil_frames[idx])
+            pil_img = self._auto_pil_frames[idx]
+            img_ratio = pil_img.width / max(1, pil_img.height)
+            canvas_ratio = cw / max(1, ch)
+            if img_ratio > canvas_ratio:
+                new_w = cw
+                new_h = int(cw / img_ratio)
+            else:
+                new_h = ch
+                new_w = int(ch * img_ratio)
+            resized = pil_img.resize((max(1, new_w), max(1, new_h)), Image.BILINEAR)
+            self._auto_frames[idx] = ImageTk.PhotoImage(resized)
+            
         self._auto_canvas.delete("all")
-        self._auto_canvas.create_image(0, 0, anchor="nw", image=self._auto_frames[idx])
+        self._auto_canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._auto_frames[idx])
         self._auto_idx += 1
         self._auto_job = self.after(self._auto_delays[idx] if self._auto_delays else 80, self._animate_auto)
 
@@ -816,6 +931,15 @@ class PreviewPanel(ctk.CTkFrame):
         params = self._collect_params()
         start_s, end_s = self._get_trim()
         
+        # Enforce max 10 seconds for preview generation
+        effective_start = start_s if start_s is not None else 0.0
+        effective_end = end_s if end_s is not None else getattr(self, "_source_duration", 10.0)
+        if effective_end - effective_start > 10.0:
+            start_s = effective_start
+            end_s = effective_start + 10.0
+            
+
+        
         # Bypass YOLO tracking if the Auto Action preview has already generated the intermediate video
         if params.get("auto_action_enabled") and getattr(self, "_auto_tmpdir", None):
             cached_mp4 = os.path.join(self._auto_tmpdir, "action_pre.mp4")
@@ -834,14 +958,10 @@ class PreviewPanel(ctk.CTkFrame):
             dw, dh, sim_scale = cw, ch, 0
         threading.Thread(
             target=self._generate_dmd_preview,
-            args=(src, params, start_s, end_s, dw, dh, led_on, sim_scale, cw, ch,
-                  is_already_converted),
+            args=(src, params, start_s, end_s, is_already_converted),
             daemon=True).start()
 
-    def _generate_dmd_preview(self, src, params, start_s, end_s,
-                               dmd_display_w, dmd_display_h, led_sim=False, sim_scale=0,
-                               final_canvas_w=128, final_canvas_h=32,
-                               is_already_converted=False):
+    def _generate_dmd_preview(self, src, params, start_s, end_s, is_already_converted=False):
         tmpdir = tempfile.mkdtemp(prefix="dmd_dmd_")
         try:
             if is_already_converted:
@@ -878,11 +998,6 @@ class PreviewPanel(ctk.CTkFrame):
                         if not ret:
                             break
                         comp = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                        comp = comp.resize((dmd_display_w, dmd_display_h), Image.NEAREST)
-                        if led_sim and sim_scale >= 2:
-                            comp = _apply_led_grid(comp, sim_scale)
-                        if comp.size != (final_canvas_w, final_canvas_h):
-                            comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
                         pil_frames.append(comp)
                         delays.append(dm)
                     cap.release()
@@ -892,12 +1007,7 @@ class PreviewPanel(ctk.CTkFrame):
                     bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
                     for frame in ImageSequence.Iterator(img):
                         bg.paste(frame, (0, 0), frame.convert("RGBA"))
-                        comp = bg.copy().convert("RGB").resize(
-                            (dmd_display_w, dmd_display_h), Image.NEAREST)
-                        if led_sim and sim_scale >= 2:
-                            comp = _apply_led_grid(comp, sim_scale)
-                        if comp.size != (final_canvas_w, final_canvas_h):
-                            comp = comp.resize((final_canvas_w, final_canvas_h), Image.LANCZOS)
+                        comp = bg.copy().convert("RGB")
                         pil_frames.append(comp)
                         delays.append(max(img.info.get("duration", 80), 20))
             except Exception as exc:
@@ -947,7 +1057,8 @@ class PreviewPanel(ctk.CTkFrame):
             cw, ch = int(128 * DMD_DISPLAY_SCALE_FACTOR), int(32 * DMD_DISPLAY_SCALE_FACTOR)
         self._dmd_canvas.create_text(cw // 2, ch // 2,
                                      text="❌  DMD render failed",
-                                     fill="#e74c3c", font=("Helvetica", 11))
+                                     fill="#e74c3c", font=("Helvetica", 11), justify="center",
+                                     width=cw - 20, tags="info_text")
         logger.error("DMD preview: %s", msg)
         self._flush_dmd_pending()
 
@@ -968,10 +1079,41 @@ class PreviewPanel(ctk.CTkFrame):
                 self._dmd_idx += 1
                 self._dmd_job = self.after(1000, self._animate_dmd)
                 return
+                
+            cw = getattr(self, "_last_dmd_w", int(DEFAULT_PARAMS["target_width"] * DMD_DISPLAY_SCALE_FACTOR))
+            ch = getattr(self, "_last_dmd_h", int(DEFAULT_PARAMS["target_height"] * DMD_DISPLAY_SCALE_FACTOR))
+                
             if self._dmd_frames[idx] is None:
-                self._dmd_frames[idx] = ImageTk.PhotoImage(self._dmd_pil_frames[idx])
+                pil_img = self._dmd_pil_frames[idx]
+                
+                led = getattr(self.app_state, "v_led_sim", None)
+                if led and led.get():
+                    scale_w = cw // pil_img.width if pil_img.width > 0 else 2
+                    scale_h = ch // pil_img.height if pil_img.height > 0 else 2
+                    scale = min(scale_w, scale_h)
+                    
+                    if pil_img.width * scale > LED_SIM_MAX_W and scale > 2:
+                        scale = max(2, LED_SIM_MAX_W // pil_img.width)
+                    if scale < 2: 
+                        scale = 2
+                        
+                    resized = pil_img.resize((pil_img.width * scale, pil_img.height * scale), Image.NEAREST)
+                    resized = _apply_led_grid(resized, scale)
+                else:
+                    img_ratio = pil_img.width / max(1, pil_img.height)
+                    canvas_ratio = cw / max(1, ch)
+                    if img_ratio > canvas_ratio:
+                        new_w = cw
+                        new_h = int(cw / img_ratio)
+                    else:
+                        new_h = ch
+                        new_w = int(ch * img_ratio)
+                    resized = pil_img.resize((max(1, new_w), max(1, new_h)), Image.NEAREST)
+                    
+                self._dmd_frames[idx] = ImageTk.PhotoImage(resized)
+                
             self._dmd_canvas.delete("all")
-            self._dmd_canvas.create_image(0, 0, anchor="nw", image=self._dmd_frames[idx])
+            self._dmd_canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._dmd_frames[idx])
             self._dmd_idx += 1
             self._dmd_job = self.after(
                 self._dmd_delays[idx] if self._dmd_delays else 80, self._animate_dmd)

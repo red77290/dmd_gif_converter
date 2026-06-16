@@ -434,3 +434,15 @@ To optimize CPU usage during heavy YOLO inference, two parameters allow you to t
    - *Example*: `5.0` means 5 frames per second are analyzed. Lower values are faster but less precise. Higher values catch micro-movements but take longer.
    - *CLI*: `--ai-moments-analyze-fps 5.0`
 
+
+## Hardware Acceleration (GPU Encoders)
+
+The engine automatically attempts to use hardware-accelerated video encoders during the internal FFmpeg rendering pipeline to drastically speed up processing times and reduce CPU usage. 
+It performs dynamic detection on startup in `src.engine.conversion.hardware_accel`:
+
+- **macOS (Apple Silicon / Intel)**: `h264_videotoolbox`
+- **NVIDIA GPUs**: `h264_nvenc`
+- **Intel GPUs**: `h264_qsv`
+- **Fallback**: `libx264`
+
+Hardware acceleration is automatically applied without any user configuration needed, provided the host machine has the required GPU and drivers installed.

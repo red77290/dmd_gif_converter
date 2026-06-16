@@ -1,6 +1,16 @@
 # DMD GIF Converter — Changelog
 
 ## [7.0.0] - Architecture & Performances (V7)
+- **🚀 Hardware Acceleration**: Auto-detection and injection of hardware encoders (`h264_videotoolbox` for macOS Apple Silicon, `h264_nvenc` for NVIDIA, `h264_qsv` for Intel) via `hardware_accel.py`, drastically improving H.264 encoding speeds.
+- **🚀 Fixed OpenCV macOS Crash**: Resolved a critical `SIGABRT`/`SIGSEGV` crash when using `cv2.VideoCapture` with multiple threads (8 workers) by implementing a `SafeVideoCapture` monkey patch with global `threading.Lock`.
+- **🚀 ONNX Threading Exhaustion**: Capped the global number of threads used by `onnxruntime` (`intra_op_num_threads=2`, `inter_op_num_threads=1`) to prevent CPU starvation and system freezes during "Convert All" batch mode.
+- **🚀 Instant UI Previews**: Completely eliminated Tkinter mainloop freezing during preview resizing by switching from `Image.LANCZOS` to `Image.BILINEAR`.
+- **🚀 Chained Preview Generation**: Fixed a bug where clicking a file launched the YOLO auto-action analysis twice simultaneously. The DMD preview now intelligently waits for the Auto-Action preview to finish its `action_pre.mp4` cache and bypasses YOLO entirely.
+- **🚀 Bounded Preview Times**: Enforced a strict 10-second maximum cap on Auto-Action and DMD preview generations. Selecting a long video no longer freezes the application by processing thousands of frames needlessly.
+- **🚀 "Let me handle it" UI Overrides**: Liberated aesthetic parameters ("Intro panoramic", "ROI padding", "Background Subtraction") from the automatic smart lock. Set "Intro panoramic" default to 0.0s.
+- **🚀 Worker Logs Identification**: Added thread prefix tags (`[W1]`, `[W2]`, etc.) via `WorkerFormatter` in the UI logs to easily track concurrent conversions, and removed the deduplication filter.
+- **🚀 Fixed Dynamic Scene KeyError**: Fixed an error in `AiMomentsScorer` where dynamic scene transitions failed to inject the scene profile name correctly, causing `None` key exceptions.
+
 - **🚀 Fixed Parallel Conversion UX**: Resolved a visualization bottleneck where parallel folder/queue conversions appeared to execute sequentially because the heavy OpenCV/YOLO video preprocessing ran silently without emitting progress reports. Added progressive frame-by-frame callback updates to `preprocess_video_for_dmd` and fixed a keyword parameter signature mismatch in `ConversionController`.
 - **🚀 Fixed Anime Close-up Classification**: Falsely classified anime and close-up action scenes (like `visage_anime_1.gif`) as `TOP_DOWN_ISOMETRIC`. We introduced an `effective_floor_in_lower` concept so massive subjects don't trigger "floor found" penalties, relaxed the closeup aspect ratio guard for very large subjects, and unconditionally penalized `TOP_DOWN_ISOMETRIC` when the subject occupies more than 30% of the frame.
 - **🚀 Fixed Fallback UnboundLocalError**: Fixed a crash where the `_auto_scene` variable was used before definition if the scan detected no targets.
