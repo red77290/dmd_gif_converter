@@ -140,5 +140,5 @@ fi
 # FFmpeg backend (VideoCapture). Must be set before Python starts.
 export OPENCV_FFMPEG_CAPTURE_OPTIONS="loglevel;quiet"
 export OPENCV_LOG_LEVEL="SILENT"
-exec "$VENV/bin/python3"  $UI
+exec "$VENV/bin/python3" $UI "$@"
 
