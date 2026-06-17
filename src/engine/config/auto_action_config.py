@@ -88,6 +88,7 @@ class AutoActionConfig:
             "bg_sub_enable", "dynamic_scene_detection",
             "dmd_visibility_score_enabled", "dmd_readability_score_enabled",
             "target_width", "target_height",
+            "subsample_frames", "auto_fast_tracking",
         }
         field_names = {f.name for f in fields(AutoActionConfig)
                        if not f.name.startswith("_")}
