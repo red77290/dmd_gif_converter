@@ -201,6 +201,8 @@ def get_metadata(file_path: str):
     cmd = [
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames",
+        "-show_entries", "stream_tags=rotate",
+        "-show_entries", "stream_side_data=rotation",
         "-show_entries", "format=duration",
         "-of", "json", str(file_path)
     ]
@@ -215,7 +217,23 @@ def get_metadata(file_path: str):
         duration = float(data.get("format", {}).get("duration", 0) or 0)
         if duration <= 0 and stream.get("nb_frames", "N/A") != "N/A":
             duration = int(stream["nb_frames"]) / fps_src
-        return int(stream["width"]), int(stream["height"]), fps_src, duration
+            
+        w, h = int(stream["width"]), int(stream["height"])
+        
+        # Check rotation to swap width/height if necessary (e.g., smartphone videos)
+        rotation = 0
+        if "tags" in stream and "rotate" in stream["tags"]:
+            rotation = abs(int(float(stream["tags"]["rotate"])))
+        elif "side_data_list" in stream:
+            for sd in stream["side_data_list"]:
+                if "rotation" in sd:
+                    rotation = abs(int(float(sd["rotation"])))
+                    break
+                    
+        if rotation in (90, 270):
+            w, h = h, w
+            
+        return w, h, fps_src, duration
     except Exception as e:
         logger.warning(f"Could not read metadata ({file_path}): {e}")
         return None, None, 25.0, 0.0
