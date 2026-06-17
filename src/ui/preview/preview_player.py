@@ -993,12 +993,28 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                 pil_img = self._dmd_pil_frames[idx]
                 
                 led = getattr(self.app_state, "v_led_sim", None)
-                scale_w = cw // pil_img.width if pil_img.width > 0 else 2
-                scale_h = ch // pil_img.height if pil_img.height > 0 else 2
-                scale = min(scale_w, scale_h)
                 
-                if led and led.get() and scale >= 2:
-                    if pil_img.width * scale > LED_SIM_MAX_W and scale > 2:
+                if led and led.get():
+                    scale_w = cw // pil_img.width if pil_img.width > 0 else 2
+                    scale_h = ch // pil_img.height if pil_img.height > 0 else 2
+                    scale = min(scale_w, scale_h)
+                    
+                    if scale < 2:
+                        # Image is too large to fit the LED grid on the canvas.
+                        # Downscale the raw image first so it fits when multiplied by 2.
+                        scale = 2
+                        img_ratio = pil_img.width / max(1, pil_img.height)
+                        canvas_ratio = cw / max(1, ch)
+                        max_w, max_h = cw // 2, ch // 2
+                        if img_ratio > canvas_ratio:
+                            new_w = max_w
+                            new_h = int(max_w / img_ratio)
+                        else:
+                            new_h = max_h
+                            new_w = int(max_h * img_ratio)
+                        pil_img = pil_img.resize((max(1, new_w), max(1, new_h)), Image.LANCZOS)
+                        
+                    elif pil_img.width * scale > LED_SIM_MAX_W and scale > 2:
                         scale = max(2, LED_SIM_MAX_W // pil_img.width)
                         
                     resized = pil_img.resize((pil_img.width * scale, pil_img.height * scale), Image.NEAREST)
