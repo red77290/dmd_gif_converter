@@ -8,8 +8,16 @@
 
 
 ### Ajouté
+- **Nouvelles stratégies AI Moments** : Ajout des stratégies `Emotion` (focus sur les gros plans statiques hyper-centrés pour les dialogues intenses) et `Epic` (mouvement cinématique à fort contraste).
+- **Dédoublonnage NMS par Signature Visuelle** : AI Moments calcule désormais une empreinte visuelle active des scènes extraites. Les scènes extrêmement similaires sont supprimées pour garantir une grande diversité visuelle (particulièrement critique pour la stratégie `Emotion` qui favorise les plans fixes).
+- **Biais de centrage YOLO** : Ajout d'un multiplicateur de distance dynamique aux scores de détection YOLO pour privilégier lourdement les sujets centrés dans l'image par rapport aux personnages secondaires en bordure.
 - Infobulles exhaustives pour tous les paramètres de l'interface utilisateur dans Conversion Settings et Advanced Settings.
 - Verrouillage visuel dans les Paramètres Avancés : Les sliders manuels (Zoom, X/Y Offset) et les paramètres de défilement (Scroll) sont automatiquement grisés et désactivés lorsque l'Auto Action est activée.
+
+### Corrigé
+- **Cadrage du visage YOLO & Coupe au niveau de la tête** : Correction d'un bug critique dans `talking_closeup` où le tracker appliquait une chute verticale de 25% codée en dur, coupant les têtes. Il respecte désormais correctement le `face_head_frac` configuré (0.40 pour les détections de personnes standard) garantissant que les yeux restent parfaitement alignés dans le tiers supérieur de l'image.
+- **Interface du panneau AI Moments** : Correction de la disposition de la grille responsive et du chevauchement des curseurs lors de l'activation de la stratégie 'Custom'.
+- **Scoring AI Moments** : Restauration de l'intégration complète des sliders de l'interface (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). Le moteur construit dynamiquement sa stratégie de score (`ScoringStrategy`) pour correspondre aux paramètres de l'utilisateur, ce qui permet de pénaliser explicitement les textes/génériques.
 
 ### Refactorisé
 - `PreviewPanel` entièrement restructuré dans une architecture MVC modulaire :
