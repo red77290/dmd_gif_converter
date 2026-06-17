@@ -8,6 +8,7 @@
 
 
 ### Added
+- **Auto Fast Tracking**: A new performance optimization feature that dynamically adjusts YOLO tracking subsampling based on the input video's FPS. Targets ~5 inferences per second to drastically reduce CPU load on heavy 60fps/120fps files. Enabled by default with the "Let me handle it" mode.
 - **New AI Moments Strategies**: Added `Emotion` (focusing on static, highly-centered close-ups for intense dialogue) and `Epic` (cinematic, high contrast motion) strategies.
 - **Visual Signature NMS Deduplication**: AI Moments now computes an active visual fingerprint of extracted scenes. Extremely similar scenes are suppressed to ensure high visual diversity (especially critical for the `Emotion` strategy which favors static shots).
 - **YOLO Center Bias**: Added a dynamic distance multiplier to YOLO detection scores to heavily prioritize subjects centered in the frame over high-confidence side-characters.
