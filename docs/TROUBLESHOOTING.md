@@ -7,7 +7,7 @@
 | `ffmpeg: command not found` | FFmpeg not in PATH → re-read installation section |
 | Preview is blank | FFmpeg must be installed and in PATH |
 | `[ERROR] xxx — metadata unreadable` | Corrupted or unsupported file |
-| Very slow conversion | Increase `--workers` (SSD + multi-core recommended) |
+| Very slow conversion | Increase `--workers` (use `--no-auto-workers` to override limits) |
 | Colours too saturated | Switch to `--mode anime` or lower `--saturation` in custom mode |
 | Output too dark | Raise `--brightness` (e.g. `0.05`) or `--gamma` (e.g. `0.95`) |
 | Scroll too fast / slow | Adjust `--scroll-speed` (default `24.0`) |

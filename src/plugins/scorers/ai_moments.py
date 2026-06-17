@@ -33,7 +33,7 @@ class AiMomentsEngine:
         
         # Initialize Scoring V2 components
         detector = None
-        # Always try to load the detector for AI Moments, even if crit_character is off, 
+        # Always try to load the detector for AI Moments, even if w_character is 0,
         # so we can PENALIZE frames with no subjects (like text/credits) if needed!
         try:
             from src.plugins.detectors.detector import _FrameDetector
@@ -41,18 +41,18 @@ class AiMomentsEngine:
         except Exception as e:
             logger.warning(f"Failed to load detector: {e}")
             
-        # Prepare Signal Engine
-        use_optical_flow = self.options.get("crit_action", False)
-        use_detector = detector if self.options.get("crit_character", False) else None
-        self.signal_engine = SignalScoringEngine(detector=use_detector, optical_flow=use_optical_flow)
-        
         # Build dynamic strategy based on user checkboxes and sliders
-        w_act = (self.options.get("w_action", 70.0) / 100.0) if self.options.get("crit_action", False) else 0.0
-        w_char = (self.options.get("w_character", 40.0) / 100.0) if self.options.get("crit_character", False) else 0.0
-        w_ep = (self.options.get("w_epic", 100.0) / 100.0) if self.options.get("crit_epic", False) else 0.0
-        w_emo = (self.options.get("w_emotion", 100.0) / 100.0) if self.options.get("crit_emotion", False) else 0.0
-        w_dm = (self.options.get("w_dmd", 100.0) / 100.0) if self.options.get("crit_dmd", False) else 0.0
-        self._loop_weight = (self.options.get("w_loopable", 70.0) / 100.0) if self.options.get("crit_loopable", False) else 0.0
+        w_act = self.options.get("w_action", 70.0) / 100.0
+        w_char = self.options.get("w_character", 40.0) / 100.0
+        w_ep = self.options.get("w_epic", 100.0) / 100.0
+        w_emo = self.options.get("w_emotion", 80.0) / 100.0
+        w_dm = self.options.get("w_dmd", 100.0) / 100.0
+        self._loop_weight = self.options.get("w_loopable", 70.0) / 100.0
+        
+        # Prepare Signal Engine
+        use_optical_flow = w_act > 0.0 or w_ep > 0.0
+        use_detector = detector if (w_char > 0.0 or w_emo > 0.0) else None
+        self.signal_engine = SignalScoringEngine(detector=use_detector, optical_flow=use_optical_flow)
 
         from src.engine.scoring.final_scoring_engine import ScoringStrategy
         strategy = ScoringStrategy(
@@ -69,7 +69,7 @@ class AiMomentsEngine:
             w_saliency=0.4 * w_ep + 0.4 * w_emo,  # Epic = visual pop
             selection_threshold=20.0,
             penalize_dark_frames=True,
-            penalize_no_detection=self.options.get("crit_character", False) or self.options.get("crit_emotion", False),
+            penalize_no_detection=(w_char > 0.0 or w_emo > 0.0),
             no_detection_penalty=30.0 * max(w_char, w_emo),
         )
         self.final_engine = FinalScoringEngine(strategy)

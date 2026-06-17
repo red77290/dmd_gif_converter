@@ -66,7 +66,7 @@ All parameters are available as **sliders/drop-downs in the UI** and as **`--arg
 | `ai_moments` | `--ai-moments` | `False` | Extract the best moments from videos AND automatically convert them to GIFs. |
 | `ai_moments_only`| `--ai-moments-only`| `False` | Extract the best moments (MP4) but DO NOT convert them to GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Max number of moments to extract per video. |
-| `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Strategy to prioritize (`Action`, `Balanced`, `Character`, `Emotion`, `Epic`, `Custom`). |
+| `ai_w_action`, etc. | `--ai-w-action`, `--ai-w-epic`, etc. | `Balanced` | Force manual detection weights (0-100). If omitted, a "Balanced" profile is used. |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Minimum duration of an extracted moment in seconds |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Maximum duration of an extracted moment in seconds |
 | `ai_moments_analyze_fps`| `--ai-moments-analyze-fps` | `5.0` | Analyze video at N frames per second to speed up YOLO |
@@ -142,9 +142,8 @@ The integer part is the number of complete **round-trips** (down→up); the frac
 | `2.0` | 2 round-trips, hold at top |
 
 ### `--workers` tuning
-By default, the converter uses an automatic optimal worker count (`cpu_cores / 2`).
-
-If you have a powerful multi-core CPU and SSD, you can override this limit. Be aware that FFmpeg scales poorly after 8 concurrent instances unless you have exceptional I/O throughput. Going beyond 8 workers rarely helps and increases memory pressure.  
+By default, the converter uses an automatic, optimal number of concurrent workers (`cpu_cores / 2`) via the `auto_workers` system.
+If you have a powerful multi-core CPU and SSD, you can override this limit using `--workers N --no-auto-workers`. Be aware that FFmpeg scales poorly after 8 concurrent instances unless you have exceptional I/O throughput. Going beyond 8 workers rarely helps and increases memory pressure.  
 > In UI mode, each parallel worker's log is prefixed with `[W1]`, `[W2]`, etc. for easy isolation in the log panel.
 
 ### Terminal logs — launcher vs direct invocation
@@ -184,7 +183,7 @@ python3 -m src.engine.conversion.cli
 ### 2. The "Let Me Handle It" Magic Mode
 The ultimate zero-configuration command. It applies AI Colorimetry, Auto Action framing, Background Subtraction, and DMD Visibility Scoring all at once to a specific folder.
 ```bash
-python3 -m src.engine.conversion.cli gifs_MyGameplay --let-me-handle-it --workers 8
+python3 -m src.engine.conversion.cli gifs_MyGameplay --let-me-handle-it --workers 8 --no-auto-workers
 ```
 
 ### 3. Text Overlay (Watermarking / Player Tags)
@@ -209,7 +208,7 @@ python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search
 ### 6. AI Moments: Pipeline Extraction + Conversion
 Take a 10-minute gameplay video, find the 5 best action moments, and immediately convert those 5 moments into 128x32 GIFs.
 ```bash
-python3 -m src.engine.conversion.cli gifs_RawGameplay --ai-moments --ai-moments-count 5 --ai-moments-strategy "Action" --let-me-handle-it
+python3 -m src.engine.conversion.cli gifs_RawGameplay --ai-moments --ai-moments-count 5 --ai-w-action 100 --let-me-handle-it
 ```
 
 ### 7. AI Moments: Extraction ONLY

@@ -7,7 +7,7 @@
 | `ffmpeg: command not found` | FFmpeg non installé ou pas dans le PATH |
 | Aperçu vide | FFmpeg doit être installé et accessible dans le PATH |
 | `[ERROR] xxx — metadata unreadable` | Fichier corrompu ou format non supporté |
-| Conversion très lente | Augmenter `--workers` (SSD + multi-cœurs recommandé) |
+| Conversion très lente | Augmenter `--workers` (utiliser `--no-auto-workers` pour forcer) |
 | Couleurs trop saturées | Passer en `--mode anime` ou baisser `--saturation` en mode custom |
 | GIF trop sombre | Augmenter `--brightness` (ex. `0.05`) ou `--gamma` (ex. `0.95`) |
 | Scroll trop rapide / lent | Ajuster `--scroll-speed` (défaut : `24.0`) |
