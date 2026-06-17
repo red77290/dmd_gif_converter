@@ -7,16 +7,17 @@ class TestCliArgs(unittest.TestCase):
         self.parser = _build_parser()
         
     def test_ai_moments_flags(self):
-        args = self.parser.parse_args(["--ai-moments", "--ai-moments-count", "5", "--ai-moments-strategy", "Action"])
+        args = self.parser.parse_args(["--ai-moments", "--ai-moments-count", "5", "--ai-w-action", "100.0"])
         self.assertTrue(args.ai_moments)
         self.assertEqual(args.ai_moments_count, 5)
-        self.assertEqual(args.ai_moments_strategy, "Action")
+        self.assertEqual(args.ai_w_action, 100.0)
         
     def test_ai_moments_defaults(self):
         args = self.parser.parse_args([])
         self.assertFalse(args.ai_moments)
         self.assertEqual(args.ai_moments_count, 10)
-        self.assertEqual(args.ai_moments_strategy, "balanced_v2")
+        self.assertEqual(args.ai_w_action, None)
+        self.assertEqual(args.ai_w_epic, None)
         self.assertEqual(args.ai_moments_dur_min, 2.0)
         self.assertEqual(args.ai_moments_dur_max, 5.0)
 
