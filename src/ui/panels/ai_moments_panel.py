@@ -510,25 +510,22 @@ class AiMomentsPanel(ctk.CTkFrame):
             var.set("[ ]")
             
         try:
-            options = {
-                "count": int(str(self.app_state.v_ai_moments_count.get()).replace(',', '.') or 10),
-                "crit_action": self.app_state.v_ai_crit_action.get(),
-                "crit_epic": self.app_state.v_ai_crit_epic.get(),
-                "crit_character": self.app_state.v_ai_crit_character.get(),
-                "crit_loopable": self.app_state.v_ai_crit_loopable.get(),
-                "crit_dmd": self.app_state.v_ai_crit_dmd.get(),
-                "strategy": self.app_state.v_ai_strategy.get(),
-                "w_action": self.app_state.v_ai_w_action.get(),
-                "w_epic": self.app_state.v_ai_w_epic.get(),
-                "w_character": self.app_state.v_ai_w_character.get(),
-                "w_loopable": self.app_state.v_ai_w_loopable.get(),
-                "w_dmd": self.app_state.v_ai_w_dmd.get(),
-                "dur_min": float(str(self.app_state.v_ai_dur_min.get()).replace(',', '.') or 2.0),
-                "dur_max": float(str(self.app_state.v_ai_dur_max.get()).replace(',', '.') or 5.0),
-                "analyze_fps": float(str(self.app_state.v_ai_analyze_fps.get()).replace(',', '.') or 5.0),
-                "auto_framing": self.app_state.v_ai_auto_framing.get(),
-                "opt_dmd": self.app_state.v_ai_opt_dmd.get()
-            }
+            options = {}
+            for k in dir(self.app_state):
+                if k.startswith("v_ai_"):
+                    var = getattr(self.app_state, k)
+                    if hasattr(var, "get"):
+                        key = k[5:]  # Remove 'v_ai_'
+                        val = var.get()
+                        
+                        # Apply numeric conversions for StringVar fields
+                        if key in ("dur_min", "dur_max", "analyze_fps"):
+                            val = float(str(val).replace(',', '.') or 0.0)
+                        elif key == "moments_count":
+                            key = "count"
+                            val = int(str(val).replace(',', '.') or 0)
+                            
+                        options[key] = val
         except ValueError:
             import tkinter.messagebox as msg
             msg.showerror("Invalid Input", "Please enter valid numbers for Duration and Analyze FPS.")
