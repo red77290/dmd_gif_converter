@@ -35,9 +35,6 @@ class AiMomentsPanel(ctk.CTkFrame):
         # Section 2 - Detection Settings
         self._build_ai_detection_settings(cfg_frame)
         
-        # Section 3 - Analysis Strategy
-        self._build_ai_analysis_strategy(cfg_frame)
-        
         # Section 4 - Generation Settings
         self._build_ai_generation_settings(cfg_frame)
 
