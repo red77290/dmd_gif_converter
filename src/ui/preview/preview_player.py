@@ -993,15 +993,13 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                 pil_img = self._dmd_pil_frames[idx]
                 
                 led = getattr(self.app_state, "v_led_sim", None)
-                if led and led.get():
-                    scale_w = cw // pil_img.width if pil_img.width > 0 else 2
-                    scale_h = ch // pil_img.height if pil_img.height > 0 else 2
-                    scale = min(scale_w, scale_h)
-                    
+                scale_w = cw // pil_img.width if pil_img.width > 0 else 2
+                scale_h = ch // pil_img.height if pil_img.height > 0 else 2
+                scale = min(scale_w, scale_h)
+                
+                if led and led.get() and scale >= 2:
                     if pil_img.width * scale > LED_SIM_MAX_W and scale > 2:
                         scale = max(2, LED_SIM_MAX_W // pil_img.width)
-                    if scale < 2: 
-                        scale = 2
                         
                     resized = pil_img.resize((pil_img.width * scale, pil_img.height * scale), Image.NEAREST)
                     resized = _apply_led_grid(resized, scale)
