@@ -15,8 +15,19 @@ Le moteur AI Moments effectue une analyse en plusieurs passes sur votre vidéo e
    - *Densité des contours* : Netteté et détails (gradient de Sobel).
    - *Mouvement* : Intensité du flux optique (Optical Flow).
 3. **Évaluateur Spatial** : Évalue la lisibilité DMD, l'encombrement et la composition (utilise YOLO pour la détection du sujet).
-4. **Pondération Stratégique** : Applique dynamiquement des poids en fonction de la stratégie choisie (`Action`, `Balanced`, `Character`).
-5. **Suppression des Non-Maxima (NMS)** : Classe les séquences et extrait les meilleurs moments sans chevauchement.
+4. **Pondération Stratégique** : Applique dynamiquement des poids en fonction de la stratégie choisie (`Action`, `Balanced`, `Character`, `Emotion`, `Epic`, `Custom`).
+5. **Dédoublonnage par Signature Visuelle** : Calcule une empreinte visuelle pour chaque séquence candidate.
+6. **Suppression des Non-Maxima (NMS)** : Classe les séquences et extrait les meilleurs moments sans chevauchement. Utilise les Signatures Visuelles pour rejeter agressivement les scènes visuellement similaires (garantissant ainsi la diversité de vos moments extraits).
+
+## Stratégies IA Disponibles
+
+Le moteur propose plusieurs stratégies intégrées pour correspondre à l'ambiance de votre vidéo :
+- **Action** : Maximise le flux optique (mouvement). Idéal pour les combats, le sport et les séquences rapides.
+- **Character** : Se concentre sur le sujet et les visages. Utilise le suivi YOLO avec un puissant "Biais de Centrage" pour verrouiller le personnage principal.
+- **Emotion** : Privilégie les gros plans statiques et parfaitement centrés avec un minimum de mouvement. Parfait pour les dialogues intenses et les réactions faciales expressives.
+- **Epic** : Équilibre un contraste élevé et des mouvements dynamiques pour créer des moments cinématiques dignes de bandes-annonces.
+- **Balanced** : Un mélange équilibré de mouvement, de contraste et de visibilité du sujet.
+- **Custom** : Déverrouille des curseurs avancés, vous permettant d'ajuster manuellement les poids exacts pour le Mouvement, le Contraste, la Densité des Contours, le Centrage du Sujet et l'Entropie.
 
 ## Optimisation des Performances
 

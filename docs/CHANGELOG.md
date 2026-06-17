@@ -8,8 +8,16 @@
 
 
 ### Added
+- **New AI Moments Strategies**: Added `Emotion` (focusing on static, highly-centered close-ups for intense dialogue) and `Epic` (cinematic, high contrast motion) strategies.
+- **Visual Signature NMS Deduplication**: AI Moments now computes an active visual fingerprint of extracted scenes. Extremely similar scenes are suppressed to ensure high visual diversity (especially critical for the `Emotion` strategy which favors static shots).
+- **YOLO Center Bias**: Added a dynamic distance multiplier to YOLO detection scores to heavily prioritize subjects centered in the frame over high-confidence side-characters.
 - Comprehensive tooltips (infobulles) for all UI parameters in Conversion Settings and Advanced Settings.
 - Visual lock in Advanced Settings: Manual sliders (Zoom, X/Y Offset) and Scroll settings are disabled (greyed out) automatically when Auto Action is enabled.
+
+### Fixed
+- **YOLO Face Tracking & Cutoff Fix**: Fixed a critical bug in `talking_closeup` where the tracker hardcoded a 25% vertical drop, causing heads to be cut off. It now correctly respects the configured `face_head_frac` (0.40 for standard person detections) ensuring the eyes remain perfectly aligned in the top third of the frame.
+- **AI Moments Panel UI**: Fixed responsive grid layout and overlapping sliders when toggling the 'Custom' strategy.
+- **AI Moments Scoring**: Restored full UI slider integration (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). The engine now dynamically builds its `ScoringStrategy` to match user parameters rather than using a hardcoded preset, explicitly penalizing text/credits.
 
 ### Refactored
 - `PreviewPanel` completely refactored into a modular MVC architecture:

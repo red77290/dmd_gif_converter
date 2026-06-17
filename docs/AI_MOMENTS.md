@@ -15,8 +15,19 @@ The AI Moments engine runs a multi-pass analysis on your video using the **Scori
    - *Edge Density*: Sharpness and details (Sobel gradient).
    - *Motion*: Optical flow intensity.
 3. **Spatial Evaluator**: Evaluates DMD readability, clutter, and composition (using YOLO for subject detection).
-4. **Strategy Weighting**: Dynamically applies weights based on the chosen strategy (`Action`, `Balanced`, `Character`).
-5. **Non-Maximum Suppression (NMS)**: Ranks the sequences and extracts the top non-overlapping moments.
+4. **Strategy Weighting**: Dynamically applies weights based on the chosen strategy (`Action`, `Balanced`, `Character`, `Emotion`, `Epic`, `Custom`).
+5. **Visual Signature Deduplication**: Computes a visual fingerprint for each candidate window.
+6. **Non-Maximum Suppression (NMS)**: Ranks the sequences and extracts the top non-overlapping moments. It uses the Visual Signatures to aggressively reject visually similar scenes (ensuring diversity in your extracted moments).
+
+## Available AI Strategies
+
+The engine provides several built-in strategies to match the vibe of your video:
+- **Action**: Maximizes optical flow and motion. Ideal for fights, sports, and fast-paced sequences.
+- **Character**: Focuses on the subject and faces. Uses YOLO tracking with a strong Center Bias to lock onto the central character.
+- **Emotion**: Prioritizes static, highly-centered close-ups with minimal motion. Perfect for intense dialogue and expressive facial reactions.
+- **Epic**: Balances high contrast and dynamic motion to create cinematic, trailer-like moments.
+- **Balanced**: A well-rounded mix of motion, contrast, and subject visibility.
+- **Custom**: Unlocks advanced sliders, allowing you to manually dial in the exact weights for Motion, Contrast, Edge Density, Subject Centering, and Entropy.
 
 ## Performance Optimization
 
