@@ -104,15 +104,17 @@ class AiMomentsPanel(ctk.CTkFrame):
         chip_frame.pack(fill="x", padx=10, pady=5)
         
         self.app_state.v_ai_crit_action = tk.BooleanVar(value=True)
-        self.app_state.v_ai_crit_emotion = tk.BooleanVar(value=True)
+        self.app_state.v_ai_crit_epic = tk.BooleanVar(value=True)
+        self.app_state.v_ai_crit_emotion = tk.BooleanVar(value=False)
         self.app_state.v_ai_crit_character = tk.BooleanVar(value=False)
         self.app_state.v_ai_crit_loopable = tk.BooleanVar(value=True)
         self.app_state.v_ai_crit_dmd = tk.BooleanVar(value=True)
         
         from src.ui.widgets import CTkChip
         CTkChip(chip_frame, text="Action", variable=self.app_state.v_ai_crit_action).grid(row=0, column=0, padx=5, pady=5)
-        CTkChip(chip_frame, text="Emotion", variable=self.app_state.v_ai_crit_emotion).grid(row=0, column=1, padx=5, pady=5)
-        CTkChip(chip_frame, text="Character", variable=self.app_state.v_ai_crit_character).grid(row=0, column=2, padx=5, pady=5)
+        CTkChip(chip_frame, text="Epic", variable=self.app_state.v_ai_crit_epic).grid(row=0, column=1, padx=5, pady=5)
+        CTkChip(chip_frame, text="Emotion", variable=self.app_state.v_ai_crit_emotion).grid(row=0, column=2, padx=5, pady=5)
+        CTkChip(chip_frame, text="Character", variable=self.app_state.v_ai_crit_character).grid(row=0, column=3, padx=5, pady=5)
         CTkChip(chip_frame, text="Loopable", variable=self.app_state.v_ai_crit_loopable).grid(row=1, column=0, padx=5, pady=5)
         CTkChip(chip_frame, text="DMD", variable=self.app_state.v_ai_crit_dmd).grid(row=1, column=1, padx=5, pady=5)
 
@@ -131,13 +133,15 @@ class AiMomentsPanel(ctk.CTkFrame):
         self._ai_custom_frame = ctk.CTkFrame(f, fg_color="transparent")
         
         self.app_state.v_ai_w_action = tk.DoubleVar(value=70)
-        self.app_state.v_ai_w_emotion = tk.DoubleVar(value=100)
+        self.app_state.v_ai_w_epic = tk.DoubleVar(value=100)
+        self.app_state.v_ai_w_emotion = tk.DoubleVar(value=80)
         self.app_state.v_ai_w_character = tk.DoubleVar(value=40)
         self.app_state.v_ai_w_loopable = tk.DoubleVar(value=70)
         self.app_state.v_ai_w_dmd = tk.DoubleVar(value=100)
         
         weights = [
             ("Action", self.app_state.v_ai_w_action),
+            ("Epic", self.app_state.v_ai_w_epic),
             ("Emotion", self.app_state.v_ai_w_emotion),
             ("Character", self.app_state.v_ai_w_character),
             ("Loopable", self.app_state.v_ai_w_loopable),
