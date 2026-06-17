@@ -1,6 +1,6 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
-## [V7.0.0] - 2026-06-17 (AI Moments V2, Thread Safety, Refonte UI, Tests)
+## [V7.1.0] - 2026-06-17 (AI Moments V2, Thread Safety, Refonte UI, Tests)
 ### Corrigé
 - **Scoring AI Moments** : Restauration de l'intégration complète des sliders de l'interface (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). Le moteur construit désormais dynamiquement sa stratégie de score (`ScoringStrategy`) pour correspondre aux paramètres de l'utilisateur plutôt que d'utiliser un preset codé en dur, ce qui permet de pénaliser explicitement les textes/génériques.
 - **Race Conditions de la Preview DMD** : Correction d'un problème critique de multithreading où le passage rapide d'une vidéo à l'autre poussait les processus FFmpeg en arrière-plan à écraser l'état de l'interface avec "Error opening input files". Remplacement des interruptions `threading.Thread` par des jetons d'ID de génération (`_dmd_gen_id`).
