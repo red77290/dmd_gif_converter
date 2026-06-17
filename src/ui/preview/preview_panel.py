@@ -104,48 +104,29 @@ class PreviewPanel(ctk.CTkFrame):
         self.controls.set_led_sim_text(is_on)
     def _collect_params(self):
         s = self.app_state
-        params = {
-            "mode":            s.v_mode.get(),
-            "max_workers":     s.v_workers.get(),
-            "auto_workers":    getattr(s, "v_auto_workers", tk.BooleanVar(value=True)).get(),
-            "scroll_speed":    s.v_scroll_speed.get(),
-            "bottom_crop_pct": s.v_bottom_crop.get(),
-            "top_crop_pct":    s.v_top_crop.get(),
-            "scroll_cycles":   s.v_scroll_cycles.get(),
-            "fps_min":         s.v_fps_min.get(),
-            "fps_max":         s.v_fps_max.get(),
-            "contrast":        s.v_contrast.get(),
-            "saturation":      s.v_saturation.get(),
-            "brightness":      s.v_brightness.get(),
-            "gamma":           s.v_gamma.get(),
-            "sharpen_lum":     s.v_sharpen_lum.get(),
-            "sharpen_chr":     s.v_sharpen_chr.get(),
-            "dither":          s.v_dither.get(),
-            "scroll_enabled":  s.v_scroll_enabled.get(),
-            "zoom":            s.v_zoom.get(),
-            "manual_x":        s.v_manual_x.get(),
-            "manual_y":        s.v_manual_y.get(),
-            "hue_shift":       s.v_hue_shift.get(),
-            "noise_reduction": s.v_noise_reduction.get(),
-            "film_grain":      int(s.v_film_grain.get()),
-            "vignette":        s.v_vignette.get(),
-            "target_width":    s.v_target_width.get(),
-            "target_height":   s.v_target_height.get(),
-            "smart_ratio_bypass": getattr(s, "v_smart_ratio_bypass", None) and s.v_smart_ratio_bypass.get(),
-            "text_overlay_enabled": s.v_text_overlay_enabled.get(),
-            "text_content":    s.v_text_content.get(),
-            "text_font_size":  s.v_text_font_size.get(),
-            "text_color":      s.v_text_color.get(),
-            "text_position":   s.v_text_position.get(),
-            "text_font_file":  s.v_text_font_file.get(),
-            "text_style":      s.v_text_style.get(),
-            "text_bg":         s.v_text_bg.get(),
-            "text_bg_opacity": s.v_text_bg_opacity.get(),
-            "text_animation":  s.v_text_animation.get(),
-            "max_duration": (s.v_max_duration.get() if s.v_max_dur_enabled.get() else 0.0),
-            "auto_color_enabled": s.v_auto_color_enabled.get(),
-            "log_level": getattr(self.winfo_toplevel(), "v_log_level", tk.StringVar(value="INFO")).get(),
-        }
+        params = {}
+        
+        # 1. Dynamically collect all scalar variables from ApplicationState
+        # This prevents the recurring problem of forgetting to add new configs here.
+        for k, var in s._var_map.items():
+            if k in ("v_trim_start", "v_trim_end"):
+                continue  # Trim is per-file, not global
+            if k.startswith("v_") and not k.startswith("v_action_"):
+                # e.g., v_mode -> mode
+                params[k[2:]] = var.get()
+
+        # 2. Map aliases expected by the converter's DEFAULT_PARAMS
+        if "bottom_crop" in params:
+            params["bottom_crop_pct"] = params.pop("bottom_crop")
+        if "top_crop" in params:
+            params["top_crop_pct"] = params.pop("top_crop")
+        if "workers" in params:
+            params["max_workers"] = params["workers"]
+            
+        # 3. Special conditions
+        params["max_duration"] = params.get("max_duration", 0.0) if params.get("max_dur_enabled", True) else 0.0
+        params["smart_ratio_bypass"] = getattr(s, "v_smart_ratio_bypass", tk.BooleanVar(value=True)).get()
+        params["log_level"] = getattr(self.winfo_toplevel(), "v_log_level", tk.StringVar(value="INFO")).get()
 
         # Inject all auto-action configuration parameters
         from src.engine.config.auto_action_config import AutoActionConfig
