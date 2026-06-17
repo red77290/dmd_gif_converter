@@ -229,11 +229,17 @@ class AiMomentsEngine:
         moments.sort(key=lambda x: x.overall_score, reverse=True)
         final_results = []
         
+        # Enforce a minimum separation between moments to prevent clustering.
+        min_separation = 1.5  # seconds
+        
         for r in moments:
             overlap = False
             for fr in final_results:
-                # if there is overlap of more than 1 second
-                if not (r.end_time < fr.start_time + 1.0 or r.start_time > fr.end_time - 1.0):
+                # Distance between two intervals (negative means they overlap)
+                dist = max(r.start_time, fr.start_time) - min(r.end_time, fr.end_time)
+                
+                # If they overlap, or are closer than the minimum separation, reject
+                if dist < min_separation:
                     overlap = True
                     break
             if not overlap:
