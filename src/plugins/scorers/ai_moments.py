@@ -22,6 +22,7 @@ class AiMoment:
     end_frame: int
     scores: Dict[str, float]
     overall_score: float
+    signature: Optional[np.ndarray] = None
 
 class AiMomentsEngine:
     def __init__(self, video_path: str, options: dict, progress_cb: Callable[[str, float], None]):
@@ -203,6 +204,18 @@ class AiMomentsEngine:
                 temporal_bonus = (report.overall_temporal or 50.0) * (0.2 * self._loop_weight)
                 overall = min(100.0, avg_frame_score + temporal_bonus)
                 
+                # Compute visual signature for scene similarity detection
+                sig_features = []
+                for s in window_sigs:
+                    sig_features.append([
+                        s.edge_density_score or 0.0,
+                        s.contrast_score or 0.0,
+                        s.subject_score or 0.0,
+                        s.subject_centering_score or 0.0,
+                        s.entropy_score or 0.0
+                    ])
+                signature = np.mean(sig_features, axis=0) if sig_features else np.zeros(5)
+                
                 moments.append(AiMoment(
                     start_time=window[0][1],
                     end_time=window[-1][1],
@@ -215,7 +228,8 @@ class AiMomentsEngine:
                         "Continuity": report.subject_continuity or 0.0,
                         "Temporal Bonus": temporal_bonus
                     },
-                    overall_score=overall
+                    overall_score=overall,
+                    signature=signature
                 ))
                 
                 windows_processed += 1
@@ -242,6 +256,14 @@ class AiMomentsEngine:
                 if dist < min_separation:
                     overlap = True
                     break
+                    
+                # Scene Similarity Check (prevent extracting the exact same static scene multiple times)
+                if r.signature is not None and fr.signature is not None:
+                    sim_dist = np.linalg.norm(r.signature - fr.signature)
+                    if sim_dist < 0.05:  # Very tight threshold for exact same scene
+                        overlap = True
+                        break
+                        
             if not overlap:
                 final_results.append(r)
                 
