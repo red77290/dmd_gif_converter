@@ -48,28 +48,27 @@ class AiMomentsEngine:
         # Build dynamic strategy based on user checkboxes and sliders
         w_act = (self.options.get("w_action", 70.0) / 100.0) if self.options.get("crit_action", False) else 0.0
         w_char = (self.options.get("w_character", 40.0) / 100.0) if self.options.get("crit_character", False) else 0.0
-        w_ep = (self.options.get("w_epic", 100.0) / 100.0) if self.options.get("crit_epic", False) else 0.0
+        w_emo = (self.options.get("w_emotion", 100.0) / 100.0) if self.options.get("crit_emotion", False) else 0.0
         w_dm = (self.options.get("w_dmd", 100.0) / 100.0) if self.options.get("crit_dmd", False) else 0.0
         self._loop_weight = (self.options.get("w_loopable", 70.0) / 100.0) if self.options.get("crit_loopable", False) else 0.0
 
         from src.engine.scoring.final_scoring_engine import ScoringStrategy
         strategy = ScoringStrategy(
             name="ai_moments_dynamic",
-            w_motion=0.5 * w_act,
+            w_motion=0.8 * w_act,
             w_stability=0.0,
-            w_entropy=0.2,
-            w_contrast=0.3,
-            w_edge_density=0.2 * w_dm if w_dm > 0 else 0.1,
-            w_subject=0.5 * w_char if w_char > 0 else 0.1,
-            w_subject_centering=0.3 * w_char if w_char > 0 else 0.0,
-            w_readability=0.4 * w_dm if w_dm > 0 else 0.0,
-            w_attention=0.4 * w_ep if w_ep > 0 else 0.0,
-            w_saliency=0.3 * w_ep if w_ep > 0 else 0.1,
+            w_entropy=0.1,
+            w_contrast=0.1,
+            w_edge_density=0.4 * w_dm if w_dm > 0 else 0.1,
+            w_subject=0.8 * w_char if w_char > 0 else 0.0,
+            w_subject_centering=0.5 * w_char if w_char > 0 else 0.0,
+            w_readability=0.6 * w_dm if w_dm > 0 else 0.0,
+            w_attention=0.6 * w_emo if w_emo > 0 else 0.1,
+            w_saliency=0.4 * w_emo if w_emo > 0 else 0.1,
             selection_threshold=20.0,
             penalize_dark_frames=True,
-            # We ONLY penalize no-detection if Character is explicitly checked.
             penalize_no_detection=self.options.get("crit_character", False),
-            no_detection_penalty=20.0 * w_char if w_char > 0 else 0.0,
+            no_detection_penalty=30.0 * w_char if w_char > 0 else 0.0,
         )
         self.final_engine = FinalScoringEngine(strategy)
         
