@@ -61,8 +61,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--workers", type=int, default=DEFAULT_PARAMS["max_workers"], metavar="N",
-        help=f"Parallel ffmpeg processes (default: {DEFAULT_PARAMS['max_workers']}). "
+        help=f"Parallel ffmpeg processes (default: {DEFAULT_PARAMS['max_workers']}, 0 means auto). "
              "SSD+8 cores → 6–8, HDD/laptop → 2.",
+    )
+    p.add_argument(
+        "--no-auto-workers", action="store_true", default=False,
+        help="Disable automatic worker scaling. Forces the use of exactly --workers N even if it exceeds safe CPU limits.",
     )
 
     # ── Scroll ────────────────────────────────────────────────────────────────
@@ -220,8 +224,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max number of moments to extract per video (default: 10)."
     )
     am.add_argument(
-        "--ai-moments-strategy", type=str, default="balanced_v2",
-        help="Scoring strategy to use for AI moments (default: balanced_v2)."
+        "--ai-w-action", type=float, default=None, metavar="W",
+        help="Weight for Action criteria (0-100)."
+    )
+    am.add_argument(
+        "--ai-w-epic", type=float, default=None, metavar="W",
+        help="Weight for Epic criteria (0-100)."
+    )
+    am.add_argument(
+        "--ai-w-emotion", type=float, default=None, metavar="W",
+        help="Weight for Emotion criteria (0-100)."
+    )
+    am.add_argument(
+        "--ai-w-character", type=float, default=None, metavar="W",
+        help="Weight for Character criteria (0-100)."
+    )
+    am.add_argument(
+        "--ai-w-loopable", type=float, default=None, metavar="W",
+        help="Weight for Loopable criteria (0-100)."
+    )
+    am.add_argument(
+        "--ai-w-dmd", type=float, default=None, metavar="W",
+        help="Weight for DMD Visibility criteria (0-100)."
     )
     am.add_argument(
         "--ai-moments-dur-min", type=float, default=2.0, metavar="F",
@@ -378,6 +402,7 @@ if __name__ == "__main__":
     params = {
         "mode":           args.mode,
         "max_workers":    args.workers,
+        "auto_workers":   not args.no_auto_workers and args.workers == 0,
         "folder_prefix":  args.prefix,
         "scroll_speed":   args.scroll_speed,
         "scroll_cycles":  args.scroll_cycles,
@@ -509,7 +534,7 @@ if __name__ == "__main__":
 
     # ── Integrated AI Moments Extraction ──────────────────────────────────────
     if args.ai_moments or args.ai_moments_only:
-        logger.info(f"=== Extracting AI Moments (Count: {args.ai_moments_count}, Strategy: {args.ai_moments_strategy}) ===")
+        logger.info(f"=== Extracting AI Moments (Count: {args.ai_moments_count}) ===")
         import subprocess
         try:
             from src.engine.auto_action.ai_moments import AiMomentsEngine
@@ -527,14 +552,26 @@ if __name__ == "__main__":
                         continue  # Skip GIFs for extraction
                         
                     logger.info(f"Analyzing {file} for AI moments...")
+                    w_args = [args.ai_w_action, args.ai_w_epic, args.ai_w_emotion, args.ai_w_character, args.ai_w_loopable, args.ai_w_dmd]
+                    if all(x is None for x in w_args):
+                        # Default balanced mode
+                        w_act, w_ep, w_emo, w_char, w_loop, w_dm = 70.0, 100.0, 80.0, 40.0, 70.0, 100.0
+                    else:
+                        w_act = args.ai_w_action if args.ai_w_action is not None else 0.0
+                        w_ep = args.ai_w_epic if args.ai_w_epic is not None else 0.0
+                        w_emo = args.ai_w_emotion if args.ai_w_emotion is not None else 0.0
+                        w_char = args.ai_w_character if args.ai_w_character is not None else 0.0
+                        w_loop = args.ai_w_loopable if args.ai_w_loopable is not None else 0.0
+                        w_dm = args.ai_w_dmd if args.ai_w_dmd is not None else 0.0
+
                     options = {
                         "count": args.ai_moments_count,
-                        "strategy": args.ai_moments_strategy,
-                        "w_action": 70.0,
-                        "w_epic": 100.0,
-                        "w_character": 40.0,
-                        "w_loopable": 70.0,
-                        "w_dmd": 100.0,
+                        "w_action": w_act,
+                        "w_epic": w_ep,
+                        "w_emotion": w_emo,
+                        "w_character": w_char,
+                        "w_loopable": w_loop,
+                        "w_dmd": w_dm,
                         "dur_min": args.ai_moments_dur_min,
                         "dur_max": args.ai_moments_dur_max,
                         "analyze_fps": args.ai_moments_analyze_fps,

@@ -53,7 +53,7 @@ Vous pouvez également automatiser l'extraction AI Moments depuis la ligne de co
 
 ```bash
 # Analyse toutes les vidéos du dossier, extrait les 5 meilleurs moments par vidéo et les convertit en GIF DMD
-./dmd_gif_converter.py mes_videos/ --ai-moments --ai-moments-count 5 --ai-moments-strategy Action
+./dmd_gif_converter.py mes_videos/ --ai-moments --ai-moments-count 5 --ai-w-action 100
 ```
 
 ## Magie du Texte (Animations)
