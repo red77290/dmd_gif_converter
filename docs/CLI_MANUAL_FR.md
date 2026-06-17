@@ -99,6 +99,7 @@ Cela exécutera le pipeline de prétraitement Auto Action sur toutes les vidéos
 | `action_zoom_max` | `--action-zoom-max` | `2.0` | Facteur de zoom dynamique maximal |
 | `action_padding` | `--action-padding` | `0.20` | Marge autour du ROI détecté |
 | `action_subsample_frames` | `--action-subsample-frames` | `3` | Optimisation de vitesse. Ignore l'inférence YOLO 1 fois sur N. |
+| `auto_fast_tracking` | `--auto-fast-tracking` | `False` | Optimisation de vitesse. Ajuste dynamiquement `action_subsample_frames` en fonction des FPS de la vidéo. |
 | `bg_sub_enable` | `--bg-sub-enable` | `False` | Remplace le fond par du noir (maximise le contraste du sujet) |
 | `action_bottom_crop` | `--action-bottom-crop`| `0.0` | Exclut les N % inférieurs du cadre (manuel, 0 = désactivé) |
 | `action_auto_bottom_crop`| `--action-auto-bottom-crop`| `False` | Détecte auto la limite basse du sujet (pieds / sol) |

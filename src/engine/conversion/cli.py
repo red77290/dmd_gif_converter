@@ -152,6 +152,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--action-padding", type=float, default=DEFAULT_PARAMS["action_padding"], metavar="F")
     ag.add_argument("--action-subsample-frames", type=int, default=DEFAULT_PARAMS["action_subsample_frames"], metavar="N",
                     help="Run YOLO every N frames (1 = every frame, 3 = fast, 5 = very fast)")
+    ag.add_argument("--auto-fast-tracking", action="store_true", default=False,
+                    help="Dynamically scale YOLO tracking fps to match video fps to prevent slowdown on 60/120fps.")
     ag.add_argument("--action-intro", type=float, default=DEFAULT_PARAMS["action_intro"], metavar="F",
                     help="Establishing shot duration in seconds (default: 1.5).")
     ag.add_argument("--action-bottom-crop", type=float, default=DEFAULT_PARAMS["action_bottom_crop"], metavar="F",
@@ -391,6 +393,9 @@ if __name__ == "__main__":
         "sharpen_chr":    args.sharpen_chr,
         "dither":         args.dither,
         "auto_action_enabled": args.auto_action,
+        "subsample_frames": args.action_subsample_frames,
+        "auto_fast_tracking": args.auto_fast_tracking,
+        "intro_duration": args.action_intro,
         "action_detector": args.action_detector,
         "action_strength": args.action_strength,
         "action_smoothness": args.action_smoothness,
@@ -424,6 +429,7 @@ if __name__ == "__main__":
             "auto_action_enabled":    True,
             "action_smart_auto_crop": True,
             "action_auto_scene_type": True,
+            "auto_fast_tracking":     True,
             "dmd_visibility_score_enabled": True,
             "dmd_readability_score_enabled": True,
         })
