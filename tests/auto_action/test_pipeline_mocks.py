@@ -31,6 +31,7 @@ class TestPipelineMocks(unittest.TestCase):
         mock_writer_proc = MagicMock()
         mock_writer_proc.stdin.write = MagicMock()
         mock_writer_proc.wait.return_value = 0
+        mock_writer_proc.stderr.read.side_effect = [b""]
         mock_writer_popen.return_value = mock_writer_proc
         
         cfg = AutoActionConfig()

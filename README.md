@@ -177,7 +177,7 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 
 ## 🛠️ For Developers
 
-If you wish to contribute or understand how the app works under the hood (MVC architecture, Auto-Action Pipeline, FFmpeg Streaming), please refer to our **[Architectural Documentation](docs/architecture.md)**.
+If you wish to contribute or understand how the app works under the hood (MVC architecture, Auto-Action Pipeline, FFmpeg Streaming), please refer to our **[Architectural Documentation](docs/ARCHITECTURE.md)**.
 
 ---
 

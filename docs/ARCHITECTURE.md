@@ -922,8 +922,8 @@ tests/
 
 **Running the full suite:**
 ```bash
-PYTHONPATH=. pytest tests/ -v
-# Expected: 440 passed, 0 failed
+PYTHONPATH=. pytest tests/ -v --cov=src
+# Expected: 455 passed, 0 failed, 53% overall coverage
 ```
 
 **Mocking strategy:**
