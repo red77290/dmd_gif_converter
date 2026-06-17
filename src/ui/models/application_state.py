@@ -126,6 +126,7 @@ class ApplicationState(IModel):
             "v_auto_color_enabled",
             "v_action_enabled",
             "v_action_smart_auto_crop",
+            "v_action_auto_fast_tracking",
             "v_action_auto_scene_type",
             "v_action_dmd_visibility_score_enabled",
             "v_action_dmd_readability_score_enabled",
