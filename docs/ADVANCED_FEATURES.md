@@ -429,7 +429,11 @@ To optimize CPU usage during heavy YOLO inference, two parameters allow you to t
    - *Example*: `3` means the engine runs inference every 3rd frame and interpolates the bounding box between them.
    - *CLI*: `--action-subsample-frames 3`
 
-2. **Analyze FPS** (AI Moments):
+2. **Auto Fast Tracking** (Dynamic Tracking):
+   - Automatically overrides the manual subsample setting and scales it dynamically based on the input video's FPS. Targets ~5 YOLO inferences per second to guarantee high performance on heavy 60fps/120fps files without manual tweaking.
+   - *CLI*: `--auto-fast-tracking`
+
+3. **Analyze FPS** (AI Moments):
    - Defines how many frames per second the AI Moments engine analyzes.
    - *Example*: `5.0` means 5 frames per second are analyzed. Lower values are faster but less precise. Higher values catch micro-movements but take longer.
    - *CLI*: `--ai-moments-analyze-fps 5.0`
