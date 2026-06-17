@@ -218,14 +218,29 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         self._action_dependent_widgets.append(intro_sl)
                    
         # Fast Tracking / Subsampling (not disabled by Let Me Handle It)
-        self._slider_subsample = adv_slider(parent, "Fast Tracking (Speedup)", self.app_state.v_action_subsample_frames, 1, 10,
-                   "{:.0f}", " frames", steps=9,
+        self._slider_subsample = adv_slider(parent, "Fast Tracking (Speedup)", self.app_state.v_action_subsample_frames, 1, 30,
+                   "{:.0f}", " frames", steps=29,
                    tooltip_text="Performance optimization. Skips AI detection on X frames out of X.\nExample: 3 means AI runs 3x faster with almost no visual penalty since frames are interpolated.")
         subsample_row = ctk.CTkFrame(parent, fg_color="transparent")
         subsample_row.pack(fill="x", padx=14, pady=(0, 4))
+        
+        self._cb_auto_fast_tracking = ctk.CTkCheckBox(
+            subsample_row,
+            text="⚡ Auto Fast Tracking (Scale tracking speed to video FPS)",
+            variable=self.app_state.v_action_auto_fast_tracking,
+            font=ctk.CTkFont(size=12, weight="bold"), text_color="#ffe08a",
+        )
+        self._cb_auto_fast_tracking.pack(side="left", padx=(150, 10))
+        ToolTip(self._cb_auto_fast_tracking, "Dynamically adjusts tracking speedup based on video FPS (target 5fps AI processing).\nExtremely useful for heavy 60fps or 120fps videos.")
+
+        def _toggle_auto_fast_tracking(*_):
+            state = "disabled" if self.app_state.v_action_auto_fast_tracking.get() else "normal"
+            self._safe_cfg(self._slider_subsample, state=state)
+        self.app_state.v_action_auto_fast_tracking.trace_add("write", _toggle_auto_fast_tracking)
+        
         _b_sub = _InfoBadge(subsample_row)
         _b_sub.configure(text="Optimization: Skips YOLO analysis on X frames out of X.\nFor example, 3 divides tracking time by 3 without visual loss.\nThis setting remains editable even when 'Let me handle it' is checked.")
-        _b_sub.pack(side="left", padx=150) # Indent to align with slider label
+        _b_sub.pack(side="left")
 
         ctk.CTkLabel(
             parent, text="━━  📐  Crop & Vertical Bias",
@@ -432,6 +447,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         
         self.app_state.v_action_smart_auto_crop.set(self.app_state.v_action_smart_auto_crop.get())
         self.app_state.v_action_auto_bottom_crop.set(self.app_state.v_action_auto_bottom_crop.get())
+        self.app_state.v_action_auto_fast_tracking.set(self.app_state.v_action_auto_fast_tracking.get())
         self.app_state.v_action_auto_top_crop.set(self.app_state.v_action_auto_top_crop.get())
         self.app_state.v_action_auto_vertical_bias.set(self.app_state.v_action_auto_vertical_bias.get())
         self.app_state.v_action_auto_strength.set(self.app_state.v_action_auto_strength.get())
