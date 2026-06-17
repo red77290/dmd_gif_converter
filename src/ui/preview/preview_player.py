@@ -417,7 +417,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             self.panel.controls.show_trim()
             self.panel.controls.hide_diagnosis()
             threading.Thread(target=self._extract_source_frames,
-                             args=(file_path,), daemon=True).start()
+                             args=(file_path, getattr(self, "_src_gen_id", 0)), daemon=True).start()
             # Only start auto-generation here. It will chain to DMD generation when finished.
             self._start_auto_generation(file_path)
 
@@ -438,7 +438,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             shutil.rmtree(self._src_tmpdir, ignore_errors=True)
             self._src_tmpdir = None
 
-    def _extract_source_frames(self, file_path):
+    def _extract_source_frames(self, file_path, gen_id):
         tmpdir = tempfile.mkdtemp(prefix="dmd_src_")
         fps_prev = 12.5
         dur = min(self._source_duration, 10.0)
