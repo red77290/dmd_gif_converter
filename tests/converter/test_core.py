@@ -234,13 +234,14 @@ class TestProcessFile(unittest.TestCase):
         mock = MagicMock()
         mock.returncode = 0
         mock.poll.return_value = 0
+        mock.stderr.read.side_effect = [b""]
         return patch("src.engine.conversion.core.subprocess.Popen", return_value=mock)
 
     def _mock_ffmpeg_fail(self, stderr=b"some error\nlast error line"):
         mock = MagicMock()
         mock.returncode = 1
         mock.poll.return_value = 1
-        mock.stderr.read.return_value = stderr
+        mock.stderr.read.side_effect = [stderr, b""]
         return patch("src.engine.conversion.core.subprocess.Popen", return_value=mock)
 
     def test_success_returns_true(self):
@@ -319,7 +320,7 @@ class TestProcessFile(unittest.TestCase):
             m = MagicMock()
             m.returncode = 0
             m.poll.return_value = 0
-            m.stderr.read.return_value = b""
+            m.stderr.read.side_effect = [b""]
             return m
 
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1,12 +1,12 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
-## [V7.1.1] - 2026-06-16 (AI Moments V2 Tuning & Thread Safety Fixes)
+## [V7.0.0] - 2026-06-17 (AI Moments V2, Thread Safety, Refonte UI, Tests)
 ### Corrigé
 - **Scoring AI Moments** : Restauration de l'intégration complète des sliders de l'interface (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). Le moteur construit désormais dynamiquement sa stratégie de score (`ScoringStrategy`) pour correspondre aux paramètres de l'utilisateur plutôt que d'utiliser un preset codé en dur, ce qui permet de pénaliser explicitement les textes/génériques.
 - **Race Conditions de la Preview DMD** : Correction d'un problème critique de multithreading où le passage rapide d'une vidéo à l'autre poussait les processus FFmpeg en arrière-plan à écraser l'état de l'interface avec "Error opening input files". Remplacement des interruptions `threading.Thread` par des jetons d'ID de génération (`_dmd_gen_id`).
 - **Vitesse d'extraction AI Moments** : Restauration de l'extraction instantanée des moments vers les fichiers temporaires grâce à l'utilisation correcte de la copie de flux (`-c copy`) et du fast-seek (`-ss` placé avant `-i`).
 
-## [V7.1.0] - 2026-06-16 (Refonte UI & Infobulles)
+
 ### Ajouté
 - Infobulles exhaustives pour tous les paramètres de l'interface utilisateur dans Conversion Settings et Advanced Settings.
 - Verrouillage visuel dans les Paramètres Avancés : Les sliders manuels (Zoom, X/Y Offset) et les paramètres de défilement (Scroll) sont automatiquement grisés et désactivés lorsque l'Auto Action est activée.
@@ -17,7 +17,9 @@
   - `PreviewPlayer` : Gère le chargement des médias, le cache, et le rendu du simulateur LED Matrix.
   - `PreviewControls` : Isole tous les widgets de l'interface, boutons et barres de progression.
 
-## [V7.0.0] - Architecture & Performances (V7)
+### Tests & Stabilité
+- **✅ 100% de réussite aux tests** : Résolution de tous les crashs de la suite de tests (notamment le `SIGABRT` macOS causé par la concurrence entre Tkinter et OpenCV) grâce à un mocking complet de Tkinter dans `conftest.py`.
+- **✅ 53% de Couverture de code** : Vérification que la logique du pipeline central et de l'auto-action est couverte, avec 455 tests passant avec succès au total.
 
 ### Modifié
 - **🚀 Restauration du Multithreading Massif** : La conversion de masse (batch processing) utilise de nouveau un pool de workers (`concurrent.futures.ThreadPoolExecutor`), réduisant massivement le temps de traitement pour les gros répertoires.

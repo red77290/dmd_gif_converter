@@ -39,7 +39,7 @@ It creates an intermediate video that follows action/person areas at the target 
 - **C-level stderr suppression**: `_quiet_c_stderr()` context manager in `reader.py` uses `os.dup2` to redirect file-descriptor 2 to `/dev/null` during `cv2.VideoCapture()` construction, silencing `[mp3float @ ...] Header missing` messages that bypass Python's logging system entirely.
 
 **v6.0.0 architectural improvements:**
-- **Full OOP refactoring**: Every class now implements a strict ABC interface (`IDetector`, `ITracker`, `IRenderer`). See [ARCHITECTURE.md](docs/architecture.md) for class diagrams and sequence diagrams.
+- **Full OOP refactoring**: Every class now implements a strict ABC interface (`IDetector`, `ITracker`, `IRenderer`). See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for class diagrams and sequence diagrams.
 - **`DetectorFactory`**: The ONNX detector instantiation is now decoupled behind a factory — swap the backend without touching the pipeline.
 - **`TrackingEngine` implements `ITracker`**: `last_roi` and `cam_full_view` are now proper `@property` accessors, not raw attributes.
 - **`Renderer` implements `IRenderer`**: Crop and render logic is fully encapsulated.
