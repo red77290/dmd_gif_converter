@@ -25,8 +25,8 @@ This is where the magic happens. It is subdivided into:
   - `ITracker`: Handles subject smoothing, zooming, and bounding box logic.
   - `IRenderer`: Crops the frames using fast resizing instead of heavy OpenCV operations.
 
-#### 3. The Controllers (`src/ui/controllers/`)
-Instead of an Event Bus, the UI is decoupled from the engine through Controllers (`ConversionController`, `AutoController`, `SourceController`). The UI sends user actions to the controllers, which then spawn background threads to communicate with the Engine.
+#### 3. Event Bus and Controllers (`src/ui/core/event_bus.py`, `src/ui/controllers/`)
+The UI is decoupled from the engine using an `EventBus`. UI components publish events (e.g. "FilesAdded", "PreviewRequested") rather than holding direct references to controllers. Controllers subscribe to these events and spawn background threads to communicate with the Engine.
 
 ---
 

@@ -1024,11 +1024,11 @@ The converter injects OS-specific hardware encoders into the FFmpeg pipeline dyn
 - NVIDIA: `h264_nvenc`
 - Intel: `h264_qsv`
 
-### 12.2 Global Thread Safety (`FFmpegPipeReader`)
-OpenCV's `FFmpegPipeReader` is fundamentally unsafe when multiple threads instantiate it simultaneously (causing `SIGABRT` / `SIGSEGV` on macOS). The system uses a globally patched `FFmpegPipeReader` with a strict `threading.Lock` to serialize video demuxing.
+### 12.2 Global Thread Safety (`SafeVideoCapture`)
+OpenCV's `cv2.VideoCapture` is fundamentally unsafe when multiple threads instantiate it simultaneously (causing `SIGABRT` / `SIGSEGV` on macOS). The system uses a globally patched `SafeVideoCapture` with a strict `threading.Lock` to serialize video demuxing.
 
 ### 12.3 Thread Pooling Caps
-Deep Learning inference (YOLO / ONNX) will cannibalize all CPU cores if unbound, leading to GUI freezes during batch processing. The `onnxruntime` sessions are strictly capped globally (`intra_op_num_threads=2`, `inter_op_num_threads=1`).
+Deep Learning inference (YOLO / ONNX) will cannibalize all CPU cores if unbound, leading to GUI freezes during batch processing. To balance this, the threading is now context-aware: thread allocation dynamically switches between 2 threads for batch processing (to prevent system starvation) and 8 threads for standalone Auto Action or AI Moments, providing a massive speed boost during individual extraction.
 
 ### 12.4 Chained UI Preview
 To prevent redundant YOLO execution, the UI's `PreviewPanel` strictly chains the generation of the `Auto-Action` preview and the `DMD` preview. The DMD preview waits for the intermediate `action_pre.mp4` cache, entirely bypassing the YOLO engine on subsequent runs.

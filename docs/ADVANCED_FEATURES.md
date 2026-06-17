@@ -362,6 +362,7 @@ This fix applies to:
 - `FFmpegWriter.close()` (auto-action preprocessing pipe)
 
 ### `--workers` tuning
+By default, the converter uses an automatic, optimal number of concurrent workers (`cpu_cores / 2`) to ensure system stability. To force a specific number in the CLI, you must append `--no-auto-workers` (e.g., `--workers 8 --no-auto-workers`).
 
 | Machine | Recommended |
 |---|---|

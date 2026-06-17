@@ -63,7 +63,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `ai_moments` | `--ai-moments` | `False` | Extrait les meilleurs moments des vidéos ET les convertit automatiquement en GIFs. |
 | `ai_moments_only`| `--ai-moments-only`| `False` | Extrait les meilleurs moments (en MP4) mais NE LES CONVERTIT PAS en GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Nombre maximum de moments à extraire par vidéo. |
-| `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`, `Emotion`, `Epic`, `Custom`). |
+| `ai_w_action`, etc. | `--ai-w-action`, `--ai-w-epic`, etc. | `Balanced` | Force des poids de détection manuels (0-100). Sans eux, un profil "Balanced" est utilisé. |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes |
 | `ai_moments_analyze_fps`| `--ai-moments-analyze-fps` | `5.0` | Analyse la vidéo à N images par seconde pour optimiser YOLO |
@@ -138,10 +138,8 @@ La partie entière = nombre d'**allers-retours complets** (bas→haut) ; la part
 | `2.0` | 2 allers-retours, s'arrête en haut |
 
 ### Réglage de `--workers`
-
-Par défaut, le convertisseur utilise un nombre de workers optimal calculé automatiquement (`cœurs_cpu / 2`).
-
-Si vous avez un processeur très puissant et un SSD rapide, vous pouvez forcer cette limite avec `--workers N`. Attention, au-delà de 8 workers le gain est souvent négligeable et la pression mémoire augmente drastiquement.
+Par défaut, le convertisseur utilise un nombre de workers optimal calculé automatiquement (`cœurs_cpu / 2`) via le système `auto_workers`.
+Si vous avez un processeur très puissant et un SSD rapide, vous pouvez forcer cette limite avec `--workers N --no-auto-workers`. Attention, au-delà de 8 workers le gain est souvent négligeable et la pression mémoire augmente drastiquement.
 > En mode UI, chaque log de worker parallèle est préfixé par `[W1]`, `[W2]`, etc. pour faciliter le filtrage.
 
 ### Logs terminal — launcher vs invocation directe
@@ -181,7 +179,7 @@ python3 -m src.engine.conversion.cli
 ### 2. Le Mode Magique "Let Me Handle It"
 La commande ultime sans configuration. Elle applique la colorimétrie IA, le cadrage Auto Action, la soustraction de fond et l'évaluation de visibilité DMD tout en même temps sur un dossier spécifique.
 ```bash
-python3 -m src.engine.conversion.cli gifs_MonGameplay --let-me-handle-it --workers 8
+python3 -m src.engine.conversion.cli gifs_MonGameplay --let-me-handle-it --workers 8 --no-auto-workers
 ```
 
 ### 3. Superposition de Texte (Watermark / Tags Joueur)
@@ -206,7 +204,7 @@ python3 -m src.engine.conversion.cli --search-keyword "arcade fighting" --search
 ### 6. AI Moments : Pipeline complet (Extraction + Conversion)
 Prend une vidéo de gameplay de 10 minutes, trouve les 5 meilleurs moments d'action, et convertit immédiatement ces 5 extraits en GIFs 128x32.
 ```bash
-python3 -m src.engine.conversion.cli gifs_GameplayBrut --ai-moments --ai-moments-count 5 --ai-moments-strategy "Action" --let-me-handle-it
+python3 -m src.engine.conversion.cli gifs_GameplayBrut --ai-moments --ai-moments-count 5 --ai-w-action 100 --let-me-handle-it
 ```
 
 ### 7. AI Moments : Extraction UNIQUEMENT

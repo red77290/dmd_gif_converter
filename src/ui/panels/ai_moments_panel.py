@@ -118,48 +118,46 @@ class AiMomentsPanel(ctk.CTkFrame):
         CTkChip(chip_frame, text="Loopable", variable=self.app_state.v_ai_crit_loopable).grid(row=1, column=1, padx=5, pady=5)
         CTkChip(chip_frame, text="DMD", variable=self.app_state.v_ai_crit_dmd).grid(row=1, column=2, padx=5, pady=5)
 
-    def _build_ai_analysis_strategy(self, parent):
-        f = ctk.CTkFrame(parent)
-        f.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkLabel(f, text="Section 3 - Analysis Strategy", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
-        
-        self.app_state.v_ai_strategy = tk.StringVar(value="Balanced")
-        modes = ["Balanced", "Maximum Action", "Maximum DMD Visibility", "Loop Priority", "Custom"]
-        
-        for m in modes:
-            ctk.CTkRadioButton(f, text=m, variable=self.app_state.v_ai_strategy, value=m, command=self._on_ai_strategy_change).pack(anchor="w", padx=10, pady=2)
-            
-        self._ai_custom_frame = ctk.CTkFrame(f, fg_color="transparent")
-        
-        self.app_state.v_ai_w_action = tk.DoubleVar(value=70)
-        self.app_state.v_ai_w_epic = tk.DoubleVar(value=100)
-        self.app_state.v_ai_w_emotion = tk.DoubleVar(value=80)
-        self.app_state.v_ai_w_character = tk.DoubleVar(value=40)
-        self.app_state.v_ai_w_loopable = tk.DoubleVar(value=70)
-        self.app_state.v_ai_w_dmd = tk.DoubleVar(value=100)
+        self.app_state.v_ai_w_action = tk.DoubleVar(value=70 if self.app_state.v_ai_crit_action.get() else 0)
+        self.app_state.v_ai_w_epic = tk.DoubleVar(value=100 if self.app_state.v_ai_crit_epic.get() else 0)
+        self.app_state.v_ai_w_emotion = tk.DoubleVar(value=80 if self.app_state.v_ai_crit_emotion.get() else 0)
+        self.app_state.v_ai_w_character = tk.DoubleVar(value=40 if self.app_state.v_ai_crit_character.get() else 0)
+        self.app_state.v_ai_w_loopable = tk.DoubleVar(value=70 if self.app_state.v_ai_crit_loopable.get() else 0)
+        self.app_state.v_ai_w_dmd = tk.DoubleVar(value=100 if self.app_state.v_ai_crit_dmd.get() else 0)
         
         weights = [
-            ("Action", self.app_state.v_ai_w_action),
-            ("Epic", self.app_state.v_ai_w_epic),
-            ("Emotion", self.app_state.v_ai_w_emotion),
-            ("Character", self.app_state.v_ai_w_character),
-            ("Loopable", self.app_state.v_ai_w_loopable),
-            ("DMD Visibility", self.app_state.v_ai_w_dmd),
+            ("Action", self.app_state.v_ai_crit_action, self.app_state.v_ai_w_action, 70),
+            ("Epic", self.app_state.v_ai_crit_epic, self.app_state.v_ai_w_epic, 100),
+            ("Emotion", self.app_state.v_ai_crit_emotion, self.app_state.v_ai_w_emotion, 80),
+            ("Character", self.app_state.v_ai_crit_character, self.app_state.v_ai_w_character, 40),
+            ("Loopable", self.app_state.v_ai_crit_loopable, self.app_state.v_ai_w_loopable, 70),
+            ("DMD Visibility", self.app_state.v_ai_crit_dmd, self.app_state.v_ai_w_dmd, 100),
         ]
         
-        self._ai_custom_frame.grid_columnconfigure(1, weight=1)
-        for i, (name, var) in enumerate(weights):
-            lbl = ctk.CTkLabel(self._ai_custom_frame, text=name, width=80, anchor="w")
+        slider_frame = ctk.CTkFrame(f, fg_color="transparent")
+        slider_frame.pack(fill="x", padx=10, pady=5)
+        slider_frame.grid_columnconfigure(1, weight=1)
+        
+        for i, (name, crit_var, w_var, def_w) in enumerate(weights):
+            lbl = ctk.CTkLabel(slider_frame, text=name, width=80, anchor="w")
             lbl.grid(row=i, column=0, padx=5, pady=2, sticky="w")
-            slider = ctk.CTkSlider(self._ai_custom_frame, from_=0, to=100, variable=var)
+            
+            slider = ctk.CTkSlider(slider_frame, from_=0, to=100, variable=w_var)
             slider.grid(row=i, column=1, padx=(5, 15), pady=2, sticky="ew")
             
-    def _on_ai_strategy_change(self):
-        if self.app_state.v_ai_strategy.get() == "Custom":
-            self._ai_custom_frame.pack(fill="x", padx=10, pady=10)
-        else:
-            self._ai_custom_frame.pack_forget()
+            if not crit_var.get():
+                slider.configure(state="disabled")
+                
+            def _make_trace(c_var=crit_var, w=w_var, s=slider, dw=def_w):
+                def _cb(*args):
+                    if c_var.get():
+                        w.set(dw)
+                        s.configure(state="normal")
+                    else:
+                        w.set(0)
+                        s.configure(state="disabled")
+                return _cb
+            crit_var.trace_add("write", _make_trace())
 
     def _build_ai_generation_settings(self, parent):
         f = ctk.CTkFrame(parent)
