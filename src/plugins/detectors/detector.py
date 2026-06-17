@@ -272,7 +272,27 @@ class _FrameDetector(AbstractDetector):
                 
             best_i = int(np.argmax(platformer_scores))
         else:
-            best_i = int(np.argmax(person_scores * mask))
+            valid_indices = np.where(mask)[0]
+            if len(valid_indices) == 0:
+                return None
+            
+            valid_scores = person_scores[valid_indices]
+            valid_boxes = boxes_raw[valid_indices]
+            
+            # Bias toward the center of the frame
+            center_x_norm = valid_boxes[:, 0] / float(self._model_w)
+            center_y_norm = valid_boxes[:, 1] / float(self._model_h)
+            
+            # Distance from center (0.5, 0.5)
+            # Max possible distance from center is ~0.707
+            dist_from_center = np.sqrt((center_x_norm - 0.5)**2 + (center_y_norm - 0.5)**2)
+            
+            # Apply a centering bonus (up to 1.5x multiplier for perfectly centered)
+            center_bias = 1.0 + np.maximum(0.0, 0.5 - dist_from_center)
+            
+            centered_scores = valid_scores * center_bias
+            best_idx_in_valid = int(np.argmax(centered_scores))
+            best_i = valid_indices[best_idx_in_valid]
 
         cx, cy, bw, bh = boxes_raw[best_i]
         sx, sy = w / float(self._model_w), h / float(self._model_h)
