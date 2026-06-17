@@ -103,6 +103,7 @@ This will run the Auto Action preprocessing pipeline on all videos in the target
 | `action_zoom_max` | `--action-zoom-max` | `2.0` | Maximum dynamic zoom factor |
 | `action_padding` | `--action-padding` | `0.20` | Padding around detected ROI |
 | `action_subsample_frames` | `--action-subsample-frames` | `3` | Speed optimization. Skips YOLO inference on N frames. |
+| `auto_fast_tracking` | `--auto-fast-tracking` | `False` | Speed optimization. Dynamically scales `action_subsample_frames` according to video fps. |
 | `bg_sub_enable` | `--bg-sub-enable` | `False` | Replace background with black (maximises subject contrast) |
 | `action_bottom_crop` | `--action-bottom-crop`| `0.0` | Exclude bottom N % of frame (manual, 0 = disabled) |
 | `action_auto_bottom_crop`| `--action-auto-bottom-crop`| `False` | Auto-detect bottom crop from ROI analysis |

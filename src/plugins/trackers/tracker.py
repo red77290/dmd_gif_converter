@@ -4,6 +4,7 @@ import logging
 from typing import Deque, Tuple, Optional, List
 import numpy as np
 import cv2
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -99,7 +100,11 @@ class DetectionStage(ITrackerStage):
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         expected_floor_y = engine.floor_est.floor_y if engine.floor_est is not None else None
         
-        subsample = getattr(engine.cfg, 'subsample_frames', 3)
+        if getattr(engine.cfg, 'auto_fast_tracking', False):
+            # Target roughly 5 frames per second for YOLO processing
+            subsample = max(1, math.ceil(engine.fps / 5.0))
+        else:
+            subsample = getattr(engine.cfg, 'subsample_frames', 3)
         run_detector = (
             subsample <= 1 or
             engine.frames_since_scene_change <= 1 or

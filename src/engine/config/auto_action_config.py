@@ -9,6 +9,7 @@ class AutoActionConfig:
     zoom_max: float = 2.0              # max dynamic zoom factor (hard limit)
     padding: float = 0.20              # extra padding around ROI
     subsample_frames: int = 3          # run YOLO every N frames (1 = every frame)
+    auto_fast_tracking: bool = False   # dynamically adjust subsample_frames based on video fps (target ~5 analysis fps)
     intro_duration: float = 0.0        # seconds of full-frame overview before focusing
     bg_sub_enable: bool = False        # enable background subtraction (replaces background with black)
     bottom_crop_pct: float = 0.0       # fraction of image bottom to exclude from framing (0 = disabled)
