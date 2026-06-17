@@ -232,11 +232,15 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
         )
         self._cb_auto_fast_tracking.pack(side="left", padx=(150, 10))
         ToolTip(self._cb_auto_fast_tracking, "Dynamically adjusts tracking speedup based on video FPS (target 5fps AI processing).\nExtremely useful for heavy 60fps or 120fps videos.")
+        self.app_state.lmh_widgets.append(self._cb_auto_fast_tracking)
 
         def _toggle_auto_fast_tracking(*_):
             state = "disabled" if self.app_state.v_action_auto_fast_tracking.get() else "normal"
             self._safe_cfg(self._slider_subsample, state=state)
         self.app_state.v_action_auto_fast_tracking.trace_add("write", _toggle_auto_fast_tracking)
+        _toggle_auto_fast_tracking()
+        
+        self._action_dependent_widgets.extend([self._cb_auto_fast_tracking, self._slider_subsample])
         
         _b_sub = _InfoBadge(subsample_row)
         _b_sub.configure(text="Optimization: Skips YOLO analysis on X frames out of X.\nFor example, 3 divides tracking time by 3 without visual loss.\nThis setting remains editable even when 'Let me handle it' is checked.")
