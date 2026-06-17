@@ -104,11 +104,11 @@ class TestTrackerCloseUpClip(unittest.TestCase):
         orig_rh = 460
 
         # Check hair was skipped
-        expected_skip = int(orig_rh * 0.25)
+        expected_skip = int(orig_rh * 0.15)
         expected_h    = max(8, int(orig_rh * 0.35))
 
         self.assertEqual(ry, 0 + expected_skip,
-                         f"ry should skip top 25 % of original bbox. "
+                         f"ry should skip top 15 % of original bbox. "
                          f"Got {ry}, expected {0 + expected_skip}")
         self.assertEqual(rh, expected_h,
                          f"rh should be 35 % of original bbox. "
@@ -207,7 +207,7 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         """
         result = self._get_roi((50, 0, 200, 200), frame_h=480)
         self.assertIsNotNone(result)
-        expected_skip = int(200 * 0.25)   # 50
+        expected_skip = int(200 * 0.15)   # 30
         expected_h    = max(8, int(200 * 0.35))  # 70
         self.assertEqual(result[1], expected_skip, "ry should be hair-skip for square bbox")
         self.assertEqual(result[3], expected_h,    "rh should be eye region for square bbox")
@@ -233,7 +233,7 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         # rw=100, rh=140 → aspect exactly 1.4
         result = self._get_roi((50, 0, 100, 140), frame_h=480)
         self.assertIsNotNone(result)
-        expected_skip = int(140 * 0.25)
+        expected_skip = int(140 * 0.15)
         expected_h    = max(8, int(140 * 0.35))
         self.assertEqual(result[1], expected_skip)
         self.assertEqual(result[3], expected_h)

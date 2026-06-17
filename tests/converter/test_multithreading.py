@@ -285,7 +285,7 @@ class TestProcessFolderUsesPool(unittest.TestCase):
                            side_effect=fake_pf):
                     # Patch the class inside the concurrent.futures module directly
                     with patch.object(concurrent.futures, "ThreadPoolExecutor", CapturingTPE):
-                        conv.process_folder(fin, fout, params={"max_workers": 4})
+                        conv.process_folder(fin, fout, params={"max_workers": 4, "auto_workers": False})
 
         self.assertIn(4, executor_calls,
                       f"max_workers=4 n'a pas atteint ThreadPoolExecutor. Appels: {executor_calls}")
