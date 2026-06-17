@@ -1,6 +1,6 @@
 # DMD GIF Converter — Changelog
 
-## [7.0.0] - 2026-06-17 (AI Moments V2, Thread Safety, UI Refactoring, Tests)
+## [7.1.0] - 2026-06-17 (AI Moments V2, Thread Safety, UI Refactoring, Tests)
 ### Fixed
 - **AI Moments Scoring**: Restored full UI slider integration (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). The engine now dynamically builds its `ScoringStrategy` to match user parameters rather than using a hardcoded preset, explicitly penalizing text/credits.
 - **DMD Preview Race Conditions**: Fixed a critical threading issue where rapid video switching caused background FFmpeg processes to overwrite the UI state with "Error opening input files". Replaced `threading.Thread` interruptions with generation ID tokens (`_dmd_gen_id`).
