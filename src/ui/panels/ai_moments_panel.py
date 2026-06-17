@@ -114,9 +114,9 @@ class AiMomentsPanel(ctk.CTkFrame):
         CTkChip(chip_frame, text="Action", variable=self.app_state.v_ai_crit_action).grid(row=0, column=0, padx=5, pady=5)
         CTkChip(chip_frame, text="Epic", variable=self.app_state.v_ai_crit_epic).grid(row=0, column=1, padx=5, pady=5)
         CTkChip(chip_frame, text="Emotion", variable=self.app_state.v_ai_crit_emotion).grid(row=0, column=2, padx=5, pady=5)
-        CTkChip(chip_frame, text="Character", variable=self.app_state.v_ai_crit_character).grid(row=0, column=3, padx=5, pady=5)
-        CTkChip(chip_frame, text="Loopable", variable=self.app_state.v_ai_crit_loopable).grid(row=1, column=0, padx=5, pady=5)
-        CTkChip(chip_frame, text="DMD", variable=self.app_state.v_ai_crit_dmd).grid(row=1, column=1, padx=5, pady=5)
+        CTkChip(chip_frame, text="Character", variable=self.app_state.v_ai_crit_character).grid(row=1, column=0, padx=5, pady=5)
+        CTkChip(chip_frame, text="Loopable", variable=self.app_state.v_ai_crit_loopable).grid(row=1, column=1, padx=5, pady=5)
+        CTkChip(chip_frame, text="DMD", variable=self.app_state.v_ai_crit_dmd).grid(row=1, column=2, padx=5, pady=5)
 
     def _build_ai_analysis_strategy(self, parent):
         f = ctk.CTkFrame(parent)
@@ -148,11 +148,12 @@ class AiMomentsPanel(ctk.CTkFrame):
             ("DMD Visibility", self.app_state.v_ai_w_dmd),
         ]
         
+        self._ai_custom_frame.grid_columnconfigure(1, weight=1)
         for i, (name, var) in enumerate(weights):
-            lbl = ctk.CTkLabel(self._ai_custom_frame, text=name, width=100, anchor="w")
-            lbl.grid(row=i, column=0, padx=5, pady=2)
+            lbl = ctk.CTkLabel(self._ai_custom_frame, text=name, width=80, anchor="w")
+            lbl.grid(row=i, column=0, padx=5, pady=2, sticky="w")
             slider = ctk.CTkSlider(self._ai_custom_frame, from_=0, to=100, variable=var)
-            slider.grid(row=i, column=1, padx=5, pady=2)
+            slider.grid(row=i, column=1, padx=(5, 15), pady=2, sticky="ew")
             
     def _on_ai_strategy_change(self):
         if self.app_state.v_ai_strategy.get() == "Custom":
