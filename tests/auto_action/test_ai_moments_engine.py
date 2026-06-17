@@ -14,6 +14,7 @@ class TestAiMomentsEngine(unittest.TestCase):
         mock_proc = MagicMock()
         dummy_frame = np.random.randint(0, 255, (180, 320, 3), dtype=np.uint8)
         mock_proc.stdout.read.side_effect = [dummy_frame.tobytes()] * 250 + [b""]
+        mock_proc.stderr.read.side_effect = [b""]
         mock_popen.return_value = mock_proc
         # Mock video capture
         mock_cap_instance = MagicMock()
@@ -89,6 +90,7 @@ class TestAiMomentsEngine(unittest.TestCase):
             return np.zeros((100, 100, 3), dtype=np.uint8).tobytes()
             
         mock_proc.stdout.read.side_effect = slow_read
+        mock_proc.stderr.read.side_effect = [b""]
         mock_popen.return_value = mock_proc
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
