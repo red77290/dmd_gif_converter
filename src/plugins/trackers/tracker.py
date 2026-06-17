@@ -480,8 +480,17 @@ class TrackingEngine(ITracker):
             clip_mode = "closeup" if aspect <= 1.4 else "full_body_head"
 
         if clip_mode == "closeup":
-            hair_skip = int(rh * 0.25)
-            face_h    = max(8, int(rh * 0.35))
+            head_frac = 0.35
+            eye_offset = 0.15  # Default to 15% down instead of 25% to avoid aiming at the mouth/chest
+            
+            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
+                if getattr(self.cfg.scene_profile, "face_eye_offset", None) is not None:
+                    eye_offset = self.cfg.scene_profile.face_eye_offset
+                if getattr(self.cfg.scene_profile, "face_head_frac", None) is not None:
+                    head_frac = self.cfg.scene_profile.face_head_frac
+                    
+            hair_skip = int(rh * eye_offset)
+            face_h    = max(8, int(rh * head_frac))
             return BoundingBox(rx, ry + hair_skip, rw, face_h)
 
         if clip_mode == "full_body_head":
