@@ -63,7 +63,7 @@ Tous les paramètres sont accessibles via **curseurs et listes déroulantes dans
 | `ai_moments` | `--ai-moments` | `False` | Extrait les meilleurs moments des vidéos ET les convertit automatiquement en GIFs. |
 | `ai_moments_only`| `--ai-moments-only`| `False` | Extrait les meilleurs moments (en MP4) mais NE LES CONVERTIT PAS en GIFs. |
 | `ai_moments_count` | `--ai-moments-count` | `10` | Nombre maximum de moments à extraire par vidéo. |
-| `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`). |
+| `ai_moments_strategy` | `--ai-moments-strategy` | `Balanced` | Stratégie à prioriser (`Action`, `Balanced`, `Character`, `Emotion`, `Epic`, `Custom`). |
 | `ai_moments_dur_min` | `--ai-moments-dur-min` | `2.0` | Durée minimale d'un moment extrait en secondes |
 | `ai_moments_dur_max` | `--ai-moments-dur-max` | `5.0` | Durée maximale d'un moment extrait en secondes |
 | `ai_moments_analyze_fps`| `--ai-moments-analyze-fps` | `5.0` | Analyse la vidéo à N images par seconde pour optimiser YOLO |
