@@ -107,6 +107,7 @@ class PreviewPanel(ctk.CTkFrame):
         params = {
             "mode":            s.v_mode.get(),
             "max_workers":     s.v_workers.get(),
+            "auto_workers":    getattr(s, "v_auto_workers", tk.BooleanVar(value=True)).get(),
             "scroll_speed":    s.v_scroll_speed.get(),
             "bottom_crop_pct": s.v_bottom_crop.get(),
             "top_crop_pct":    s.v_top_crop.get(),
@@ -326,7 +327,13 @@ class PreviewPanel(ctk.CTkFrame):
     def _run_tasks(self, tasks, params):
         self.after(0, lambda: self._set_conv_busy(True))
         total = len(tasks)
-        max_workers = int(params.get("max_workers", 2))
+        
+        v_auto_workers = params.get("auto_workers", True)
+        if v_auto_workers:
+            max_workers = max(1, min(16, (os.cpu_count() or 4) // 2))
+        else:
+            max_workers = int(params.get("max_workers", 2))
+            
         self.after(0, lambda w=max_workers: self._log(
             f"🚀  Convert {total} file(s) using {w} worker(s)…"))
 

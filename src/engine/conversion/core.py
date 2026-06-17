@@ -756,9 +756,13 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         logger.warning(f"No supported files found in {folder_in}")
         return []
 
-    max_workers = p.get("max_workers", 0)
-    if max_workers <= 0:
+    v_auto_workers = p.get("auto_workers", True)
+    if v_auto_workers:
         max_workers = max(1, min(16, (os.cpu_count() or 4) // 2))
+    else:
+        max_workers = p.get("max_workers", 0)
+        if max_workers <= 0:
+            max_workers = max(1, min(16, (os.cpu_count() or 4) // 2))
 
     auto_enabled = bool(p.get("auto_action_enabled", False))
 
