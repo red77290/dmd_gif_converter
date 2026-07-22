@@ -128,8 +128,15 @@ class AutoActionConfig:
             if raw is None:
                 continue
             ft = field_map[fname].type
+            # Handle Optional[...] types
+            import typing
+            if getattr(ft, "__origin__", None) is typing.Union and type(None) in getattr(ft, "__args__", []):
+                ft = next(t for t in getattr(ft, "__args__") if t is not type(None))
+            
             cast_fn = _cast.get(ft)
             if cast_fn is not None:
+                if isinstance(raw, str) and not raw.strip():
+                    continue # Skip empty strings for castable fields
                 kwargs[fname] = cast_fn(raw)
             else:
                 kwargs[fname] = raw
@@ -155,8 +162,16 @@ class AutoActionConfig:
                 var = getattr(s, f"{prefix}{f.name}", None)
                 if var is not None and hasattr(var, "get"):
                     raw = var.get()
-                    cast_fn = _cast.get(f.type)
+                    ft = f.type
+                    # Handle Optional[...] types
+                    import typing
+                    if getattr(ft, "__origin__", None) is typing.Union and type(None) in getattr(ft, "__args__", []):
+                        ft = next(t for t in getattr(ft, "__args__") if t is not type(None))
+                        
+                    cast_fn = _cast.get(ft)
                     if cast_fn is not None:
+                        if isinstance(raw, str) and not raw.strip():
+                            continue # Skip empty strings for castable fields
                         kwargs[f.name] = cast_fn(raw)
                     else:
                         kwargs[f.name] = raw

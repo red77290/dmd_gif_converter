@@ -57,9 +57,13 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
     import logging
     logger = logging.getLogger(__name__)
 
-    initial_start_s = cfg.start_s if cfg.start_s is not None else 0.0
+    try:
+        initial_start_s = float(cfg.start_s) if cfg.start_s is not None else 0.0
+    except (TypeError, ValueError):
+        initial_start_s = 0.0
+        
     if initial_start_s > 0:
-        reader.set_time(float(initial_start_s) * 1000.0)
+        reader.set_time(initial_start_s * 1000.0)
 
     # 3. Writer
     writer = FFmpegWriter(analyzer.out_w, analyzer.out_h, reader.fps)
@@ -169,8 +173,13 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
                     break
                 
                 t_val = src_idx / reader.fps
-                if cfg.end_s is not None and (initial_start_s + t_val) >= float(cfg.end_s):
-                    break
+                try:
+                    if cfg.end_s is not None and str(cfg.end_s).strip() != "":
+                        end_s_float = float(cfg.end_s)
+                        if (initial_start_s + t_val) >= end_s_float:
+                            break
+                except (TypeError, ValueError):
+                    pass
 
                 cam_now = tracker.process_frame(frame, cam_prev, src_idx, analyzer.out_w, analyzer.out_h)
                 
