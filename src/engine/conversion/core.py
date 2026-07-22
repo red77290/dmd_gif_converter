@@ -331,8 +331,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     if auto_action_enabled:
         cfg = AutoActionConfig.from_params(
             p,
-            start_s=float(start_s) if start_s is not None else None,
-            end_s=float(end_s) if end_s is not None else None
+            start_s=float(start_s) if start_s is not None and str(start_s).strip() != "" else None,
+            end_s=float(end_s) if end_s is not None and str(end_s).strip() != "" else None
         )
         ok_pre, pre_src, pre_msg = preprocess_video_for_dmd(src_path, cfg, cancel_event=cancel_event, callback=callback)
         if ok_pre and pre_src:
@@ -361,8 +361,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             log(f"[COLOR  ] {filename} — OpenCV unavailable, skipping auto-colorimetry", "warning")
 
     # ── Clip timing ───────────────────────────────────────────────────────
-    trim_start   = float(start_s) if start_s is not None else 0.0
-    trim_end     = float(end_s)   if end_s   is not None else duration_full
+    trim_start   = float(start_s) if start_s is not None and str(start_s).strip() != "" else 0.0
+    trim_end     = float(end_s)   if end_s   is not None and str(end_s).strip() != "" else duration_full
 
     # Apply max_duration cap: trim_end = min(trim_end, trim_start + max_duration)
     max_dur = float(p.get("max_duration", 0.0))
