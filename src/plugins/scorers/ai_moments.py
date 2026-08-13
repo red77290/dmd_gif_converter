@@ -49,9 +49,12 @@ class AiMomentsEngine:
         w_dm = self.options.get("w_dmd", 100.0) / 100.0
         self._loop_weight = self.options.get("w_loopable", 70.0) / 100.0
         
+        # Check if detector is actually loaded and functional
+        detector_active = detector is not None and getattr(detector, "model_type", "") != ""
+
         # Prepare Signal Engine
         use_optical_flow = w_act > 0.0 or w_ep > 0.0
-        use_detector = detector if (w_char > 0.0 or w_emo > 0.0) else None
+        use_detector = detector if ((w_char > 0.0 or w_emo > 0.0) and detector_active) else None
         self.signal_engine = SignalScoringEngine(detector=use_detector, optical_flow=use_optical_flow)
 
         from src.engine.scoring.final_scoring_engine import ScoringStrategy
@@ -62,15 +65,15 @@ class AiMomentsEngine:
             w_entropy=0.1,
             w_contrast=0.1 + 0.2 * w_ep, # Epic gets some contrast bonus
             w_edge_density=0.4 * w_dm if w_dm > 0 else 0.1,
-            w_subject=0.8 * w_char + 0.4 * w_emo, # Emotion requires a subject
-            w_subject_centering=0.5 * w_char + 0.8 * w_emo, # Emotion strongly prefers centered faces
+            w_subject=(0.8 * w_char + 0.4 * w_emo) if detector_active else 0.0,
+            w_subject_centering=(0.5 * w_char + 0.8 * w_emo) if detector_active else 0.0,
             w_readability=0.6 * w_dm if w_dm > 0 else 0.0,
             w_attention=0.6 * w_ep + 0.2 * w_emo, # Epic = high attention areas
             w_saliency=0.4 * w_ep + 0.4 * w_emo,  # Epic = visual pop
             selection_threshold=20.0,
             penalize_dark_frames=True,
-            penalize_no_detection=(w_char > 0.0 or w_emo > 0.0),
-            no_detection_penalty=30.0 * max(w_char, w_emo),
+            penalize_no_detection=(w_char > 0.0 or w_emo > 0.0) and detector_active,
+            no_detection_penalty=30.0 * max(w_char, w_emo) if detector_active else 0.0,
         )
         self.final_engine = FinalScoringEngine(strategy)
         
