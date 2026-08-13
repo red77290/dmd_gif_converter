@@ -4,8 +4,11 @@ import subprocess
 import tempfile
 import contextlib
 import cv2
+import logging
 from typing import Optional, Tuple
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Suppress [mp3float @ ...] / Header missing messages from OpenCV's internal
 # FFmpeg decoder. Must be set before any cv2 import.
@@ -46,6 +49,8 @@ class FFmpegPipeReader:
         self.total_frames: int = 0
         self._frame_bytes = 0
 
+        self._first_frame: Optional[np.ndarray] = None
+
         # OpenCV fallback attributes
         self._use_cv2_fallback = False
         self._cv2_cap = None
@@ -57,7 +62,7 @@ class FFmpegPipeReader:
         from src.engine.conversion.ffmpeg_utils import get_metadata
         w, h, f, dur = get_metadata(self.src_path)
         if not w or not h:
-            # Fall back to OpenCV VideoCapture if ffprobe is not in PATH or fails
+            logger.info(f"[READER] Metadata probe failed via ffprobe. Using OpenCV fallback for {self.src_path}")
             return self._open_cv2(target_fps)
 
         self.frame_w = w
@@ -107,12 +112,32 @@ class FFmpegPipeReader:
         ])
 
         try:
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=self._frame_bytes * 10)
-        except Exception:
-            # Fall back to OpenCV if ffmpeg process fails to launch
-            return self._open_cv2(target_fps)
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self._frame_bytes * 10)
+            
+            # Test-read the very first frame to verify that ffmpeg is actually pipe-outputting
+            raw_frame = self.proc.stdout.read(self._frame_bytes)
+            if len(raw_frame) != self._frame_bytes:
+                logger.info(f"[READER] FFmpeg pipe test read failed (read {len(raw_frame)}/{self._frame_bytes} bytes). Using OpenCV fallback.")
+                try:
+                    self.proc.stdout.close()
+                    self.proc.terminate()
+                    self.proc.wait()
+                except Exception:
+                    pass
+                self.proc = None
+                return self._open_cv2(target_fps)
 
-        return True, ""
+            self._first_frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((self.frame_h, self.frame_w, 3))
+            return True, ""
+        except Exception as e:
+            logger.info(f"[READER] FFmpeg process launch failed ({e}). Using OpenCV fallback.")
+            if self.proc:
+                try:
+                    self.proc.terminate()
+                except Exception:
+                    pass
+                self.proc = None
+            return self._open_cv2(target_fps)
 
     def _open_cv2(self, target_fps: Optional[float] = None) -> Tuple[bool, str]:
         with _quiet_c_stderr():
@@ -121,11 +146,13 @@ class FFmpegPipeReader:
                 self._cv2_cap = cv2.VideoCapture(self.src_path)
 
         if not self._cv2_cap or not self._cv2_cap.isOpened():
+            logger.error(f"[READER] OpenCV VideoCapture failed to open: {self.src_path}")
             return False, f"Could not open video file: {self.src_path}"
 
         self.frame_w = int(self._cv2_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_h = int(self._cv2_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         if self.frame_w <= 0 or self.frame_h <= 0:
+            logger.error(f"[READER] Invalid video dimensions from OpenCV: {self.frame_w}x{self.frame_h}")
             return False, f"Invalid video dimensions: {self.frame_w}x{self.frame_h}"
 
         src_fps = self._cv2_cap.get(cv2.CAP_PROP_FPS)
@@ -147,9 +174,15 @@ class FFmpegPipeReader:
         self._next_target_frame = 0.0
         self._current_src_frame = 0
         self._use_cv2_fallback = True
+        logger.info(f"[READER] Opened video via OpenCV fallback: {self.frame_w}x{self.frame_h} @ {self.fps:.1f} FPS ({self.total_frames} total frames)")
         return True, ""
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        if self._first_frame is not None:
+            frame = self._first_frame
+            self._first_frame = None
+            return True, frame
+
         if self._use_cv2_fallback:
             if not self._cv2_cap or not self._cv2_cap.isOpened():
                 return False, None
