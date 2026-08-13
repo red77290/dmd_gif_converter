@@ -1,6 +1,6 @@
 @echo off
 :: =============================================================================
-:: launch_ui.bat — DMD GIF Converter UI launcher
+:: launch_ui.bat - DMD GIF Converter UI launcher
 :: Windows (cmd / double-click)
 ::
 :: First run : creates a Python venv and installs all dependencies.
@@ -18,15 +18,14 @@ set "UI=-m src.ui.launcher"
 set "REQ=%SCRIPT_DIR%requirements_ui.txt"
 set "REQ_HASH_FILE=%VENV%\.requirements_hash"
 
-:: ── Jump to main logic — subroutines are defined below :main ─────────────────
+:: Jump to main logic
 goto :main
 
 :: =============================================================================
 ::  S U B R O U T I N E S
-::  (only reached via  call :name — never executed during normal flow)
 :: =============================================================================
 
-:: ── Compute MD5 of requirements_ui.txt via CertUtil ──────────────────────────
+:: Compute MD5 of requirements_ui.txt via CertUtil
 :compute_hash
     set "_hash="
     for /f "skip=1 tokens=* delims=" %%H in ('certutil -hashfile "%REQ%" MD5 2^>nul') do (
@@ -36,7 +35,7 @@ goto :main
     set "_hash=!_hash: =!"
     goto :eof
 
-:: ── Install / upgrade dependencies ───────────────────────────────────────────
+:: Install / upgrade dependencies
 :install_deps
     echo =^> Installing / updating dependencies...
     "%VENV%\Scripts\python.exe" -m ensurepip --default-pip >nul 2>&1
@@ -61,9 +60,9 @@ goto :main
 :: =============================================================================
 :main
 
-:: ── Check / create venv ──────────────────────────────────────────────────────
+:: Check / create venv
 if not exist "%VENV%\Scripts\python.exe" (
-    echo =^> First run — setting up virtual environment...
+    echo =^> First run - setting up virtual environment...
     echo.
 
     :: Find Python 3.10+
@@ -98,11 +97,16 @@ if not exist "%VENV%\Scripts\python.exe" (
     )
 
     call :install_deps
-
     echo =^> Environment ready.
     echo.
+)
+
+:: Check if dependencies are actually functional (import customtkinter) or if requirements_ui.txt changed
+"%VENV%\Scripts\python.exe" -c "import customtkinter" >nul 2>&1
+if errorlevel 1 (
+    echo =^> Missing or incomplete dependencies detected in venv - installing...
+    call :install_deps
 ) else (
-    :: Venv exists — check if requirements_ui.txt changed since last install
     set "_hash="
     call :compute_hash
     set "CURRENT_HASH=!_hash!"
@@ -111,12 +115,12 @@ if not exist "%VENV%\Scripts\python.exe" (
     if exist "%REQ_HASH_FILE%" set /p SAVED_HASH=<"%REQ_HASH_FILE%"
 
     if not "!CURRENT_HASH!"=="!SAVED_HASH!" (
-        echo =^> requirements_ui.txt changed — updating dependencies...
+        echo =^> requirements_ui.txt changed - updating dependencies...
         call :install_deps
     )
 )
 
-:: ── Launch the UI ─────────────────────────────────────────────────────────────
+:: Launch the UI
 echo =^> Starting DMD GIF Converter...
 "%VENV%\Scripts\python.exe" %UI% %*
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# launch_ui.ps1 — DMD GIF Converter UI launcher
+# launch_ui.ps1 - DMD GIF Converter UI launcher
 # Windows (PowerShell)
 #
 # First run : creates a Python venv and installs all dependencies.
@@ -7,22 +7,20 @@
 #              If requirements_ui.txt changed since last install, re-runs pip.
 #
 # Usage:
-#   Right-click → "Run with PowerShell"
+#   Right-click -> "Run with PowerShell"
 #   or from a terminal:  .\launch_ui.ps1
 #
 # If you get an execution-policy error, run once as admin:
 #   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 # =============================================================================
 
-# $PSScriptRoot is always the directory of the running script (PowerShell 3+)
 $ScriptDir    = $PSScriptRoot
 $Venv         = Join-Path $ScriptDir ".venv"
 $Req          = Join-Path $ScriptDir "requirements_ui.txt"
 $ReqHashFile  = Join-Path $Venv ".requirements_hash"
 $VenvPy       = Join-Path $Venv "Scripts\python.exe"
-$VenvPip      = Join-Path $Venv "Scripts\pip.exe"
 
-# ── Compute MD5 hash of requirements_ui.txt ──────────────────────────────────
+# Compute MD5 hash of requirements_ui.txt
 function Get-ReqHash {
     try {
         return (Get-FileHash $Req -Algorithm MD5).Hash
@@ -31,7 +29,7 @@ function Get-ReqHash {
     }
 }
 
-# ── Install / upgrade dependencies ───────────────────────────────────────────
+# Install / upgrade dependencies
 function Install-Deps {
     Write-Host "==> Installing / updating dependencies..." -ForegroundColor Cyan
     & $VenvPy -m ensurepip --default-pip 2>$null
@@ -44,14 +42,15 @@ function Install-Deps {
         exit 1
     }
     # Save current hash so we skip next time
-    Get-ReqHash | Set-Content $ReqHashFile -NoNewline
+    $hash = Get-ReqHash
+    [System.IO.File]::WriteAllText($ReqHashFile, $hash)
     Write-Host "==> Dependencies up to date." -ForegroundColor Green
     Write-Host ""
 }
 
-# ── Check / create venv ───────────────────────────────────────────────────────
+# Check / create venv
 if (-not (Test-Path $VenvPy)) {
-    Write-Host "==> First run — setting up virtual environment..." -ForegroundColor Cyan
+    Write-Host "==> First run - setting up virtual environment..." -ForegroundColor Cyan
     Write-Host ""
 
     # Find Python 3.10+
@@ -87,24 +86,33 @@ if (-not (Test-Path $VenvPy)) {
     }
 
     Install-Deps
-
     Write-Host "==> Environment ready." -ForegroundColor Green
     Write-Host ""
+}
+
+# Ensure dependencies are installed and functional
+$needsInstall = $false
+& $VenvPy -c "import customtkinter" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "==> Missing dependencies detected in venv - installing..." -ForegroundColor Yellow
+    $needsInstall = $true
 } else {
-    # Check if requirements_ui.txt changed since last install
     $currentHash = Get-ReqHash
     $savedHash   = ""
     if (Test-Path $ReqHashFile) {
         $savedHash = (Get-Content $ReqHashFile).Trim()
     }
-
     if ($currentHash -ne $savedHash) {
-        Write-Host "==> requirements_ui.txt changed — updating dependencies..." -ForegroundColor Cyan
-        Install-Deps
+        Write-Host "==> requirements_ui.txt changed - updating dependencies..." -ForegroundColor Cyan
+        $needsInstall = $true
     }
 }
 
-# ── Launch the UI ─────────────────────────────────────────────────────────────
+if ($needsInstall) {
+    Install-Deps
+}
+
+# Launch the UI
 Write-Host "==> Starting DMD GIF Converter..." -ForegroundColor Green
 & $VenvPy -m src.ui.launcher $args
 
