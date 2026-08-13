@@ -125,13 +125,18 @@ if [ ! -f "$VENV/bin/python3" ]; then
     echo "==> Environment ready."
     echo ""
 else
-    # Venv already exists — check if requirements_ui.txt changed since last install
-    CURRENT_HASH="$(req_checksum)"
-    SAVED_HASH="$(cat "$REQ_HASH_FILE" 2>/dev/null || echo "")"
-
-    if [ "$CURRENT_HASH" != "$SAVED_HASH" ]; then
-        echo "==> requirements_ui.txt changed — updating dependencies…"
+    # Venv already exists — check if customtkinter works and if requirements_ui.txt changed
+    if ! "$VENV/bin/python3" -c "import customtkinter" >/dev/null 2>&1; then
+        echo "==> Missing dependencies detected in .venv — installing..."
         install_deps
+    else
+        CURRENT_HASH="$(req_checksum)"
+        SAVED_HASH="$(cat "$REQ_HASH_FILE" 2>/dev/null || echo "")"
+
+        if [ "$CURRENT_HASH" != "$SAVED_HASH" ]; then
+            echo "==> requirements_ui.txt changed — updating dependencies…"
+            install_deps
+        fi
     fi
 fi
 
