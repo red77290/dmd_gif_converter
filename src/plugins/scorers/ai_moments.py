@@ -164,7 +164,7 @@ class AiMomentsEngine:
             if pct - last_log_pct >= 5.0 or idx == total_frames:
                 bar_len = 30
                 filled = int(bar_len * pct / 100)
-                bar = "█" * filled + "-" * (bar_len - filled)
+                bar = "#" * filled + "-" * (bar_len - filled)
                 logger.info(f"[AI MOMENT] Signal Extraction: [{bar}] {pct:.1f}% ({idx}/{total_frames})")
                 last_log_pct = pct
                 

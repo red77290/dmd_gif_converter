@@ -51,9 +51,9 @@ class DMDConverterApp(ctk.CTk):
             from src.engine.conversion.hardware_accel import get_best_h264_encoder
             best = get_best_h264_encoder()
             if best != "libx264":
-                logger.info(f"🚀 Hardware Acceleration Enabled: {best}")
+                logger.info(f"[HW_ACCEL] Hardware Acceleration Enabled: {best}")
             else:
-                logger.info("ℹ️ Hardware Acceleration: CPU only (libx264)")
+                logger.info("[HW_ACCEL] Hardware Acceleration: CPU only (libx264)")
         except Exception:
             pass
 
@@ -180,14 +180,18 @@ def main():
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "dmd_converter.log"
         
-        import sys
-        
+        if hasattr(sys.stdout, "reconfigure"):
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
         _logging.basicConfig(
             level=_logging.DEBUG,
             format="%(asctime)s [%(levelname)-7s] %(name)s — %(message)s",
             datefmt="%H:%M:%S",
             handlers=[
-                _logging.FileHandler(str(log_file), mode='w'),
+                _logging.FileHandler(str(log_file), mode='w', encoding='utf-8'),
                 _logging.StreamHandler(sys.stdout)
             ]
         )
