@@ -38,12 +38,33 @@ def _get_model_path() -> str:
 def _ensure_yolo_model() -> Optional[str]:
     path = _get_model_path()
     if os.path.isfile(path):
-        return path
+        if os.path.getsize(path) > 1_000_000:
+            return path
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
     try:
         urllib.request.urlretrieve(_YOLO_MODEL_URL, path)
-        return path
+        if os.path.isfile(path) and os.path.getsize(path) > 1_000_000:
+            return path
     except Exception:
-        return None
+        pass
+
+    try:
+        import requests
+        r = requests.get(_YOLO_MODEL_URL, stream=True, timeout=60, verify=False)
+        if r.status_code == 200:
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            if os.path.isfile(path) and os.path.getsize(path) > 1_000_000:
+                return path
+    except Exception:
+        pass
+
+    return None
 
 
 def available_detectors() -> list[str]:
