@@ -171,7 +171,7 @@ class AiMomentsEngine:
         reader.release()
         
         if not signals or self._cancel:
-            logger.info("[AI MOMENT] Cancelled or no signals extracted.")
+            logger.info(f"[AI MOMENT] Signal extraction ended: {len(signals)} signal points extracted (cancelled: {self._cancel}).")
             return []
             
         logger.info(f"[AI MOMENT] Signal Extraction complete. Found {len(signals)} signal points.")
