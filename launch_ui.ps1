@@ -34,8 +34,9 @@ function Get-ReqHash {
 # ── Install / upgrade dependencies ───────────────────────────────────────────
 function Install-Deps {
     Write-Host "==> Installing / updating dependencies..." -ForegroundColor Cyan
-    & $VenvPip install --quiet --upgrade pip
-    & $VenvPip install --quiet -r $Req
+    & $VenvPy -m ensurepip --default-pip 2>$null
+    & $VenvPy -m pip install --quiet --upgrade pip
+    & $VenvPy -m pip install --quiet -r $Req
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         Write-Host "ERROR: pip install failed. Check your internet connection and try again." -ForegroundColor Red
@@ -55,7 +56,7 @@ if (-not (Test-Path $VenvPy)) {
 
     # Find Python 3.10+
     $Python = $null
-    foreach ($candidate in @("python3.13","python3.12","python3.11","python3.10","python3","python","py")) {
+    foreach ($candidate in @("py","python","python3","python3.13","python3.12","python3.11","python3.10")) {
         try {
             $p = Get-Command $candidate -ErrorAction Stop
             $Python = $p.Source
@@ -90,19 +91,16 @@ if (-not (Test-Path $VenvPy)) {
     Write-Host "==> Environment ready." -ForegroundColor Green
     Write-Host ""
 } else {
-    # Venv exists — also check pip is present (guards against corrupted venvs)
-    if (-not (Test-Path $VenvPip)) {
-        Write-Host "==> Venv seems corrupted (pip missing) — reinstalling dependencies..." -ForegroundColor Yellow
-        Install-Deps
-    } else {
-        # Check if requirements_ui.txt changed since last install
-        $currentHash = Get-ReqHash
-        $savedHash   = if (Test-Path $ReqHashFile) { (Get-Content $ReqHashFile -Raw).Trim() } else { "" }
+    # Check if requirements_ui.txt changed since last install
+    $currentHash = Get-ReqHash
+    $savedHash   = ""
+    if (Test-Path $ReqHashFile) {
+        $savedHash = (Get-Content $ReqHashFile).Trim()
+    }
 
-        if ($currentHash -ne $savedHash) {
-            Write-Host "==> requirements_ui.txt changed — updating dependencies..." -ForegroundColor Cyan
-            Install-Deps
-        }
+    if ($currentHash -ne $savedHash) {
+        Write-Host "==> requirements_ui.txt changed — updating dependencies..." -ForegroundColor Cyan
+        Install-Deps
     }
 }
 

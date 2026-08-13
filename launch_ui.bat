@@ -39,8 +39,9 @@ goto :main
 :: ── Install / upgrade dependencies ───────────────────────────────────────────
 :install_deps
     echo =^> Installing / updating dependencies...
-    "%VENV%\Scripts\pip" install --quiet --upgrade pip
-    "%VENV%\Scripts\pip" install --quiet -r "%REQ%"
+    "%VENV%\Scripts\python.exe" -m ensurepip --default-pip >nul 2>&1
+    "%VENV%\Scripts\python.exe" -m pip install --quiet --upgrade pip
+    "%VENV%\Scripts\python.exe" -m pip install --quiet -r "%REQ%"
     if errorlevel 1 (
         echo.
         echo ERROR: pip install failed. Check your internet connection and try again.
@@ -67,7 +68,7 @@ if not exist "%VENV%\Scripts\python.exe" (
 
     :: Find Python 3.10+
     set "PYTHON="
-    for %%C in (python3.13 python3.12 python3.11 python3.10 python3 python py) do (
+    for %%C in (py python python3 python3.13 python3.12 python3.11 python3.10) do (
         if "!PYTHON!"=="" (
             %%C --version >nul 2>&1
             if not errorlevel 1 set "PYTHON=%%C"
