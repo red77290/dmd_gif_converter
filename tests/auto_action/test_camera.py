@@ -198,7 +198,7 @@ class TestBuildCameraRectZoomMax(unittest.TestCase):
 
 
 class TestSmooth(unittest.TestCase):
-    """_smooth() blends prev → curr with smoothness coefficient."""
+    """_smooth() blends cx, cy while keeping cw, ch locked to curr."""
 
     def test_zero_smoothness_returns_curr(self):
         result = _smooth((10, 20, 30, 40), (1, 2, 3, 4), 0.0)
@@ -206,13 +206,17 @@ class TestSmooth(unittest.TestCase):
 
     def test_full_smoothness_nearly_prev(self):
         result = _smooth((10, 20, 30, 40), (1, 2, 3, 4), 0.98)
-        for r, p in zip(result, (10, 20, 30, 40)):
-            self.assertAlmostEqual(r, p, delta=1.0)  # 0.98*p + 0.02*c ≈ p ±1
+        self.assertAlmostEqual(result[0], 10, delta=1.0)
+        self.assertAlmostEqual(result[1], 20, delta=1.0)
+        self.assertEqual(result[2], 3)
+        self.assertEqual(result[3], 4)
 
     def test_half_smoothness_midpoint(self):
         result = _smooth((0.0, 0.0, 0.0, 0.0), (10.0, 10.0, 10.0, 10.0), 0.5)
-        for v in result:
-            self.assertAlmostEqual(v, 5.0, places=5)
+        self.assertAlmostEqual(result[0], 5.0, places=5)
+        self.assertAlmostEqual(result[1], 5.0, places=5)
+        self.assertEqual(result[2], 10.0)
+        self.assertEqual(result[3], 10.0)
 
     def test_none_prev_returns_curr(self):
         result = _smooth(None, (1, 2, 3, 4), 0.8)

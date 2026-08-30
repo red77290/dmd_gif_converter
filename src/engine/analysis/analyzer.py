@@ -12,9 +12,13 @@ class VideoAnalyzer:
         self.cfg = cfg
         
         # Output dimensions
-        self.out_w = max(2, int(round(frame_w / 2.0)) * 2)
-        target_aspect_ratio = float(cfg.target_width) / cfg.target_height
-        self.out_h = max(8, int(round(frame_w / target_aspect_ratio / 2)) * 2)
+        target_aspect_ratio = float(cfg.target_width) / max(1, cfg.target_height)
+        if target_aspect_ratio >= 1.0:
+            self.out_w = max(2, int(round(min(frame_w, 1920) / 2.0)) * 2)
+            self.out_h = max(2, int(round(self.out_w / target_aspect_ratio / 2.0)) * 2)
+        else:
+            self.out_h = max(2, int(round(min(frame_h, 1920) / 2.0)) * 2)
+            self.out_w = max(2, int(round(self.out_h * target_aspect_ratio / 2.0)) * 2)
         
         # Crop percentages
         self.bcp = _clamp(getattr(cfg, "bottom_crop_pct", 0.0), 0.0, 0.9)
@@ -29,6 +33,9 @@ class VideoAnalyzer:
         self.scene_profile = None   # populated by analyze() when scene classification is active
         self.smart_reasons: List[str] = []
         self.scoreboard: List[str] = []
+        self.locked_crop_size: Optional[Tuple[float, float]] = None
+        self.median_subject_height: Optional[float] = None
+        self.median_subject_width: Optional[float] = None
         
     def analyze(self, src_path: str) -> None:
         """Runs smart/auto crop analysis and updates configuration variables."""
@@ -48,6 +55,11 @@ class VideoAnalyzer:
             try:
                 _decision = _smart_auto_crop_decision(src_path, self.cfg, self.frame_w, self.frame_h)
                 
+                if "median_height" in _decision:
+                    self.median_subject_height = _decision["median_height"]
+                if "median_width" in _decision:
+                    self.median_subject_width = _decision["median_width"]
+
                 if _smart:
                     _auto_bc                  = _decision["auto_bottom_crop"]
                     _auto_tc                  = _decision["auto_top_crop"]
@@ -107,3 +119,56 @@ class VideoAnalyzer:
 
         self.effective_frame_top = int(self.frame_h * self.tcp)
         self.effective_frame_h   = max(self.cfg.target_height, int(self.frame_h * (1.0 - self.bcp))) - self.effective_frame_top
+
+        # Compute static locked crop dimensions upfront
+        target_ratio = float(self.cfg.target_width) / max(1, self.cfg.target_height)
+        from src.engine.auto_action.camera import _compute_base_crop_dimensions
+        max_w, max_h = _compute_base_crop_dimensions(float(self.effective_frame_w), float(self.effective_frame_h), target_ratio)
+
+        median_h = self.median_subject_height
+        median_w = self.median_subject_width
+
+        if median_h is not None and median_h > 0:
+            ideal_h = median_h * (1.0 + self.cfg.padding)
+            _platformer = getattr(self.cfg, "platformer_mode", False)
+            _auto = getattr(self.cfg, "auto_vertical_bias", False)
+            _floor_ratio = getattr(self.cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
+            if _auto or _platformer:
+                required_h = median_h / max(0.1, _floor_ratio - 0.05)
+                ideal_h = max(ideal_h, required_h)
+            ideal_w = ideal_h * target_ratio
+            if median_w is not None and ideal_w < median_w * (1.0 + self.cfg.padding):
+                ideal_w = median_w * (1.0 + self.cfg.padding)
+                ideal_h = ideal_w / target_ratio
+            
+            tight_w = ideal_w
+            loose_w = max_w
+            strength = _clamp(self.cfg.strength, 0.0, 1.0)
+            crop_w = loose_w - strength * (loose_w - tight_w)
+            
+            current_zoom_max = getattr(self.cfg, "zoom_max", 1.8)
+            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
+                if self.cfg.scene_profile.max_zoom_override is not None:
+                    current_zoom_max = self.cfg.scene_profile.max_zoom_override
+            min_allowed_w = loose_w / max(1.0, current_zoom_max)
+            crop_w = max(crop_w, min_allowed_w)
+            crop_w = max(crop_w, tight_w)
+            if _platformer:
+                crop_w = min(max_w, crop_w * 1.5)
+            if crop_w > max_w:
+                crop_w = max_w
+            crop_h = crop_w / target_ratio
+            if crop_h > max_h:
+                crop_h = max_h
+                crop_w = crop_h * target_ratio
+        else:
+            strength = _clamp(self.cfg.strength, 0.0, 1.0)
+            current_zoom_max = getattr(self.cfg, "zoom_max", 1.8)
+            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
+                if self.cfg.scene_profile.max_zoom_override is not None:
+                    current_zoom_max = self.cfg.scene_profile.max_zoom_override
+            zoom_val = 1.0 + strength * (max(1.0, current_zoom_max) - 1.0)
+            crop_w = max_w / zoom_val
+            crop_h = max_h / zoom_val
+
+        self.locked_crop_size = (crop_w, crop_h)

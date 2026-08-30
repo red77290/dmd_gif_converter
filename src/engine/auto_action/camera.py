@@ -3,6 +3,30 @@ from src.engine.auto_action.interfaces import CamRect, BoundingBox
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.engine.analysis.analysis import _clamp
 
+def _compute_base_crop_dimensions(eff_w: float, eff_h: float, target_ratio: float) -> Tuple[float, float]:
+    """Compute maximum crop window dimensions fitting within effective frame bounds for any aspect ratio."""
+    if eff_h <= 0 or target_ratio <= 0:
+        return max(1.0, eff_w), max(1.0, eff_h)
+    
+    if (eff_w / eff_h) >= target_ratio:
+        # Height-limited (portrait or narrow target on wide source)
+        crop_h = float(eff_h)
+        crop_w = crop_h * target_ratio
+    else:
+        # Width-limited (landscape target on standard source)
+        crop_w = float(eff_w)
+        crop_h = crop_w / target_ratio
+        
+    if crop_w > eff_w:
+        crop_w = float(eff_w)
+        crop_h = crop_w / target_ratio
+    if crop_h > eff_h:
+        crop_h = float(eff_h)
+        crop_w = crop_h * target_ratio
+        
+    return crop_w, crop_h
+
+
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        floor_y_est: Optional[float] = None,
                        frame_top: float = 0.0,
@@ -10,12 +34,15 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        effective_frame_left: int = 0,
                        effective_frame_w: Optional[int] = None,
                        effective_frame_top: float = 0.0,
-                       effective_frame_h: Optional[int] = None):
+                       effective_frame_h: Optional[int] = None,
+                       locked_crop_size: Optional[Tuple[float, float]] = None):
+    if effective_frame_top == 0.0 and frame_top != 0.0:
+        effective_frame_top = frame_top
     if effective_frame_w is None:
         effective_frame_w = frame_w
     if effective_frame_h is None:
-        effective_frame_h = frame_h
-    target_ratio = float(cfg.target_width) / cfg.target_height
+        effective_frame_h = max(1, frame_h - int(effective_frame_top))
+    target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
     _bias = _clamp(getattr(cfg, "vertical_bias", 0.0), -1.0, 1.0)
     _auto = getattr(cfg, "auto_vertical_bias", False)
     _platformer = getattr(cfg, "platformer_mode", False)
@@ -30,14 +57,14 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     _FLOOR_RATIO: float = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
 
     def _cy_min(crop_h: float) -> float:
-        return max(crop_h / 2.0, frame_top + crop_h / 2.0)
+        return effective_frame_top + crop_h / 2.0
 
     def _cy_max(crop_h: float) -> float:
-        return frame_top + float(frame_h) - crop_h / 2.0
+        return effective_frame_top + float(effective_frame_h) - crop_h / 2.0
 
     def _apply_bias(cy: float, crop_h: float) -> float:
         if abs(_bias) < 1e-4:
-            return cy
+            return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
         target_cy = _cy_max(crop_h) if _bias > 0 else _cy_min(crop_h)
         cy = cy + abs(_bias) * (target_cy - cy)
         return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
@@ -46,92 +73,80 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cy = floor_y + crop_h * (0.5 - _FLOOR_RATIO)
         return _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
 
+    # Base full-frame maximum bounding window for this aspect ratio
+    max_w, max_h = _compute_base_crop_dimensions(float(effective_frame_w), float(effective_frame_h), target_ratio)
+
+    if locked_crop_size is not None:
+        crop_w, crop_h = locked_crop_size
+        crop_w = min(crop_w, float(effective_frame_w))
+        crop_h = min(crop_h, float(effective_frame_h))
+    else:
+        if roi is None:
+            crop_w = max_w
+            crop_h = max_h
+        else:
+            x, y, w, h = roi
+            hair_headroom = h * 0.05
+            ideal_top = max(0.0, y - hair_headroom)
+            total_h = h + (y - ideal_top)
+
+            ideal_crop_h = total_h * (1.0 + cfg.padding)
+            if _auto or _platformer:
+                required_h = total_h / max(0.1, _FLOOR_RATIO - 0.05)
+                ideal_crop_h = max(ideal_crop_h, required_h)
+                
+            ideal_crop_w = ideal_crop_h * target_ratio
+            if ideal_crop_w < w * (1.0 + cfg.padding):
+                ideal_crop_w = w * (1.0 + cfg.padding)
+                ideal_crop_h = ideal_crop_w / target_ratio
+
+            tight_w = ideal_crop_w
+            loose_w = max_w
+            strength = _clamp(cfg.strength, 0.0, 1.0)
+            crop_w = loose_w - strength * (loose_w - tight_w)
+
+            current_zoom_max = getattr(cfg, "zoom_max", 1.8)
+            if hasattr(cfg, "scene_profile") and cfg.scene_profile is not None:
+                if cfg.scene_profile.max_zoom_override is not None:
+                    current_zoom_max = cfg.scene_profile.max_zoom_override
+
+            min_allowed_w = loose_w / max(1.0, current_zoom_max)
+            crop_w = max(crop_w, min_allowed_w)
+            crop_w = max(crop_w, tight_w)
+
+            if _platformer:
+                crop_w = min(max_w, crop_w * 1.5)
+
+            if crop_w > max_w:
+                crop_w = max_w
+
+            crop_h = crop_w / target_ratio
+            if crop_h > max_h:
+                crop_h = max_h
+                crop_w = crop_h * target_ratio
+
     if roi is None:
         cx = effective_frame_left + effective_frame_w / 2.0
-        cy = (frame_top + frame_h) / 2.0
-        crop_w = float(effective_frame_w)
-        crop_h = crop_w / target_ratio
+        cy = effective_frame_top + effective_frame_h / 2.0
         cy = _apply_bias(cy, crop_h)
         return CamRect(cx, cy, crop_w, crop_h)
 
     x, y, w, h = roi
-
-    # A small headroom above the roi top so the subject's head is not clipped.
     hair_headroom = h * 0.05
     ideal_top = max(0.0, y - hair_headroom)
     total_h = h + (y - ideal_top)
     cx = x + w / 2.0
-    # cy starts at the centre of the roi (tracker already clipped to eye region
-    # for close-ups in face_priority_mode, or to the head for normal shots).
     cy = y + h / 2.0
 
-    # Calculate the ideal crop that perfectly frames the subject + headroom + padding
-    ideal_crop_h = total_h * (1.0 + cfg.padding)
-    
-    if _auto or _platformer:
-        # Prevent the camera from abandoning the floor tracking by ensuring crop_h is large enough
-        # to fit both the character's full height AND the space reserved for the floor.
-        # We need total_h to fit between the top padding (5%) and the floor (_FLOOR_RATIO).
-        required_h = total_h / max(0.1, _FLOOR_RATIO - 0.05)
-        ideal_crop_h = max(ideal_crop_h, required_h)
-        
-    ideal_crop_w = ideal_crop_h * target_ratio
-    
-    if ideal_crop_w < w * (1.0 + cfg.padding):
-        ideal_crop_w = w * (1.0 + cfg.padding)
-        ideal_crop_h = ideal_crop_w / target_ratio
-
-    tight_w = ideal_crop_w
-    loose_w = float(effective_frame_w)
-    
-    strength = _clamp(cfg.strength, 0.0, 1.0)
-    # strength=1.0 -> tight framing. strength=0.0 -> loose framing (show context)
-    crop_w = loose_w - strength * (loose_w - tight_w)
-
-    # Enforce zoom_max (maximum zoom-in from full frame)
-    current_zoom_max = getattr(cfg, "zoom_max", 1.8)
-    if hasattr(cfg, "scene_profile") and cfg.scene_profile is not None:
-        if cfg.scene_profile.max_zoom_override is not None:
-            current_zoom_max = cfg.scene_profile.max_zoom_override
-
-    min_allowed_w = loose_w / max(1.0, current_zoom_max)
-    crop_w = max(crop_w, min_allowed_w)
-    
-    # Ensure we never crop tighter than the person's required bounding box
-    crop_w = max(crop_w, tight_w)
-
-    if _platformer:
-        crop_w = min(float(effective_frame_w), crop_w * 1.5)
-
-    # Prevent zooming out beyond the frame dimensions (avoid black bars)
-    if crop_w > effective_frame_w:
-        crop_w = float(effective_frame_w)
-
-    crop_h = crop_w / target_ratio
-
-    if crop_h > frame_h:
-        crop_h = float(frame_h)
-        crop_w = crop_h * target_ratio
-
     if face_priority_mode:
-        # Centre the camera on the roi centre (y + h/2).
-        # The tracker already clips the roi to the eye/face region for close-ups,
-        # so y + h/2 targets the eyes rather than the top of the head.
         cy = y + h / 2.0
-        # Prevent the top edge of the camera from cropping below the eye region in close-ups.
-        # This keeps the eyes visible even when the camera window is very short.
         cy = min(cy, y + 0.25 * crop_h)
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
         
-        # Keep head+hair visible over floor, even in platformer mode.
-        # If the sprite is larger than the screen, prioritize the top of the character.
         if (cy_floor - crop_h / 2.0) > ideal_top:
             scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
-            # In platformers, huge bounding boxes are usually floating blocks (false positives).
-            # We must ignore them and stay anchored to the floor.
-            # In fighting_2d, huge bounding boxes are the actual character, so we shift up to show the head.
             if scene_type == "platformer" and total_h > crop_h * 0.8:
                 cy = cy_floor
             else:
@@ -139,9 +154,6 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         else:
             cy = cy_floor
     else:
-        # Standard generic tracking (e.g. top-down games like Zelda).
-        # Simply apply vertical bias. We do NOT force pin the camera to the top of the bounding box,
-        # as a large motion bounding box (e.g. screen scrolling) would snap the camera to the HUD/ceiling.
         cy = _apply_bias(cy, crop_h)
 
     if crop_w >= effective_frame_w:
@@ -150,7 +162,6 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cx = _clamp(cx, effective_frame_left + crop_w / 2.0, effective_frame_left + float(effective_frame_w) - crop_w / 2.0)
 
     cy = _clamp(cy, _cy_min(crop_h), _cy_max(crop_h))
-    
 
     return CamRect(cx, cy, crop_w, crop_h)
 
@@ -159,7 +170,12 @@ def _smooth(prev, curr, smoothness: float):
     if prev is None:
         return curr
     a = _clamp(smoothness, 0.0, 0.98)
-    return CamRect(*( (a * p) + ((1.0 - a) * c) for p, c in zip(prev, curr) ))
+    # Smooth ONLY camera translation (cx, cy). Keep camera crop dimensions (cw, ch) strictly static.
+    cx = (a * prev[0]) + ((1.0 - a) * curr[0])
+    cy = (a * prev[1]) + ((1.0 - a) * curr[1])
+    cw = curr[2]
+    ch = curr[3]
+    return CamRect(cx, cy, cw, ch)
 
 
 def _crop_frame(frame, cam_rect):
