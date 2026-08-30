@@ -93,7 +93,8 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
         reader.fps, reader.frame_w, reader.frame_h,
         analyzer.effective_frame_top, analyzer.effective_frame_h,
         analyzer.effective_frame_left, analyzer.effective_frame_w,
-        analyzer.face_priority_mode, cfg
+        analyzer.face_priority_mode, cfg,
+        locked_crop_size=getattr(analyzer, "locked_crop_size", None)
     )
 
     # 6. Renderer

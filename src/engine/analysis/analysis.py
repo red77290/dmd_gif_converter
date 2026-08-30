@@ -452,6 +452,8 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         "scene_scores":       scene_scores,
         "scene_signals":      scene_signals,
         "scoreboard_lines":   scoreboard_lines,
+        "median_height":      median_height,
+        "median_width":       median_w,
     }
 
 

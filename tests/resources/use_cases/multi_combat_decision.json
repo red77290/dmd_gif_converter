@@ -1,5 +1,5 @@
 {
-  "task_id": "70A24",
+  "task_id": "CB693",
   "file_info": {
     "filename": "multi_combat.mp4",
     "video_width": 480,
@@ -8,31 +8,39 @@
   },
   "camera_params": {
     "strength": {
-      "value": 0.65,
-      "reason": "Standard default strength."
+      "value": 0.55,
+      "reason": "Reduced strength to stabilize the tall subject."
     },
     "smoothness": {
-      "value": 0.0,
-      "reason": "Standard default smoothness."
+      "value": 0.85,
+      "reason": "Increased smoothness to prevent motion sickness."
     }
   },
-  "raw_signals": {},
+  "raw_signals": {
+    "tall_ratio": 0.9333333333333333,
+    "fill_ratio": 0.4148148148148148,
+    "body_aspect": 1.1851851851851851,
+    "floor_in_lower": true,
+    "floor_var_score": 0.02525589203145529,
+    "x_variance": 0.01242552015516493,
+    "y_variance": 0.0008371779621056242
+  },
   "decisions": {
     "face_priority": {
-      "value": false,
-      "reason": "Standard subject, no portrait mode required."
+      "value": true,
+      "reason": "Very tall subject detected, switching to portrait mode."
     },
     "auto_vertical_bias": {
       "value": false,
-      "reason": "No trackable floor detected."
+      "reason": "Floor tracking disabled (contradictory with portrait mode)."
     },
     "auto_bottom_crop": {
       "value": false,
-      "reason": "Screen is filled."
+      "reason": "Bottom crop forced to frame the upper body."
     },
     "auto_top_crop": {
       "value": false,
-      "reason": "Screen is filled at the top."
+      "reason": "Top crop forced to frame the head."
     },
     "pillarbox": {
       "value": "L:0px",

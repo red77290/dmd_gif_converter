@@ -38,7 +38,7 @@ class SceneChangeScore:
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.plugins.detectors.detector import _FrameDetector, DetectorFactory
 from src.engine.auto_action.camera import _build_camera_rect, _apply_look_ahead
-from src.engine.analysis.analysis import _FloorEstimator
+from src.engine.analysis.analysis import _FloorEstimator, _clamp
 from src.engine.auto_action.interfaces import ITracker, BoundingBox, CamRect
 from src.engine.auto_action.renderer import Renderer
 
@@ -289,7 +289,8 @@ class CameraBuilderStage(ITrackerStage):
             effective_frame_left=engine.effective_frame_left,
             effective_frame_w=engine.effective_frame_w,
             effective_frame_top=float(engine.effective_frame_top),
-            effective_frame_h=engine.effective_frame_h
+            effective_frame_h=engine.effective_frame_h,
+            locked_crop_size=engine.locked_crop_size
         )
         context.cam_now = context.cam_now_proposed
 
@@ -302,8 +303,8 @@ class ReadabilityScoreStage(ITrackerStage):
             read_prop_score = engine.readability_engine.evaluate(context.frame, roi=context.cam_now_proposed).overall / 100.0
 
             if read_prop_score < read_prev_score * 0.95:
-                # Reject width/height changes if readability is significantly worse
-                context.cam_now = CamRect(context.cam_now_proposed[0], context.cam_now_proposed[1], context.cam_prev[2], context.cam_prev[3])
+                # Reject poor framing proposals
+                context.cam_now = context.cam_prev
 
             if getattr(engine.cfg, 'auto_tuning_dataset_dir', None) is not None:
                 _ds_dir = engine.cfg.auto_tuning_dataset_dir
@@ -365,7 +366,8 @@ class TrackingEngine(ITracker):
     def __init__(self, fps: float, frame_w: int, frame_h: int, 
                  effective_frame_top: int, effective_frame_h: int, 
                  effective_frame_left: int, effective_frame_w: int,
-                 face_priority_mode: bool, cfg: AutoActionConfig):
+                 face_priority_mode: bool, cfg: AutoActionConfig,
+                 locked_crop_size: Optional[Tuple[float, float]] = None):
         self.fps = fps
         self.frame_w = frame_w
         self.frame_h = frame_h
@@ -376,6 +378,21 @@ class TrackingEngine(ITracker):
         self._face_priority_mode_init = face_priority_mode
         self.cfg = cfg
         
+        target_ratio = float(cfg.target_width) / max(1, cfg.target_height)
+        from src.engine.auto_action.camera import _compute_base_crop_dimensions
+        max_w, max_h = _compute_base_crop_dimensions(float(self.effective_frame_w), float(self.effective_frame_h), target_ratio)
+        
+        if locked_crop_size is not None:
+            self.locked_crop_size = locked_crop_size
+        else:
+            strength = _clamp(self.cfg.strength, 0.0, 1.0)
+            current_zoom_max = getattr(self.cfg, "zoom_max", 1.8)
+            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
+                if self.cfg.scene_profile.max_zoom_override is not None:
+                    current_zoom_max = self.cfg.scene_profile.max_zoom_override
+            zoom_val = 1.0 + strength * (max(1.0, current_zoom_max) - 1.0)
+            self.locked_crop_size = (max_w / zoom_val, max_h / zoom_val)
+
         self.detector = DetectorFactory.create()
 
         self.readability_engine = DmdReadabilityEngine(
@@ -389,7 +406,8 @@ class TrackingEngine(ITracker):
             effective_frame_left=self.effective_frame_left,
             effective_frame_w=self.effective_frame_w,
             effective_frame_top=float(self.effective_frame_top),
-            effective_frame_h=self.effective_frame_h
+            effective_frame_h=self.effective_frame_h,
+            locked_crop_size=self.locked_crop_size
         )
         self._last_roi: Optional[BoundingBox] = None
         

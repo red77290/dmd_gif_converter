@@ -257,9 +257,10 @@ class FFmpegConverter(IConverter):
                 pass
 
     def _apply_dmd_crop_ffmpeg(self, w: int, h: int, dur_s: Optional[float], p: Dict[str, Any]) -> Tuple[str, str]:
-        """Extracted from core.py _apply_dmd_crop_ffmpeg"""
+        """Calculates ffmpeg crop parameters for fixed or scrolling modes."""
         target_width = p["target_width"]
         target_height = p["target_height"]
+        target_aspect = float(target_width) / max(1, target_height)
 
         if not p.get("scroll_enabled", True) or p.get("auto_action_enabled"):
             bcp = max(0.0, min(0.9, p.get("bottom_crop_pct", 0.0)))
@@ -267,26 +268,30 @@ class FFmpegConverter(IConverter):
             if bcp + tcp >= 1.0:
                 bcp, tcp = 0.0, 0.0
 
-            avail_h = h * (1.0 - bcp - tcp)
+            avail_h = max(2.0, h * (1.0 - bcp - tcp))
             base_y  = h * tcp
 
             zoom = p.get("zoom", 1.0)
             if zoom <= 0: zoom = 1.0
 
-            target_aspect = target_width / target_height
-
-            scaled_target_w = w / zoom
-            scaled_target_h = scaled_target_w / target_aspect
-
-            if scaled_target_h > avail_h:
-                scaled_target_h = avail_h
+            if target_aspect >= (float(w) / avail_h):
+                scaled_target_w = float(w) / zoom
+                scaled_target_h = scaled_target_w / target_aspect
+                if scaled_target_h > avail_h:
+                    scaled_target_h = avail_h
+                    scaled_target_w = scaled_target_h * target_aspect
+            else:
+                scaled_target_h = avail_h / zoom
                 scaled_target_w = scaled_target_h * target_aspect
+                if scaled_target_w > float(w):
+                    scaled_target_w = float(w)
+                    scaled_target_h = scaled_target_w / target_aspect
 
-            base_crop_w = int(scaled_target_w)
-            base_crop_h = int(scaled_target_h)
+            base_crop_w = max(2, min(w, int(scaled_target_w)))
+            base_crop_h = max(2, min(int(avail_h), int(scaled_target_h)))
 
-            cx = (w - base_crop_w) // 2
-            cy = int(base_y + (avail_h - base_crop_h) // 2)
+            cx = max(0, min((w - base_crop_w) // 2, w - base_crop_w))
+            cy = max(0, min(int(base_y + (avail_h - base_crop_h) // 2), h - base_crop_h))
 
             mx = p.get("manual_x", 0)
             my = p.get("manual_y", 0)
@@ -296,19 +301,23 @@ class FFmpegConverter(IConverter):
             msg = f"Fixed crop: zoom={zoom}x (offset: {mx},{my})"
             return f"crop={base_crop_w}:{base_crop_h}:{cx}:{cy}", msg
 
-        bcp = p["bottom_crop_pct"]
+        bcp = p.get("bottom_crop_pct", 0.0)
         tcp = p.get("top_crop_pct", 0.0)
         h_eff_start = int(h * tcp)
         h_eff_end   = int(h * (1.0 - bcp))
-        h_eff = h_eff_end - h_eff_start
+        h_eff = max(2, h_eff_end - h_eff_start)
 
-        target_aspect = target_width / target_height
-        crop_w = w
-        crop_h = int(w / target_aspect)
+        if target_aspect >= (float(w) / float(h_eff)):
+            crop_w = w
+            crop_h = max(2, int(w / target_aspect))
+        else:
+            crop_h = h_eff
+            crop_w = max(2, int(h_eff * target_aspect))
 
         if crop_h >= h_eff:
             cy = h_eff_start + (h_eff - crop_h) // 2
-            return f"crop={crop_w}:{crop_h}:0:{max(0, cy)}", ""
+            cx = (w - crop_w) // 2
+            return f"crop={crop_w}:{crop_h}:{max(0, cx)}:{max(0, cy)}", ""
 
         max_y = h_eff_start + h_eff - crop_h
         min_y = h_eff_start
