@@ -180,7 +180,7 @@ class TestBuildCameraRectClamping(unittest.TestCase):
 
 
 class TestBuildCameraRectZoomMax(unittest.TestCase):
-    """zoom_max limits how tightly the crop frames the subject."""
+    """Zoom is strictly performed for aspect ratio fitting, never to zoom in on action."""
 
     def test_zoom_max_1_no_zoom(self):
         cfg = _default_cfg(zoom_max=1.0, strength=1.0)
@@ -188,13 +188,15 @@ class TestBuildCameraRectZoomMax(unittest.TestCase):
         _, _, cw, _ = _build_camera_rect(FRAME_W, FRAME_H, roi, cfg)
         self.assertAlmostEqual(cw, FRAME_W, delta=2.0)
 
-    def test_zoom_max_2_allows_tighter_crop(self):
+    def test_zoom_preserves_widest_shot_regardless_of_roi(self):
         cfg_nozoom = _default_cfg(zoom_max=1.0, strength=1.0)
         cfg_zoom   = _default_cfg(zoom_max=2.0, strength=1.0)
         roi = (200, 100, 100, 100)
         _, _, cw_nz, _ = _build_camera_rect(FRAME_W, FRAME_H, roi, cfg_nozoom)
         _, _, cw_z,  _ = _build_camera_rect(FRAME_W, FRAME_H, roi, cfg_zoom)
-        self.assertLessEqual(cw_z, cw_nz + 1.0)
+        self.assertAlmostEqual(cw_nz, FRAME_W, delta=2.0)
+        self.assertAlmostEqual(cw_z, FRAME_W, delta=2.0)
+
 
 
 class TestSmooth(unittest.TestCase):

@@ -205,7 +205,7 @@ class AutoActionSettingsPanel(ctk.CTkFrame):
 
         _add_dep(adv_slider(parent, "Zoom max", self.app_state.v_action_zoom_max, 1.0, 3.0,
                    "{:.2f}", "×", steps=100,
-                   tooltip_text="The absolute maximum zoom multiplier allowed.\nPrevents the camera from zooming in too much and degrading video quality.\n3.0x means the image can be magnified up to 300%."))
+                   tooltip_text="Maximum dynamic zoom factor allowed.\nDefault 1.0x maintains the widest possible shot to ensure scene readability on tight DMD resolutions."))
         
         pad_sl = adv_slider(parent, "ROI padding", self.app_state.v_action_padding, 0.0, 0.6,
                    "{:.2f}", "", steps=60, 

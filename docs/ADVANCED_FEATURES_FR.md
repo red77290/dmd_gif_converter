@@ -59,7 +59,7 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_auto_strength` | Auto strength | `OFF` | Adapte automatiquement la force en fonction du type de contenu (0.55 anime, 0.65 jeux) |
 | `action_smoothness` | Camera smooth | `0.65` | `0` = instantané · `0.98` = caméra très lente |
 | `action_auto_smoothness`| Auto smooth | `OFF` | Adapte automatiquement le lissage en fonction du type de contenu (0.85 anime, 0.70 jeux) |
-| `action_zoom_max` | Zoom max | `1,8×` | Zoom dynamique maximum que la caméra IA peut appliquer |
+| `action_zoom_max` | Zoom max | `1,0×` | Zoom dynamique maximal autorisé (1,0× par défaut pour préserver la prise la plus large et la lisibilité DMD) |
 | `action_padding` | ROI padding | `0,20` | Espace de respiration autour du sujet détecté |
 | `action_bottom_crop` | Bottom crop % | `0 %` | Exclut les N % inférieurs du frame de la détection (manuel — ignoré si auto actif) |
 | `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Détecte automatiquement** la limite basse du sujet. Active le mode **Face Priority** 👤 quand le corps est plus grand que la fenêtre DMD — recadre sur la région menton (~20 % du corps depuis le haut) avec un rembourrage asymétrique pour que **le visage soit centré, pas coupé aux épaules** |

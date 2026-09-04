@@ -96,7 +96,7 @@ Cela exécutera le pipeline de prétraitement Auto Action sur toutes les vidéos
 | `action_intro` | `--action-intro` | `1.5` | Durée du plan d'établissement en secondes |
 | `action_strength` | `--action-strength` | `0.65` | Précision du cadrage autour du sujet |
 | `action_smoothness` | `--action-smoothness`| `0.65` | Lissage exponentiel de la caméra |
-| `action_zoom_max` | `--action-zoom-max` | `2.0` | Facteur de zoom dynamique maximal |
+| `action_zoom_max` | `--action-zoom-max` | `1.0` | Facteur de zoom dynamique maximal (1.0 = plan large) |
 | `action_padding` | `--action-padding` | `0.20` | Marge autour du ROI détecté |
 | `action_subsample_frames` | `--action-subsample-frames` | `3` | Optimisation de vitesse. Ignore l'inférence YOLO 1 fois sur N. |
 | `auto_fast_tracking` | `--auto-fast-tracking` | `False` | Optimisation de vitesse. Ajuste dynamiquement `action_subsample_frames` en fonction des FPS de la vidéo. |

@@ -6,7 +6,7 @@ class AutoActionConfig:
     detector: str = "person"          # person | motion | hybrid | center
     strength: float = 0.65             # 0..1, larger = tighter framing
     smoothness: float = 0.65           # 0..0.98, larger = smoother / slower
-    zoom_max: float = 2.0              # max dynamic zoom factor (hard limit)
+    zoom_max: float = 1.0              # max dynamic zoom factor (1.0 = no zoom into action)
     padding: float = 0.20              # extra padding around ROI
     subsample_frames: int = 3          # run YOLO every N frames (1 = every frame)
     auto_fast_tracking: bool = False   # dynamically adjust subsample_frames based on video fps (target ~5 analysis fps)

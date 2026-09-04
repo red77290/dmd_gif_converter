@@ -102,7 +102,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=False,
         suggested_strength=0.25,
         suggested_smoothness=0.96,
-        max_zoom_override=1.05,
+        max_zoom_override=1.0,
     ),
     SceneType.FULL_BODY_TALL: SceneProfile(
         scene_type=SceneType.FULL_BODY_TALL,
@@ -114,7 +114,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=False,
         suggested_strength=0.35,
         suggested_smoothness=0.92,
-        max_zoom_override=1.05,
+        max_zoom_override=1.0,
     ),
     SceneType.TALKING_MEDIUM: SceneProfile(
         scene_type=SceneType.TALKING_MEDIUM,
@@ -126,7 +126,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=False,
         suggested_strength=0.30,
         suggested_smoothness=0.94,
-        max_zoom_override=1.5,
+        max_zoom_override=1.0,
     ),
     SceneType.FULL_BODY_MEDIUM: SceneProfile(
         scene_type=SceneType.FULL_BODY_MEDIUM,
@@ -138,7 +138,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.65,
         suggested_smoothness=0.85,
-        max_zoom_override=1.5,
+        max_zoom_override=1.0,
     ),
     SceneType.PLATFORMER: SceneProfile(
         scene_type=SceneType.PLATFORMER,
@@ -150,7 +150,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.65,
         suggested_smoothness=0.70,
-        max_zoom_override=1.05,
+        max_zoom_override=1.0,
     ),
     SceneType.FIGHTING_2D: SceneProfile(
         scene_type=SceneType.FIGHTING_2D,
@@ -162,7 +162,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.70,
         suggested_smoothness=0.80,
-        max_zoom_override=1.05,
+        max_zoom_override=1.0,
     ),
 
     SceneType.ACTION_HORIZONTAL: SceneProfile(
@@ -175,7 +175,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.65,
         suggested_smoothness=0.85,
-        max_zoom_override=1.1,
+        max_zoom_override=1.0,
     ),
     SceneType.WIDE_SHOT: SceneProfile(
         scene_type=SceneType.WIDE_SHOT,
@@ -187,7 +187,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.40,
         suggested_smoothness=0.90,
-        max_zoom_override=2.0,
+        max_zoom_override=1.0,
     ),
     SceneType.ACTION_MOVING: SceneProfile(
         scene_type=SceneType.ACTION_MOVING,
@@ -199,7 +199,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.65,
         suggested_smoothness=0.85,
-        max_zoom_override=1.6,
+        max_zoom_override=1.0,
     ),
     SceneType.TOP_DOWN_ISOMETRIC: SceneProfile(
         scene_type=SceneType.TOP_DOWN_ISOMETRIC,
@@ -211,7 +211,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=True,
         suggested_strength=0.60,
         suggested_smoothness=0.80,
-        max_zoom_override=1.3,
+        max_zoom_override=1.0,
     ),
     SceneType.FIRST_PERSON: SceneProfile(
         scene_type=SceneType.FIRST_PERSON,
@@ -235,7 +235,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         auto_vertical_bias=False,
         suggested_strength=0.30,     # Slight tracking but mostly centered
         suggested_smoothness=0.90,   # Smooth tracking
-        max_zoom_override=1.1,       # Very slight zoom allowed
+        max_zoom_override=1.0,       # No zoom
     ),
     SceneType.MENU_STATIC: SceneProfile(
         scene_type=SceneType.MENU_STATIC,

@@ -385,13 +385,9 @@ class TrackingEngine(ITracker):
         if locked_crop_size is not None:
             self.locked_crop_size = locked_crop_size
         else:
-            strength = _clamp(self.cfg.strength, 0.0, 1.0)
-            current_zoom_max = getattr(self.cfg, "zoom_max", 1.8)
-            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
-                if self.cfg.scene_profile.max_zoom_override is not None:
-                    current_zoom_max = self.cfg.scene_profile.max_zoom_override
-            zoom_val = 1.0 + strength * (max(1.0, current_zoom_max) - 1.0)
-            self.locked_crop_size = (max_w / zoom_val, max_h / zoom_val)
+            # DMD Invariant: Keep the widest possible shot fitting the target aspect ratio
+            self.locked_crop_size = (max_w, max_h)
+
 
         self.detector = DetectorFactory.create()
 

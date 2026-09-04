@@ -206,7 +206,7 @@ DEFAULT_PARAMS = {
     "action_auto_detector_fallback": False, # fallback to hybrid if person fails
     "action_strength":     0.65,       # 0..1 tighter framing around action
     "action_smoothness":   0.98,       # 0..0.98 camera smoothing
-    "action_zoom_max":     2.0,        # max dynamic zoom factor (hard limit)
+    "action_zoom_max":     1.0,        # max dynamic zoom factor (1.0 = no zoom into action)
     "action_padding":      0.20,       # ROI padding before aspect crop
     "action_subsample_frames": 3,      # Run YOLO every N frames
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in

@@ -81,49 +81,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         crop_w = min(crop_w, float(effective_frame_w))
         crop_h = min(crop_h, float(effective_frame_h))
     else:
-        if roi is None:
-            crop_w = max_w
-            crop_h = max_h
-        else:
-            x, y, w, h = roi
-            hair_headroom = h * 0.05
-            ideal_top = max(0.0, y - hair_headroom)
-            total_h = h + (y - ideal_top)
+        # DMD Invariant: Never zoom in on the action. The camera crop dimensions strictly
+        # match the maximum bounding window fitting the target aspect ratio.
+        crop_w = max_w
+        crop_h = max_h
 
-            ideal_crop_h = total_h * (1.0 + cfg.padding)
-            if _auto or _platformer:
-                required_h = total_h / max(0.1, _FLOOR_RATIO - 0.05)
-                ideal_crop_h = max(ideal_crop_h, required_h)
-                
-            ideal_crop_w = ideal_crop_h * target_ratio
-            if ideal_crop_w < w * (1.0 + cfg.padding):
-                ideal_crop_w = w * (1.0 + cfg.padding)
-                ideal_crop_h = ideal_crop_w / target_ratio
-
-            tight_w = ideal_crop_w
-            loose_w = max_w
-            strength = _clamp(cfg.strength, 0.0, 1.0)
-            crop_w = loose_w - strength * (loose_w - tight_w)
-
-            current_zoom_max = getattr(cfg, "zoom_max", 1.8)
-            if hasattr(cfg, "scene_profile") and cfg.scene_profile is not None:
-                if cfg.scene_profile.max_zoom_override is not None:
-                    current_zoom_max = cfg.scene_profile.max_zoom_override
-
-            min_allowed_w = loose_w / max(1.0, current_zoom_max)
-            crop_w = max(crop_w, min_allowed_w)
-            crop_w = max(crop_w, tight_w)
-
-            if _platformer:
-                crop_w = min(max_w, crop_w * 1.5)
-
-            if crop_w > max_w:
-                crop_w = max_w
-
-            crop_h = crop_w / target_ratio
-            if crop_h > max_h:
-                crop_h = max_h
-                crop_w = crop_h * target_ratio
 
     if roi is None:
         cx = effective_frame_left + effective_frame_w / 2.0
