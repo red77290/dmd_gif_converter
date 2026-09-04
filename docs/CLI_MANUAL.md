@@ -100,7 +100,7 @@ This will run the Auto Action preprocessing pipeline on all videos in the target
 | `action_intro` | `--action-intro` | `1.5` | Establishing shot duration in seconds |
 | `action_strength` | `--action-strength` | `0.65` | Framing tightness around subject |
 | `action_smoothness` | `--action-smoothness`| `0.65` | Camera exponential smoothing factor |
-| `action_zoom_max` | `--action-zoom-max` | `2.0` | Maximum dynamic zoom factor |
+| `action_zoom_max` | `--action-zoom-max` | `1.0` | Maximum dynamic zoom factor (1.0 = wide shot) |
 | `action_padding` | `--action-padding` | `0.20` | Padding around detected ROI |
 | `action_subsample_frames` | `--action-subsample-frames` | `3` | Speed optimization. Skips YOLO inference on N frames. |
 | `auto_fast_tracking` | `--auto-fast-tracking` | `False` | Speed optimization. Dynamically scales `action_subsample_frames` according to video fps. |

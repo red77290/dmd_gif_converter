@@ -125,50 +125,9 @@ class VideoAnalyzer:
         from src.engine.auto_action.camera import _compute_base_crop_dimensions
         max_w, max_h = _compute_base_crop_dimensions(float(self.effective_frame_w), float(self.effective_frame_h), target_ratio)
 
-        median_h = self.median_subject_height
-        median_w = self.median_subject_width
+        # DMD Invariant: Zoom is strictly and exclusively performed to adapt to the
+        # target DMD aspect ratio within the frame bounds (via _compute_base_crop_dimensions).
+        # We never zoom in on the action to guarantee the widest possible shot for comprehension
+        # given the very tight DMD screen resolutions (e.g. 128x32).
+        self.locked_crop_size = (max_w, max_h)
 
-        if median_h is not None and median_h > 0:
-            ideal_h = median_h * (1.0 + self.cfg.padding)
-            _platformer = getattr(self.cfg, "platformer_mode", False)
-            _auto = getattr(self.cfg, "auto_vertical_bias", False)
-            _floor_ratio = getattr(self.cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
-            if _auto or _platformer:
-                required_h = median_h / max(0.1, _floor_ratio - 0.05)
-                ideal_h = max(ideal_h, required_h)
-            ideal_w = ideal_h * target_ratio
-            if median_w is not None and ideal_w < median_w * (1.0 + self.cfg.padding):
-                ideal_w = median_w * (1.0 + self.cfg.padding)
-                ideal_h = ideal_w / target_ratio
-            
-            tight_w = ideal_w
-            loose_w = max_w
-            strength = _clamp(self.cfg.strength, 0.0, 1.0)
-            crop_w = loose_w - strength * (loose_w - tight_w)
-            
-            current_zoom_max = getattr(self.cfg, "zoom_max", 1.8)
-            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
-                if self.cfg.scene_profile.max_zoom_override is not None:
-                    current_zoom_max = self.cfg.scene_profile.max_zoom_override
-            min_allowed_w = loose_w / max(1.0, current_zoom_max)
-            crop_w = max(crop_w, min_allowed_w)
-            crop_w = max(crop_w, tight_w)
-            if _platformer:
-                crop_w = min(max_w, crop_w * 1.5)
-            if crop_w > max_w:
-                crop_w = max_w
-            crop_h = crop_w / target_ratio
-            if crop_h > max_h:
-                crop_h = max_h
-                crop_w = crop_h * target_ratio
-        else:
-            strength = _clamp(self.cfg.strength, 0.0, 1.0)
-            current_zoom_max = getattr(self.cfg, "zoom_max", 1.8)
-            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
-                if self.cfg.scene_profile.max_zoom_override is not None:
-                    current_zoom_max = self.cfg.scene_profile.max_zoom_override
-            zoom_val = 1.0 + strength * (max(1.0, current_zoom_max) - 1.0)
-            crop_w = max_w / zoom_val
-            crop_h = max_h / zoom_val
-
-        self.locked_crop_size = (crop_w, crop_h)

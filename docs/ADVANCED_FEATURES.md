@@ -59,7 +59,7 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_auto_strength` | Auto strength | `OFF` | Automatically adapt action strength based on content type (0.55 for anime, 0.65 for games) |
 | `action_smoothness` | Camera smooth | `0.65` | `0` = instant · `0.98` = very slow camera |
 | `action_auto_smoothness`| Auto smooth | `OFF` | Automatically adapt camera smoothness based on content type (0.85 for anime, 0.70 for games) |
-| `action_zoom_max` | Zoom max | `1.8×` | Maximum dynamic zoom the AI camera can apply |
+| `action_zoom_max` | Zoom max | `1.0×` | Maximum dynamic zoom allowed (default 1.0× maintains the widest possible shot for DMD readability) |
 | `action_padding` | ROI padding | `0.20` | Extra space added around the detected subject |
 | `action_bottom_crop` | Bottom crop % | `0 %` | Exclude the bottom N % of the frame from detection (manual — overridden when auto is active) |
 | `action_auto_bottom_crop` | Auto bottom crop | `OFF` | **Automatically** detect where the subject ends at the bottom (feet / floor). Activates **Face Priority** mode 👤 when the body is taller than the DMD window — crops to the estimated chin region (top ~20 % of body height) with asymmetric padding so the **face is centred, not cut at the shoulders** |

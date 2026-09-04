@@ -221,7 +221,7 @@ class SettingsPanel(ctk.CTkFrame):
             self.app_state.v_action_auto_smoothness.set(True)
             self.app_state.v_action_auto_pillarbox_crop.set(True)
             self.app_state.v_action_dynamic_scene_detection.set(False)
-            self.app_state.v_action_zoom_max.set(2.0)
+            self.app_state.v_action_zoom_max.set(1.0)
         state = 'disabled' if enabled else 'normal'
         for widget in self.app_state.lmh_widgets:
             try:
