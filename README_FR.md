@@ -4,6 +4,9 @@ Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, W
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Soutenir%20le%20Projet-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
+[![Communauté Telegram](https://img.shields.io/badge/Telegram-Rejoindre%20la%20Communaut%C3%A9-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
+
 ---
 
 ## 🌟 Découvrez la puissance du DMD GIF Converter
@@ -188,6 +191,12 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 ## 🛠️ Pour les développeurs
 
 Si vous souhaitez contribuer ou comprendre comment l'application fonctionne sous le capot (architecture MVC, Pipeline Auto-Action, Streaming FFmpeg), consultez notre **[Documentation Architecturale](docs/ARCHITECTURE.md)**.
+
+## ☕ Soutenir le projet
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-M'offrir%20un%20caf%C3%A9-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
+
+Si vous appréciez DMD GIF Converter et souhaitez apporter votre soutien, vous pouvez [m'offrir un café sur Ko-fi](https://ko-fi.com/red1l). C'est entièrement volontaire, sans condition ni rien attendre en retour — simplement un geste bienveillant pour donner un coup de pouce et aider aux tests matériels !
 
 ---
 

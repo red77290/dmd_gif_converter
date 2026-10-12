@@ -4,6 +4,9 @@ Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a form
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Project-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
+[![Telegram Community](https://img.shields.io/badge/Telegram-Join%20Community-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
+
 ---
 
 ## 🌟 Discover the Power of DMD GIF Converter
@@ -178,6 +181,12 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 ## 🛠️ For Developers
 
 If you wish to contribute or understand how the app works under the hood (MVC architecture, Auto-Action Pipeline, FFmpeg Streaming), please refer to our **[Architectural Documentation](docs/ARCHITECTURE.md)**.
+
+## ☕ Support the Project
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20Me%20a%20Coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
+
+If you enjoy DMD GIF Converter and want to support its development, feel free to [buy me a coffee on Ko-fi](https://ko-fi.com/red1l). It is completely voluntary, no strings attached, and nothing expected in return — just a kind gesture that fuels motivation and testing on new hardware!
 
 ---
 
