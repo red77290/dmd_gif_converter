@@ -144,7 +144,8 @@ def _terminal_log(msg: str, level: str = "info") -> None:
 
 SUPPORTED_EXTENSIONS = {
     ".gif", ".mp4", ".avi", ".mkv", ".mov", ".webm",
-    ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp"
+    ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp",
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp",
 }
 
 # ── Default parameters ─────────────────────────────────────────────────────────
@@ -433,10 +434,28 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         log(f"[TEXT  ] {filename} — ffmpeg drawtext unavailable (no libfreetype); "
             "using Pillow fallback", "warning")
 
-    # ── Scale (zoom-aware) ────────────────────────────────────────────────────
+    # ── Scale (zoom-aware & multi-resolution / TATE-safe) ────────────────────
     # When zoom=1.0 (default), target_w=128 — identical to previous behaviour.
     target_w_scaled = max(target_width, round(target_width * zoom / 2) * 2)   # even, ≥ target_width
     scaled_h = math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2
+
+    if not keep_original_resolution and src_h > 0:
+        top_crop_pct_pre = float(p.get("top_crop_pct", 0.0))
+        bot_crop_pct_pre = float(p.get("bottom_crop_pct", 0.15))
+        usable_frac = max(0.25, 1.0 - top_crop_pct_pre - bot_crop_pct_pre)
+        if scroll_enabled and bool(p.get("force_panorama_scroll", False)):
+            min_scaled_h = math.ceil((target_height * 1.45 / usable_frac) / 2.0) * 2
+        else:
+            min_scaled_h = target_height
+        if scaled_h < min_scaled_h:
+            target_w_scaled = max(
+                target_w_scaled,
+                math.ceil(((min_scaled_h / src_h) * src_w) / 2.0) * 2,
+            )
+            scaled_h = max(
+                min_scaled_h,
+                math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2,
+            )
 
     if scroll_enabled:
         # ── Auto-scroll (default behaviour, unchanged) ────────────────────────
@@ -452,12 +471,18 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
 
         if scroll_dist > 0:
-            step = max(1, round(p["scroll_speed"] / fps_render))
-
             # ── Cycle decomposition ───────────────────────────────────────────
             cycles   = float(p.get("scroll_cycles", 1.5))
             full_cyc = int(cycles)
             frac     = round(cycles - full_cyc, 10)
+
+            scroll_dur_req = float(p.get("scroll_duration", 0.0))
+            if scroll_dur_req > 0.0:
+                total_travel_px = max(float(scroll_dist), (2.0 * full_cyc + frac) * scroll_dist)
+                req_speed = total_travel_px / max(1.0, scroll_dur_req)
+                step = max(1, round(req_speed / fps_render))
+            else:
+                step = max(1, round(p["scroll_speed"] / fps_render))
 
             frames_one_way    = math.ceil(scroll_dist / step)
             frames_full_cycle = 2 * frames_one_way

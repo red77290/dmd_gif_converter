@@ -541,112 +541,103 @@ class DmdMediaProcessor:
         height: int = 32,
         duration_s: float = 4.0,
         fps: int = 20,
+        hold_start_s: float = 0.35,
+        hold_end_s: float = 0.35,
         smart_color_boost: bool = True,
+        mode: str = "pixel_art",
+        scroll_cycles: float = 0.999,
+        bottom_crop_pct: float = 0.0,
+        top_crop_pct: float = 0.0,
         export_gif: bool = True,
         export_rgb565_stream: bool = True,
         stem: str = "pan",
+        callback: Optional[Callable[[str, str], None]] = None,
     ) -> DmdProcessedAssets:
         """
         Convert a static image (Jacket/Poster, Marquee/Banner, or Snapshot/Backdrop)
-        into a smooth top-to-bottom scrolling panorama `.gif` and `.rgb565.stream` (`DMDS`)
-        using cosine ease-in-out sub-pixel sampling for any DMD resolution or TATE orientation.
+        into a vertical scrolling panorama `.gif` and `.rgb565.stream` (`DMDS`) using
+        the native `dmd_gif_converter` FFmpeg pipeline (`process_file`), including
+        Smart Color Boost (`analyze_and_compensate`), Lanczos scaling, and multi-resolution
+        / TATE geometry support.
         """
+        _ = (hold_start_s, hold_end_s)
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        if isinstance(input_image, Image.Image):
-            src_img = input_image.convert("RGB")
-        else:
-            with Image.open(input_image) as opened:
-                src_img = opened.convert("RGB")
-
-        enhanced = self._enhance_for_led(src_img, smart_color_boost)
-        src_w, src_h = enhanced.size
         width = max(16, int(width))
         height = max(16, int(height))
-        fps_clamped = max(10, min(30, int(fps)))
-        duration_clamped = max(1.8, float(duration_s))
+        fps_clamped = max(10, min(25, int(fps)))
+        duration_clamped = max(1.5, float(duration_s))
 
-        # Scale to fit width while guaranteeing enough vertical height for a natural top-to-bottom scroll
-        min_scroll_h = int(round(height * 1.45))
-        scale_by_w = width / max(1, src_w)
-        scaled_h = int(round(src_h * scale_by_w))
-        if scaled_h < min_scroll_h:
-            scale_by_h = min_scroll_h / max(1, src_h)
-            scaled_w = max(width, int(round(src_w * scale_by_h)))
-            scaled_h = min_scroll_h
+        temp_src_path: Optional[Path] = None
+        if isinstance(input_image, Image.Image):
+            temp_src_path = out_dir / f"_tmp_src_{stem}_{width}x{height}.png"
+            input_image.convert("RGB").save(temp_src_path, format="PNG")
+            src_path = temp_src_path
         else:
-            scaled_w = width
-
-        # Cap excessive vertical height (e.g., ultra-tall flyers) to 3.2x panel height so scroll speed stays gentle
-        max_scroll_h = max(min_scroll_h, int(round(height * 3.2)))
-        if scaled_h > max_scroll_h:
-            scaled_h = max_scroll_h
-
-        scaled_img = enhanced.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
-        x0 = max(0.0, (scaled_w - width) / 2.0)
-        scroll_dist = float(max(0, scaled_h - height))
-
-        total_frames = max(16, int(round(duration_clamped * fps_clamped)))
-        hold_top = max(3, min(total_frames // 5, int(round(0.35 * fps_clamped))))
-        hold_bot = max(3, min(total_frames // 5, int(round(0.35 * fps_clamped))))
-        move_frames = max(8, total_frames - hold_top - hold_bot)
-        total_frames = hold_top + move_frames + hold_bot
-
-        frames_rgb: list[np.ndarray] = []
-        pil_frames: list[Image.Image] = []
-
-        for idx in range(total_frames):
-            if idx < hold_top:
-                t_smooth = 0.0
-            elif idx >= hold_top + move_frames:
-                t_smooth = 1.0
-            else:
-                m_idx = idx - hold_top
-                t_lin = m_idx / max(1, move_frames - 1)
-                t_smooth = 0.5 * (1.0 - math.cos(math.pi * t_lin))
-
-            y_off = t_smooth * scroll_dist
-            crop_frame = scaled_img.transform(
-                (width, height),
-                Image.Transform.EXTENT,
-                (x0, y_off, x0 + width, y_off + height),
-                resample=Image.Resampling.BILINEAR,
-            )
-            pil_frames.append(crop_frame)
-            frames_rgb.append(np.asarray(crop_frame, dtype=np.uint8))
+            src_path = Path(input_image)
+            if not src_path.exists():
+                raise FileNotFoundError(f"Input image not found: {src_path}")
 
         gif_out_path = out_dir / f"{stem}_{width}x{height}.gif"
         stream_out_path = out_dir / f"{stem}_{width}x{height}.rgb565.stream"
 
-        final_gif_path: Optional[Path] = None
-        if export_gif and pil_frames:
-            frame_dur_ms = max(20, int(round(1000.0 / fps_clamped)))
-            pil_frames[0].save(
-                gif_out_path,
-                format="GIF",
-                save_all=True,
-                append_images=pil_frames[1:],
-                duration=frame_dur_ms,
-                loop=0,
-                disposal=2,
+        params = {
+            **DEFAULT_PARAMS,
+            "target_width": width,
+            "target_height": height,
+            "mode": mode,
+            "fps_min": float(fps_clamped),
+            "fps_max": float(fps_clamped),
+            "scroll_enabled": True,
+            "force_panorama_scroll": True,
+            "scroll_cycles": float(scroll_cycles),
+            "scroll_duration": duration_clamped,
+            "bottom_crop_pct": float(bottom_crop_pct),
+            "top_crop_pct": float(top_crop_pct),
+            "auto_action_enabled": False,
+            "auto_color_enabled": bool(smart_color_boost),
+        }
+
+        try:
+            ok, msg = process_file(
+                src_path=str(src_path),
+                out_path=str(gif_out_path),
+                params=params,
+                callback=callback,
             )
-            final_gif_path = gif_out_path
+        finally:
+            if temp_src_path is not None:
+                temp_src_path.unlink(missing_ok=True)
+
+        if not ok or not gif_out_path.exists():
+            raise RuntimeError(f"DMD image panorama conversion failed for {stem}: {msg}")
+
+        eval_res = evaluate_gif_quality(str(gif_out_path))
+        quality_score = int(eval_res.get("score", 75))
+
+        frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
+        frame_count = len(frames_rgb)
+        actual_duration_s = round(frame_count / max(1, effective_fps), 2)
 
         final_stream_path: Optional[Path] = None
         if export_rgb565_stream and frames_rgb:
-            write_rgb565_stream(frames_rgb, stream_out_path, fps=fps_clamped)
+            write_rgb565_stream(frames_rgb, stream_out_path, fps=effective_fps)
             final_stream_path = stream_out_path
+
+        final_gif_path: Optional[Path] = gif_out_path if export_gif else None
+        if not export_gif and gif_out_path.exists():
+            gif_out_path.unlink(missing_ok=True)
 
         return DmdProcessedAssets(
             gif_path=final_gif_path,
             rgb565_stream_path=final_stream_path,
-            frame_count=len(frames_rgb),
-            fps=fps_clamped,
+            frame_count=frame_count,
+            fps=effective_fps,
             width=width,
             height=height,
-            duration_s=round(len(frames_rgb) / max(1, fps_clamped), 2),
-            quality_score=90,
+            duration_s=actual_duration_s,
+            quality_score=quality_score,
             selected_start_s=0.0,
-            selected_end_s=round(len(frames_rgb) / max(1, fps_clamped), 2),
+            selected_end_s=actual_duration_s,
         )
