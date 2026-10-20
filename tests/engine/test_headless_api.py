@@ -165,6 +165,23 @@ def test_process_poster_and_pan_backdrop(tmp_path: Path):
     assert snap_rgb565.exists()
     assert snap_rgb565.stat().st_size == 128 * 72 * 2
 
+    # Test smooth top-to-bottom panorama on both 128x32 landscape and 64x128 TATE vertical
+    pan_res = processor.process_image_panorama(
+        src_img_path, tmp_path, width=128, height=32, duration_s=2.5, fps=16, stem="jacket_pan"
+    )
+    assert pan_res.gif_path is not None and pan_res.gif_path.exists()
+    assert pan_res.rgb565_stream_path is not None and pan_res.rgb565_stream_path.exists()
+    assert pan_res.width == 128
+    assert pan_res.height == 32
+    assert pan_res.frame_count >= 30
+
+    pan_tate = processor.process_image_panorama(
+        src_img_path, tmp_path, width=64, height=128, duration_s=2.5, fps=16, stem="tate_pan"
+    )
+    assert pan_tate.rgb565_stream_path is not None and pan_tate.rgb565_stream_path.exists()
+    assert pan_tate.width == 64
+    assert pan_tate.height == 128
+
 
 def test_process_video_trailer_end_to_end(tmp_path: Path):
     video_path = tmp_path / "synthetic_trailer.mp4"
@@ -211,3 +228,4 @@ def test_process_video_trailer_end_to_end(tmp_path: Path):
     assert header["width"] == 128
     assert header["height"] == 32
     assert header["total_frames"] == result.frame_count
+

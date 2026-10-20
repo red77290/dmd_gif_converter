@@ -72,21 +72,15 @@ class SceneChangeStage(ITrackerStage):
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.scene_change_enabled and engine.prev_frame_for_scene is not None:
             sim = SceneChangeScore.compute(engine.prev_frame_for_scene, context.frame)
-            if sim < (1.0 - engine.cfg.scene_change_threshold):
+            cut_threshold = min(0.35, 1.0 - engine.cfg.scene_change_threshold)
+            if sim < cut_threshold:
                 engine.roi_history.clear()
-                context.cam_prev = engine.cam_full_view
                 if engine.floor_est is not None:
                     engine.floor_est = _FloorEstimator(engine.cam_frame_h)
                 engine.prev_roi_cx = None
                 engine.prev_roi_cy = None
                 engine.frames_since_scene_change = 0
                 
-                # Reset dynamic profile temporarily on cut
-                if getattr(engine.cfg, "dynamic_scene_detection", False):
-                    from src.engine.analysis.scene_types import DEFAULT_SCENE_PROFILE
-                    engine.cfg.scene_profile = DEFAULT_SCENE_PROFILE
-                    engine.cfg.scene_type = DEFAULT_SCENE_PROFILE.scene_type
-                    
                 # Reset dynamic detector on cut
                 if getattr(engine.cfg, "auto_detector_fallback", False):
                     engine.current_detector = "person"
@@ -205,8 +199,7 @@ class HistorySynthesisStage(ITrackerStage):
                 engine.roi_history.append((1.0, context.raw_roi))
                 while len(engine.roi_history) > engine.roi_history_max_len:
                     engine.roi_history.popleft()
-            elif engine.roi_history:
-                n = len(engine.roi_history)
+            if engine.roi_history:
                 total_w = 0.0
                 wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
                 for idx, (_, hr) in enumerate(engine.roi_history):
@@ -217,7 +210,7 @@ class HistorySynthesisStage(ITrackerStage):
                     ww += w * hr[2]
                     wh += w * hr[3]
                 if total_w > 0:
-                    context.raw_roi = BoundingBox(int(wx / total_w), int(wy / total_w), int(ww / total_w), int(wh / total_w))
+                    context.raw_roi = BoundingBox(int(round(wx / total_w)), int(round(wy / total_w)), int(round(ww / total_w)), int(round(wh / total_w)))
                     context.face_roi = engine._clip_to_face_roi(context.raw_roi)
 
 
@@ -280,9 +273,9 @@ class DetectorFallbackStage(ITrackerStage):
 
 
 class CameraBuilderStage(ITrackerStage):
-    """Builds the raw proposed Camera rectangle before lissage."""
+    """Builds the raw proposed Camera rectangle before lissage, with Tripod Deadzone & Velocity Clamping."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
-        context.cam_now_proposed = _build_camera_rect(
+        raw_cam = _build_camera_rect(
             engine.frame_w, engine.cam_frame_h, context.face_roi, engine.cfg,
             floor_y_est=context.floor_y_est, frame_top=engine.cam_frame_top,
             face_priority_mode=engine.face_priority_mode,
@@ -292,6 +285,24 @@ class CameraBuilderStage(ITrackerStage):
             effective_frame_h=engine.effective_frame_h,
             locked_crop_size=engine.locked_crop_size
         )
+        if context.cam_prev is not None and engine.frames_since_scene_change > 1:
+            prev_cx, prev_cy = float(context.cam_prev[0]), float(context.cam_prev[1])
+            prop_cx, prop_cy, cw, ch = float(raw_cam[0]), float(raw_cam[1]), float(raw_cam[2]), float(raw_cam[3])
+            dx = prop_cx - prev_cx
+            dy = prop_cy - prev_cy
+            # Tripod deadzone hysteresis: camera stays rock-steady for minor movements
+            dead_x = cw * 0.12
+            dead_y = ch * 0.10
+            target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
+            target_cy = prev_cy if abs(dy) <= dead_y else prev_cy + math.copysign(abs(dy) - dead_y, dy)
+            # Maximum pan speed per frame to prevent jerky jumps on target switch
+            max_step_x = max(1.5, cw * 0.032)
+            max_step_y = max(1.2, ch * 0.032)
+            clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
+            clamped_cy = prev_cy + _clamp(target_cy - prev_cy, -max_step_y, max_step_y)
+            raw_cam = CamRect(clamped_cx, clamped_cy, cw, ch)
+
+        context.cam_now_proposed = raw_cam
         context.cam_now = context.cam_now_proposed
 
 
@@ -327,13 +338,14 @@ class LookAheadStage(ITrackerStage):
             
         live_vx, live_vy = 0.0, 0.0
         if curr_roi_cx is not None and engine.prev_roi_cx is not None:
-            live_vx = curr_roi_cx - engine.prev_roi_cx
-            live_vy = curr_roi_cy - engine.prev_roi_cy
+            max_v = max(4.0, engine.frame_w * 0.025)
+            live_vx = _clamp(curr_roi_cx - engine.prev_roi_cx, -max_v, max_v)
+            live_vy = _clamp(curr_roi_cy - engine.prev_roi_cy, -max_v, max_v)
             
         if getattr(engine.cfg, "scroll_direction_memory_enabled", True):
             if context.raw_roi is not None:
-                engine.scroll_vx = 0.9 * engine.scroll_vx + 0.1 * live_vx
-                engine.scroll_vy = 0.9 * engine.scroll_vy + 0.1 * live_vy
+                engine.scroll_vx = 0.94 * engine.scroll_vx + 0.06 * live_vx
+                engine.scroll_vy = 0.94 * engine.scroll_vy + 0.06 * live_vy
                 engine.scroll_memory_frames = min(60, engine.scroll_memory_frames + 1)
             else:
                 engine.scroll_memory_frames = max(0, engine.scroll_memory_frames - 1)
