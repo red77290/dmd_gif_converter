@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v7.1.0
+# 🎞️ DMD GIF Converter — v8.0.0
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
@@ -113,6 +113,10 @@ LED matrices wash out dark colors and overdrive bright ones. **Smart Color Boost
 ### [💻 CLI Automation Mastery](docs/CLI_MANUAL.md)
 Everything you can do in the UI, you can automate in the Terminal. Download GIFs straight from DuckDuckGo, process entire folders in parallel, overlay pixel-art text, and automatically trash low-quality conversions!
 👉 **[Read the CLI Manual](docs/CLI_MANUAL.md)**
+
+### [📦 Headless Python Library & `.rgb565.stream` API](docs/LIBRARY_API.md)
+Embed `dmd_gif_converter` directly inside Docker containers, FastAPI servers, or automated backends (`pip install dmd-gif-converter`) with zero GUI dependencies, and export both `.gif` and raw `.rgb565.stream` assets!
+👉 **[Read the Headless Library API Guide](docs/LIBRARY_API.md)**
 
 ### [❓ Troubleshooting & Setup](docs/TROUBLESHOOTING.md)
 Running into OpenCV or FFmpeg issues? Need help with installation on a specific OS?
