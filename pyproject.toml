@@ -33,14 +33,14 @@ dependencies = [
     "numpy>=1.24.0",
     "opencv-python-headless>=4.9.0",
     "onnxruntime>=1.16.0",
+    "requests>=2.31.0",
+    "ddgs>=7.0.0",
 ]
 
 [project.optional-dependencies]
 ui = [
     "customtkinter>=5.2.2",
     "darkdetect==0.7.1",
-    "ddgs>=7.0.0",
-    "requests>=2.31.0",
     "send2trash>=1.8.0",
 ]
 dev = [
