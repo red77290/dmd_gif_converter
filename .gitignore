@@ -31,6 +31,7 @@ htmlcov/
 *.log
 *.sqlite
 
-# IA files
-GEMINI.md
-.github/
+# Packaging / build artifacts
+dist/
+build/
+*.egg-info/
