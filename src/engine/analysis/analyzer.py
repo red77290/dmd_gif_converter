@@ -36,6 +36,7 @@ class VideoAnalyzer:
         self.locked_crop_size: Optional[Tuple[float, float]] = None
         self.median_subject_height: Optional[float] = None
         self.median_subject_width: Optional[float] = None
+        self.best_detector: str = getattr(cfg, "detector", "person")
         
     def analyze(self, src_path: str) -> None:
         """Runs smart/auto crop analysis and updates configuration variables."""
@@ -55,6 +56,9 @@ class VideoAnalyzer:
             try:
                 _decision = _smart_auto_crop_decision(src_path, self.cfg, self.frame_w, self.frame_h)
                 
+                if "best_detector" in _decision and _decision["best_detector"]:
+                    self.best_detector = _decision["best_detector"]
+                    self.cfg.detector = _decision["best_detector"]
                 if "median_height" in _decision:
                     self.median_subject_height = _decision["median_height"]
                 if "median_width" in _decision:

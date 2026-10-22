@@ -449,15 +449,8 @@ if __name__ == "__main__":
     
     # Apply "Let Me Handle It" overrides
     if args.let_me_handle_it:
-        params.update({
-            "auto_color_enabled":     True,
-            "auto_action_enabled":    True,
-            "action_smart_auto_crop": True,
-            "action_auto_scene_type": True,
-            "auto_fast_tracking":     True,
-            "dmd_visibility_score_enabled": True,
-            "dmd_readability_score_enabled": True,
-        })
+        from src.engine.conversion.core import LET_ME_HANDLE_PARAMS
+        params.update(LET_ME_HANDLE_PARAMS)
     prefix = args.prefix
 
     # ── A/B Testing ─────────────────────────────────────────────────────────

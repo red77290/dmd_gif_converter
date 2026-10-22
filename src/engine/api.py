@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
 
-from src.engine.conversion.core import DEFAULT_PARAMS, process_file
+from src.engine.conversion.core import DEFAULT_PARAMS, LET_ME_HANDLE_PARAMS, process_file
 from src.engine.conversion.ffmpeg_utils import get_metadata
 from src.engine.conversion.quality import evaluate_gif_quality
 
@@ -400,13 +400,15 @@ class DmdMediaProcessor:
 
         params = {
             **DEFAULT_PARAMS,
+            **(LET_ME_HANDLE_PARAMS if config.use_auto_action else {}),
             "target_width": config.width,
             "target_height": config.height,
             "mode": config.mode,
             "fps_min": config.fps,
             "fps_max": config.fps,
             "max_duration": config.max_duration_s,
-            "scroll_enabled": config.scroll_enabled,
+            "scroll_enabled": False if config.use_auto_action else config.scroll_enabled,
+            "let_me_handle_it": config.use_auto_action,
             "auto_action_enabled": config.use_auto_action,
             "action_smart_auto_crop": config.use_auto_action,
             "action_auto_detector_fallback": True,

@@ -238,6 +238,28 @@ DEFAULT_PARAMS = {
     "text_style":           "outline",  # none | bold | outline | shadow
     "text_bg":              False,      # draw a dark background box behind text
     "text_bg_opacity":      60,         # background box opacity 0-100
+    "let_me_handle_it":     False,      # one-click full-auto mode
+}
+
+# Canonical parameter overrides for "Let Me Handle It" (matches UI _on_let_me_handle_toggle + _toggle_smart_auto)
+LET_ME_HANDLE_PARAMS = {
+    "let_me_handle_it":              True,
+    "auto_color_enabled":            True,
+    "auto_action_enabled":           True,
+    "action_smart_auto_crop":        True,
+    "auto_fast_tracking":            True,
+    "action_auto_scene_type":        True,
+    "action_auto_bottom_crop":       True,
+    "action_auto_top_crop":          True,
+    "action_auto_vertical_bias":     True,
+    "action_auto_strength":          True,
+    "action_auto_smoothness":        True,
+    "action_auto_pillarbox":         True,
+    "action_auto_detector_fallback": True,
+    "dmd_visibility_score_enabled":  True,
+    "dmd_readability_score_enabled": True,
+    "dynamic_scene_detection":       False,
+    "action_zoom_max":               1.0,
 }
 
 _PRESETS = {
@@ -265,7 +287,14 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     Returns:
         (success: bool, message: str)
     """
-    p = {**DEFAULT_PARAMS, **(params or {})}
+    caller_params = dict(params or {})
+    p = {**DEFAULT_PARAMS, **caller_params}
+    if bool(p.get("let_me_handle_it", False)):
+        p.update(LET_ME_HANDLE_PARAMS)
+        if "auto_color_enabled" in caller_params:
+            p["auto_color_enabled"] = bool(caller_params["auto_color_enabled"])
+        if "auto_action_enabled" in caller_params:
+            p["auto_action_enabled"] = bool(caller_params["auto_action_enabled"])
     src_path = str(src_path)
     out_path = str(out_path)
     filename = os.path.basename(src_path)
@@ -770,7 +799,14 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     When auto_action is disabled the two phases are merged into a single pass
     (identical behaviour to the previous single-phase pipeline).
     """
-    p = {**DEFAULT_PARAMS, **(params or {})}
+    caller_params = dict(params or {})
+    p = {**DEFAULT_PARAMS, **caller_params}
+    if bool(p.get("let_me_handle_it", False)):
+        p.update(LET_ME_HANDLE_PARAMS)
+        if "auto_color_enabled" in caller_params:
+            p["auto_color_enabled"] = bool(caller_params["auto_color_enabled"])
+        if "auto_action_enabled" in caller_params:
+            p["auto_action_enabled"] = bool(caller_params["auto_action_enabled"])
     os.makedirs(str(folder_out), exist_ok=True)
 
     files = [
