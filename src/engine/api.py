@@ -336,7 +336,7 @@ class DmdMediaProcessor:
 
                 options = {
                     "analyze_fps": 3.0,
-                    "dur_min": max(2.0, min(4.0, target_len * 0.6)),
+                    "dur_min": max(2.0, min(target_len * 0.85, target_len)),
                     "dur_max": target_len,
                     "count": 5,
                     "w_action": 80.0,
@@ -359,7 +359,7 @@ class DmdMediaProcessor:
                 candidates = valid if valid else moments
                 if candidates:
                     best = max(candidates, key=lambda m: m.overall_score)
-                    start_s = max(0.0, float(best.start_time))
+                    start_s = max(0.0, min(float(best.start_time), max(0.0, duration_full - target_len)))
                     end_s = min(duration_full, start_s + target_len)
                     if end_s - start_s >= min(2.0, target_len):
                         return round(start_s, 2), round(end_s, 2)
@@ -368,7 +368,7 @@ class DmdMediaProcessor:
 
         # Heuristic center-action window (around 35%-45% of the usable trailer)
         usable_span = max(0.0, usable_end - usable_start - target_len)
-        start_s = usable_start + usable_span * 0.38
+        start_s = max(0.0, min(usable_start + usable_span * 0.38, max(0.0, duration_full - target_len)))
         end_s = min(duration_full, start_s + target_len)
         return round(start_s, 2), round(end_s, 2)
 
