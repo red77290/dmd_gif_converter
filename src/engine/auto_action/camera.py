@@ -3,6 +3,10 @@ from src.engine.auto_action.interfaces import CamRect, BoundingBox
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.engine.analysis.analysis import _clamp
 
+# Minimum source pixels per target DMD pixel to prevent upscaling / interpolation blur
+_MIN_DETAIL_SRC_PER_DMD_PX = 1.75
+
+
 def _compute_base_crop_dimensions(eff_w: float, eff_h: float, target_ratio: float) -> Tuple[float, float]:
     """Compute maximum crop window dimensions fitting within effective frame bounds for any aspect ratio."""
     if eff_h <= 0 or target_ratio <= 0:
@@ -24,6 +28,87 @@ def _compute_base_crop_dimensions(eff_w: float, eff_h: float, target_ratio: floa
         crop_h = float(eff_h)
         crop_w = crop_h * target_ratio
         
+    return crop_w, crop_h
+
+
+def _compute_detail_preserving_crop_dimensions(
+    eff_w: float,
+    eff_h: float,
+    cfg: AutoActionConfig,
+    median_h: Optional[float] = None,
+    median_w: Optional[float] = None,
+) -> Tuple[float, float]:
+    """
+    Compute static, shot-locked crop dimensions (crop_w, crop_h) that zoom in
+    just enough to make a small subject readable on the DMD while strictly
+    preserving native pixel detail (never dropping below _MIN_DETAIL_SRC_PER_DMD_PX
+    source pixels per DMD pixel).
+    """
+    target_w = max(1, int(getattr(cfg, "target_width", 128)))
+    target_h = max(1, int(getattr(cfg, "target_height", 32)))
+    target_ratio = float(target_w) / float(target_h)
+
+    max_w, max_h = _compute_base_crop_dimensions(float(eff_w), float(eff_h), target_ratio)
+
+    cfg_zoom_max = max(1.0, float(getattr(cfg, "zoom_max", 1.45)))
+    effective_zoom_max = cfg_zoom_max
+    scene_profile = getattr(cfg, "scene_profile", None)
+    if scene_profile is not None and getattr(scene_profile, "max_zoom_override", None) is not None:
+        effective_zoom_max = min(effective_zoom_max, max(1.0, float(scene_profile.max_zoom_override)))
+
+    strength = _clamp(float(getattr(cfg, "strength", 0.65)), 0.0, 1.0)
+    if effective_zoom_max <= 1.001 or strength <= 1e-4:
+        return max_w, max_h
+
+    # Detail-preservation floor: require at least _MIN_DETAIL_SRC_PER_DMD_PX source pixels
+    # per DMD pixel so low-res pixel art and video detail never blur or shimmer.
+    min_detail_w = min(max_w, float(target_w) * _MIN_DETAIL_SRC_PER_DMD_PX)
+    min_detail_h = min(max_h, float(target_h) * _MIN_DETAIL_SRC_PER_DMD_PX)
+    detail_zoom_cap = min(
+        max_w / max(1.0, min_detail_w),
+        max_h / max(1.0, min_detail_h),
+    )
+    effective_zoom_max = min(effective_zoom_max, max(1.0, detail_zoom_cap))
+    if effective_zoom_max <= 1.001:
+        return max_w, max_h
+
+    # Only zoom when subject dimensions were measured; never blind-zoom unknown shots
+    if median_h is None or median_h <= 0:
+        return max_w, max_h
+
+    padding = _clamp(float(getattr(cfg, "padding", 0.20)), 0.0, 1.0)
+    _platformer = getattr(cfg, "platformer_mode", False)
+    _auto = getattr(cfg, "auto_vertical_bias", False)
+    _floor_ratio = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
+
+    ideal_h = float(median_h) * (1.0 + padding)
+    if _auto or _platformer:
+        required_h = float(median_h) / max(0.1, _floor_ratio - 0.05)
+        ideal_h = max(ideal_h, required_h)
+    ideal_w = ideal_h * target_ratio
+
+    if median_w is not None and median_w > 0:
+        min_sub_w = float(median_w) * (1.0 + padding)
+        if ideal_w < min_sub_w:
+            ideal_w = min_sub_w
+            ideal_h = ideal_w / target_ratio
+
+    # If the subject already fills or exceeds the unzoomed window, keep wide shot (1.0x)
+    if ideal_w >= max_w:
+        return max_w, max_h
+
+    crop_w = max_w - strength * (max_w - ideal_w)
+    min_allowed_w = max(min_detail_w, max_w / effective_zoom_max)
+    crop_w = _clamp(crop_w, min_allowed_w, max_w)
+    crop_h = crop_w / target_ratio
+
+    if crop_h > max_h:
+        crop_h = max_h
+        crop_w = crop_h * target_ratio
+    elif crop_h < min_detail_h:
+        crop_h = min_detail_h
+        crop_w = min(max_w, crop_h * target_ratio)
+
     return crop_w, crop_h
 
 
