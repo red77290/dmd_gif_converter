@@ -45,6 +45,8 @@ class Renderer(IRenderer):
                     * np.expand_dims(cropped_mask_float, axis=-1)
                 ).astype(np.uint8)
 
+        if cropped_frame.shape[1] == self.out_w and cropped_frame.shape[0] == self.out_h:
+            return cropped_frame
         return cv2.resize(cropped_frame, (self.out_w, self.out_h), interpolation=cv2.INTER_LANCZOS4)
 
     def _compute_vignette(
