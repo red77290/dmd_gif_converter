@@ -246,6 +246,7 @@ LET_ME_HANDLE_PARAMS = {
     "let_me_handle_it":              True,
     "auto_color_enabled":            True,
     "auto_action_enabled":           True,
+    "action_intro":                  0.0,
     "action_smart_auto_crop":        True,
     "auto_fast_tracking":            True,
     "action_auto_scene_type":        True,

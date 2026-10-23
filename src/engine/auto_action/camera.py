@@ -49,10 +49,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
 
     # Force bias for intro frame (roi=None) depending on tracking mode
     if roi is None:
-        if _auto and abs(_bias) < 1e-4:
-            _bias = -1.0  # person smart pushes up to ensure head is visible
-        elif _platformer and abs(_bias) < 1e-4:
+        if _platformer and abs(_bias) < 1e-4:
             _bias = 1.0   # platformer pushes down to ensure floor is visible
+        elif _auto and abs(_bias) < 1e-4:
+            _bias = -1.0  # person smart pushes up to ensure head is visible
 
     _FLOOR_RATIO: float = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
 
@@ -90,7 +90,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     if roi is None:
         cx = effective_frame_left + effective_frame_w / 2.0
         cy = effective_frame_top + effective_frame_h / 2.0
-        cy = _apply_bias(cy, crop_h)
+        if floor_y_est is not None and (_platformer or _auto) and not face_priority_mode:
+            cy = _apply_auto_floor(cy, floor_y_est, crop_h)
+        else:
+            cy = _apply_bias(cy, crop_h)
         return CamRect(cx, cy, crop_w, crop_h)
 
     x, y, w, h = roi
@@ -107,9 +110,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
         
-        if (cy_floor - crop_h / 2.0) > ideal_top:
+        if _platformer:
+            cy = cy_floor
+        elif (cy_floor - crop_h / 2.0) > ideal_top:
             scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
-            if scene_type == "platformer" and total_h > crop_h * 0.8:
+            if scene_type in ("platformer", "fighting_2d", "action_horizontal") or total_h > crop_h * 0.8:
                 cy = cy_floor
             else:
                 cy = ideal_top + crop_h / 2.0
