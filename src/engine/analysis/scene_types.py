@@ -171,10 +171,10 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_clip_mode="none",
         face_head_frac=0.22,
         face_eye_offset=None,
-        platformer_mode=False,
+        platformer_mode=True,
         auto_vertical_bias=True,
         suggested_strength=0.65,
-        suggested_smoothness=0.85,
+        suggested_smoothness=0.80,
         max_zoom_override=1.0,
     ),
     SceneType.WIDE_SHOT: SceneProfile(

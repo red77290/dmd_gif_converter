@@ -149,13 +149,19 @@ class PersistenceStage(ITrackerStage):
 
 
 class ValidationStage(ITrackerStage):
-    """Rejects micro or insignificant ROI detections."""
+    """Rejects micro or insignificant ROI detections and full-frame scroll noise."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
-        # Micro-detection Rejection
+        # Micro-detection Rejection (relaxed in platformer/2D sprite mode where sprites are ~0.8%-1.5% of screen area)
         if context.raw_roi is not None and engine.cfg.min_roi_area_ratio > 0.0:
             roi_area = context.raw_roi[2] * context.raw_roi[3]
             frame_area = engine.frame_w * engine.frame_h
-            if frame_area > 0 and (roi_area / frame_area) < engine.cfg.min_roi_area_ratio:
+            is_floor_scene = getattr(engine.cfg, "platformer_mode", False)
+            min_ratio = (
+                min(engine.cfg.min_roi_area_ratio, 0.004)
+                if is_floor_scene
+                else engine.cfg.min_roi_area_ratio
+            )
+            if frame_area > 0 and (roi_area / frame_area) < min_ratio:
                 context.raw_roi = None
 
         # Minimum Useful Size Rejection
@@ -182,12 +188,14 @@ class FloorEstimationStage(ITrackerStage):
             if context.raw_roi is not None:
                 rx, ry, rw, rh = context.raw_roi
                 engine._platformer = getattr(engine.cfg, "platformer_mode", False)
+                bottom_val = float(ry + rh)
                 if engine._platformer:
-                    max_char_h = engine.effective_frame_h * 0.25
-                    effective_rh = min(float(rh), max_char_h)
-                    roi_bottom = ry + effective_rh
+                    # Only update floor from ground-plausible character boxes (ignore giant explosions or high HUD/sky objects)
+                    min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.42
+                    if float(rh) <= float(engine.effective_frame_h) * 0.55 and bottom_val >= min_valid_bottom:
+                        roi_bottom = bottom_val
                 else:
-                    roi_bottom = float(ry + rh)
+                    roi_bottom = float(ry + min(rh, float(engine.effective_frame_h) * 0.25))
             context.floor_y_est = engine.floor_est.update(roi_bottom)
 
 
@@ -285,19 +293,19 @@ class CameraBuilderStage(ITrackerStage):
             effective_frame_h=engine.effective_frame_h,
             locked_crop_size=engine.locked_crop_size
         )
-        if context.cam_prev is not None and engine.frames_since_scene_change > 1:
+        if context.cam_prev is not None and engine.frames_since_scene_change > 1 and float(getattr(engine.cfg, "smoothness", 0.0)) > 0.0:
             prev_cx, prev_cy = float(context.cam_prev[0]), float(context.cam_prev[1])
             prop_cx, prop_cy, cw, ch = float(raw_cam[0]), float(raw_cam[1]), float(raw_cam[2]), float(raw_cam[3])
             dx = prop_cx - prev_cx
             dy = prop_cy - prev_cy
-            # Tripod deadzone hysteresis: camera stays rock-steady for minor movements
-            dead_x = cw * 0.12
-            dead_y = ch * 0.10
+            # Tripod deadzone hysteresis: camera stays rock-steady for minor micro-movements
+            dead_x = cw * 0.04
+            dead_y = ch * 0.04
             target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
             target_cy = prev_cy if abs(dy) <= dead_y else prev_cy + math.copysign(abs(dy) - dead_y, dy)
-            # Maximum pan speed per frame to prevent jerky jumps on target switch
-            max_step_x = max(1.5, cw * 0.032)
-            max_step_y = max(1.2, ch * 0.032)
+            # Maximum pan speed per frame before outer smoothing
+            max_step_x = max(4.0, cw * 0.14)
+            max_step_y = max(3.5, ch * 0.14)
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
             clamped_cy = prev_cy + _clamp(target_cy - prev_cy, -max_step_y, max_step_y)
             raw_cam = CamRect(clamped_cx, clamped_cy, cw, ch)
@@ -308,13 +316,27 @@ class CameraBuilderStage(ITrackerStage):
 
 class ReadabilityScoreStage(ITrackerStage):
     """Evaluates spatial readability and rejects poor camera proposals (Momentum penalty)."""
+    @staticmethod
+    def _cam_to_top_left_roi(cam: Optional[CamRect]) -> Optional[Tuple[int, int, int, int]]:
+        if cam is None:
+            return None
+        cx, cy, cw, ch = cam
+        return (
+            int(round(cx - cw / 2.0)),
+            int(round(cy - ch / 2.0)),
+            int(round(cw)),
+            int(round(ch)),
+        )
+
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.cfg.dmd_visibility_score_enabled or getattr(engine.cfg, 'dmd_readability_score_enabled', True):
-            read_prev_score = engine.readability_engine.evaluate(context.frame, roi=context.cam_prev).overall / 100.0
-            read_prop_score = engine.readability_engine.evaluate(context.frame, roi=context.cam_now_proposed).overall / 100.0
+            roi_prev = self._cam_to_top_left_roi(context.cam_prev)
+            roi_prop = self._cam_to_top_left_roi(context.cam_now_proposed)
+            read_prev_score = engine.readability_engine.evaluate(context.frame, roi=roi_prev).overall / 100.0
+            read_prop_score = engine.readability_engine.evaluate(context.frame, roi=roi_prop).overall / 100.0
 
-            if read_prop_score < read_prev_score * 0.95:
-                # Reject poor framing proposals
+            if read_prop_score < read_prev_score * 0.72:
+                # Reject severely degraded framing proposals
                 context.cam_now = context.cam_prev
 
             if getattr(engine.cfg, 'auto_tuning_dataset_dir', None) is not None:
@@ -408,9 +430,19 @@ class TrackingEngine(ITracker):
             target_h=self.cfg.target_height
         )
 
+        self.floor_est: Optional[_FloorEstimator] = (
+            _FloorEstimator(self.cam_frame_h) 
+            if self.cfg.auto_vertical_bias or self.cfg.platformer_mode else None
+        )
+        initial_floor_y: Optional[float] = None
+        if self.floor_est is not None and getattr(self.cfg, "platformer_mode", False) and not self.face_priority_mode:
+            initial_floor_y = self.floor_est.update(None)
+
         self._cam_full_view: CamRect = _build_camera_rect(
             self.frame_w, self.cam_frame_h, None, self.cfg,
+            floor_y_est=initial_floor_y,
             frame_top=self.cam_frame_top,
+            face_priority_mode=self.face_priority_mode,
             effective_frame_left=self.effective_frame_left,
             effective_frame_w=self.effective_frame_w,
             effective_frame_top=float(self.effective_frame_top),
@@ -418,11 +450,6 @@ class TrackingEngine(ITracker):
             locked_crop_size=self.locked_crop_size
         )
         self._last_roi: Optional[BoundingBox] = None
-        
-        self.floor_est: Optional[_FloorEstimator] = (
-            _FloorEstimator(self.cam_frame_h) 
-            if self.cfg.auto_vertical_bias or self.cfg.platformer_mode else None
-        )
         
         self.prev_frame_for_scene: Optional[np.ndarray] = None
         self.scene_change_enabled = self.cfg.scene_change_threshold > 0.0

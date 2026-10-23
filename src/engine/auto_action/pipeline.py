@@ -156,7 +156,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
             cam_prev = tracker.cam_full_view
             cam_now = tracker.cam_full_view
             
-            dynamic_smoothness = max(0.88, min(0.98, float(cfg.smoothness)))
+            action_frames = max(1, reader.total_frames - intro_frames)
+            required_smoothness = 0.10 ** (1.0 / max(5, action_frames))
+            dynamic_smoothness = max(0.50, min(float(cfg.smoothness), required_smoothness)) if float(cfg.smoothness) > 0.0 else 0.0
             
             src_idx = 0
             
