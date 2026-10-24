@@ -1,6 +1,6 @@
-# 🎞️ DMD GIF Converter — v7.1.0
+# 🎞️ DMD GIF Converter
 
-Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
+Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en formats (`.gif`, `.rgb565.stream`) optimisés pour **dalles LED HUB75** (`128×32`, `128×64`, `256×64`, `64×64` et mode vertical TATE `64×128` / `32×128`) pilotées par **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)** et le serveur compagnon **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** (également compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
@@ -63,7 +63,7 @@ Marre de recadrer manuellement vos vidéos pour votre matrice LED basse résolut
 | **🎨 Smart Color Boost** | Colorimétrie IA en un clic — ajuste automatiquement contraste, saturation et gamma |
 | **🎞️ Config par GIF** | Toggle global — quand activé, chaque fichier stocke sa propre copie indépendante de tous les ~50 paramètres · config sauvegardée instantanément au changement de sélection |
 | **Tous les paramètres standards** | Curseurs et menus pour le mode, le scroll, les FPS, la colorimétrie |
-| **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, valeurs par défaut = sortie identique à v2.0 |
+| **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, les valeurs par défaut n'altèrent jamais le rendu standard |
 | **Batch dossier** | Convertit un dossier entier en un clic |
 | **Convertir toute la liste** | Un clic pour traiter tous les fichiers listés |
 | **Journal en temps réel** | Progression visible dans l'interface |
@@ -112,6 +112,10 @@ Les matrices LED délavent les couleurs sombres et saturent les couleurs claires
 ### [💻 Maîtrise de l'Automatisation CLI](docs/CLI_MANUAL_FR.md)
 Tout ce que vous pouvez faire dans l'interface est automatisable dans le Terminal. Téléchargez des GIFs via DuckDuckGo, traitez des dossiers complets en parallèle, ajoutez du texte pixel-art, et envoyez automatiquement à la corbeille les mauvaises conversions !
 👉 **[Lire le Manuel CLI](docs/CLI_MANUAL_FR.md)**
+
+### [📦 Librairie Python Headless & API `.rgb565.stream`](docs/LIBRARY_API_FR.md)
+Intégrez `dmd_gif_converter` directement dans vos conteneurs Docker, serveurs FastAPI ou scripts d'automatisation (`pip install dmd-gif-converter`) sans aucune dépendance graphique, et exportez en `.gif` ou en flux binaire `.rgb565.stream` !
+👉 **[Lire le Guide de la Librairie Headless](docs/LIBRARY_API_FR.md)**
 
 ### [❓ Dépannage & Installation](docs/TROUBLESHOOTING_FR.md)
 Un problème avec OpenCV ou FFmpeg ? Besoin d'aide pour l'installation sur un OS spécifique ?
@@ -183,8 +187,6 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 > `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.  
 > `opencv-python` et `onnxruntime` sont optionnels — uniquement nécessaires pour la fonctionnalité **Auto Action** IA. En leur absence, Auto Action est silencieusement ignoré.  
 > Le modèle YOLOv8n ONNX (~6 Mo) est téléchargé automatiquement dans `~/.cache/dmd_gif_converter/` au premier lancement.
-
----
 
 ---
 

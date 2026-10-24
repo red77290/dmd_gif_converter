@@ -1,0 +1,42 @@
+name: Release — Build Wheel & Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stamp package version from Git release tag
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          python -c "from pathlib import Path; import re; p=Path('pyproject.toml'); p.write_text(re.sub(r'^version = \".*\"', f'version = \"{TAG_VER}\"', p.read_text(), count=1, flags=re.M)); a=Path('src/engine/api.py'); a.write_text(re.sub(r'__version__ = \".*\"', f'__version__ = \"{TAG_VER}\"', a.read_text()))"
+          PKG_VER=$(python -c "import src.engine.api as a; print(a.__version__)")
+          echo "Stamped version from release tag: $PKG_VER"
+
+      - name: Build Python Wheel and Source Distribution
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Publish GitHub Release with Wheel Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          generate_release_notes: true

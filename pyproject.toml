@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dmd-gif-converter"
+version = "8.0.0"
+description = "Headless library, CLI, and GUI to convert videos, trailers, and images into HUB75 LED matrix / DMD formats (.gif, .rgb565, .rgb565.stream)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "red77290" }
+]
+keywords = ["dmd", "hub75", "led-matrix", "gif", "rgb565", "esp32", "raspberry-pi", "arcade"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Topic :: Multimedia :: Video :: Conversion",
+]
+
+# Core headless dependencies (Docker & Server ready — zero X11/Tkinter dependency)
+dependencies = [
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "opencv-python-headless>=4.9.0",
+    "onnxruntime>=1.16.0",
+    "requests>=2.31.0",
+    "ddgs>=7.0.0",
+]
+
+[project.optional-dependencies]
+ui = [
+    "customtkinter>=5.2.2",
+    "darkdetect==0.7.1",
+    "send2trash>=1.8.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "build>=1.0.0",
+]
+
+[project.scripts]
+dmd-gif-converter = "src.engine.conversion.cli:main"
+dmd-gif-converter-ui = "src.ui.launcher:main"
+
+[project.urls]
+Homepage = "https://github.com/red77290/dmd_gif_converter"
+Repository = "https://github.com/red77290/dmd_gif_converter"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dmd_gif_converter*", "src*"]
+exclude = ["tests*", "media*", "docs*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"

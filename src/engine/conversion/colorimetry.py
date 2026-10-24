@@ -129,6 +129,9 @@ def _sample_frames(src_str: str, is_gif: bool, cv2) -> list:
     """
     cap = cv2.VideoCapture(src_str)
     if not cap.isOpened():
+        if is_gif and hasattr(cv2, "imread"):
+            img = cv2.imread(src_str)
+            return [img] if img is not None else []
         return []
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     fps_src      = float(cap.get(cv2.CAP_PROP_FPS) or 25.0)
@@ -145,6 +148,10 @@ def _sample_frames(src_str: str, is_gif: bool, cv2) -> list:
         if ok_f and frame is not None:
             frames.append(frame)
     cap.release()
+    if not frames and is_gif and hasattr(cv2, "imread"):
+        img = cv2.imread(src_str)
+        if img is not None:
+            frames.append(img)
     return frames
 
 
@@ -191,7 +198,7 @@ def analyze_and_compensate(src_path: str,
                 "OpenCV/NumPy unavailable — install opencv-python for auto-colorimetry")
 
     src_str = str(src_path)
-    is_gif  = src_str.lower().endswith(".gif")
+    is_gif  = src_str.lower().endswith((".gif", ".png", ".jpg", ".jpeg", ".webp", ".bmp"))
 
     sampled_frames = _sample_frames(src_str, is_gif, cv2)
     if not sampled_frames:

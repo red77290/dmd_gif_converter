@@ -144,7 +144,8 @@ def _terminal_log(msg: str, level: str = "info") -> None:
 
 SUPPORTED_EXTENSIONS = {
     ".gif", ".mp4", ".avi", ".mkv", ".mov", ".webm",
-    ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp"
+    ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp",
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp",
 }
 
 # ── Default parameters ─────────────────────────────────────────────────────────
@@ -206,7 +207,7 @@ DEFAULT_PARAMS = {
     "action_auto_detector_fallback": False, # fallback to hybrid if person fails
     "action_strength":     0.65,       # 0..1 tighter framing around action
     "action_smoothness":   0.98,       # 0..0.98 camera smoothing
-    "action_zoom_max":     1.0,        # max dynamic zoom factor (1.0 = no zoom into action)
+    "action_zoom_max":     1.45,       # max shot-locked detail-preserving zoom factor (1.0 = no zoom)
     "action_padding":      0.20,       # ROI padding before aspect crop
     "action_subsample_frames": 3,      # Run YOLO every N frames
     "action_intro":        1.5,        # seconds of full-frame overview before zoom-in
@@ -237,6 +238,29 @@ DEFAULT_PARAMS = {
     "text_style":           "outline",  # none | bold | outline | shadow
     "text_bg":              False,      # draw a dark background box behind text
     "text_bg_opacity":      60,         # background box opacity 0-100
+    "let_me_handle_it":     False,      # one-click full-auto mode
+}
+
+# Canonical parameter overrides for "Let Me Handle It" (matches UI _on_let_me_handle_toggle + _toggle_smart_auto)
+LET_ME_HANDLE_PARAMS = {
+    "let_me_handle_it":              True,
+    "auto_color_enabled":            True,
+    "auto_action_enabled":           True,
+    "action_intro":                  0.0,
+    "action_smart_auto_crop":        True,
+    "auto_fast_tracking":            True,
+    "action_auto_scene_type":        True,
+    "action_auto_bottom_crop":       True,
+    "action_auto_top_crop":          True,
+    "action_auto_vertical_bias":     True,
+    "action_auto_strength":          True,
+    "action_auto_smoothness":        True,
+    "action_auto_pillarbox":         True,
+    "action_auto_detector_fallback": True,
+    "dmd_visibility_score_enabled":  True,
+    "dmd_readability_score_enabled": True,
+    "dynamic_scene_detection":       False,
+    "action_zoom_max":               1.45,
 }
 
 _PRESETS = {
@@ -264,7 +288,14 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     Returns:
         (success: bool, message: str)
     """
-    p = {**DEFAULT_PARAMS, **(params or {})}
+    caller_params = dict(params or {})
+    p = {**DEFAULT_PARAMS, **caller_params}
+    if bool(p.get("let_me_handle_it", False)):
+        p.update(LET_ME_HANDLE_PARAMS)
+        if "auto_color_enabled" in caller_params:
+            p["auto_color_enabled"] = bool(caller_params["auto_color_enabled"])
+        if "auto_action_enabled" in caller_params:
+            p["auto_action_enabled"] = bool(caller_params["auto_action_enabled"])
     src_path = str(src_path)
     out_path = str(out_path)
     filename = os.path.basename(src_path)
@@ -433,10 +464,28 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         log(f"[TEXT  ] {filename} — ffmpeg drawtext unavailable (no libfreetype); "
             "using Pillow fallback", "warning")
 
-    # ── Scale (zoom-aware) ────────────────────────────────────────────────────
+    # ── Scale (zoom-aware & multi-resolution / TATE-safe) ────────────────────
     # When zoom=1.0 (default), target_w=128 — identical to previous behaviour.
     target_w_scaled = max(target_width, round(target_width * zoom / 2) * 2)   # even, ≥ target_width
     scaled_h = math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2
+
+    if not keep_original_resolution and src_h > 0:
+        top_crop_pct_pre = float(p.get("top_crop_pct", 0.0))
+        bot_crop_pct_pre = float(p.get("bottom_crop_pct", 0.15))
+        usable_frac = max(0.25, 1.0 - top_crop_pct_pre - bot_crop_pct_pre)
+        if scroll_enabled and bool(p.get("force_panorama_scroll", False)):
+            min_scaled_h = math.ceil((target_height * 1.45 / usable_frac) / 2.0) * 2
+        else:
+            min_scaled_h = target_height
+        if scaled_h < min_scaled_h:
+            target_w_scaled = max(
+                target_w_scaled,
+                math.ceil(((min_scaled_h / src_h) * src_w) / 2.0) * 2,
+            )
+            scaled_h = max(
+                min_scaled_h,
+                math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2,
+            )
 
     if scroll_enabled:
         # ── Auto-scroll (default behaviour, unchanged) ────────────────────────
@@ -452,12 +501,18 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
 
         if scroll_dist > 0:
-            step = max(1, round(p["scroll_speed"] / fps_render))
-
             # ── Cycle decomposition ───────────────────────────────────────────
             cycles   = float(p.get("scroll_cycles", 1.5))
             full_cyc = int(cycles)
             frac     = round(cycles - full_cyc, 10)
+
+            scroll_dur_req = float(p.get("scroll_duration", 0.0))
+            if scroll_dur_req > 0.0:
+                total_travel_px = max(float(scroll_dist), (2.0 * full_cyc + frac) * scroll_dist)
+                req_speed = total_travel_px / max(1.0, scroll_dur_req)
+                step = max(1, round(req_speed / fps_render))
+            else:
+                step = max(1, round(p["scroll_speed"] / fps_render))
 
             frames_one_way    = math.ceil(scroll_dist / step)
             frames_full_cycle = 2 * frames_one_way
@@ -745,7 +800,14 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     When auto_action is disabled the two phases are merged into a single pass
     (identical behaviour to the previous single-phase pipeline).
     """
-    p = {**DEFAULT_PARAMS, **(params or {})}
+    caller_params = dict(params or {})
+    p = {**DEFAULT_PARAMS, **caller_params}
+    if bool(p.get("let_me_handle_it", False)):
+        p.update(LET_ME_HANDLE_PARAMS)
+        if "auto_color_enabled" in caller_params:
+            p["auto_color_enabled"] = bool(caller_params["auto_color_enabled"])
+        if "auto_action_enabled" in caller_params:
+            p["auto_action_enabled"] = bool(caller_params["auto_action_enabled"])
     os.makedirs(str(folder_out), exist_ok=True)
 
     files = [

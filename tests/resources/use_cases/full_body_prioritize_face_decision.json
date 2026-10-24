@@ -1,5 +1,5 @@
 {
-  "task_id": "1E021",
+  "task_id": "69C08",
   "file_info": {
     "filename": "full_body_prioritize_face.gif",
     "video_width": 500,
@@ -17,13 +17,13 @@
     }
   },
   "raw_signals": {
-    "tall_ratio": 3.672,
-    "fill_ratio": 0.918,
-    "body_aspect": 2.6842105263157894,
+    "tall_ratio": 3.668,
+    "fill_ratio": 0.917,
+    "body_aspect": 2.681286549707602,
     "floor_in_lower": true,
-    "floor_var_score": 0.0016583123951777,
+    "floor_var_score": 0.0017320508075688772,
     "x_variance": 1.6875e-06,
-    "y_variance": 1.875e-05
+    "y_variance": 2.225e-05
   },
   "decisions": {
     "face_priority": {

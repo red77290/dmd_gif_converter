@@ -1,9 +1,11 @@
-# Auto Action Framing (v7.1.0)
+# Auto Action Framing
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
 
-**v5.0.0 engine improvements:**
+> For release-by-release history, see the [Release Changelog](docs/CHANGELOG.md).
+
+### Core Tracking & Framing Capabilities
 - **DMD Visibility Score** *(Priority 1)*: Before committing to any zoom, the engine simulates both the current crop and the proposed crop at target DMD resolution and computes a composite visibility score. If the proposed zoom scores less than 95% of the current view the zoom is cancelled — preventing counterproductive crops that make the subject invisible on low-resolution LED matrices.
 - **Temporal Scene Memory** *(Priority 2)*: A sliding window (default 3 s) of past ROI detections is kept. When YOLO loses the subject for a few frames the camera continues following the estimated trajectory (weighted average biased toward the most-recent detections) instead of jumping back to centre.
 - **Scene Change Detection** *(Priority 3)*: HSV histogram correlation detects hard cuts between frames. On cut: ROI history, floor estimator, and camera smoothing are all reset so stale tracking from the previous scene never bleeds into the new scene.
@@ -14,35 +16,23 @@ It creates an intermediate video that follows action/person areas at the target 
 - **Smart Platformer Mode** *(Priority 8)*: Special mode for 2-D side-scrollers. Locks the camera vertically to a steady floor level (using the asymmetric EMA estimator) and widens the horizontal view by 50% to reveal more level ahead.
 - **ROI Confidence System** *(Priority 10)*: Replaces hardcoded YOLO thresholds with a configurable minimum. Weak/flickering detections are explicitly rejected, forcing the temporal memory system to rely on smoothed trajectory data instead of twitching.
 
-**v5.0.0 improvements:**
+### Pipeline & Robustness Highlights
 - **GIF pre-conversion**: GIF sources are now transcoded to a clean H.264 MP4 via FFmpeg before OpenCV processing — eliminates `FFmpeg pipe encoding failed` errors caused by BGRA transparency palettes in GIF files.
 - **BGRA safety net**: OpenCV frames are normalised to BGR (3-channel) before being piped to FFmpeg, even if the GIF pre-conversion fallback path is taken.
 - **FFmpeg stderr capture**: In case of encoding failure, the last 300 characters of FFmpeg's stderr are included in the log for easier diagnosis.
 - **Smart Auto Crop 3-group logic**: The decision engine now uses three **mutually exclusive groups** instead of evaluating all signals simultaneously — resolving the face-priority ↔ floor-tracking architectural contradiction.
 - **Face Priority improvements**: Detection zone is now at **chin level** (20 % of body height from head top, not 32 % shoulder level). Camera uses **full frame bounds** in face-priority mode, not the restricted detection zone, preventing the camera from being locked at shoulder level.
-
-**v5.0.0 architectural improvements:**
-- Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
-- Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
-
-**v7.1.0 improvements:**
-- **Tracker Pipeline Architecture**: The monolithic `TrackingEngine` was completely refactored into a modular Pipeline pattern (Chain of Responsibility) using 12 discrete, testable stages (e.g., `DetectionStage`, `FaceClippingStage`, `LookAheadStage`).
-- **Letterbox drifting fix**: Integrated strict letterbox boundary containment to prevent the camera from panning into black bars on widescreen cinema clips, resolving eye cutoff issues on cinematic clips (such as characters like Doc/Marty in Back to the Future).
-- **Dynamic Logging**: Added real-time `[DYNAMIC]` logs tracking every camera cut and continuous scoring profile activation.
-- **Scene classification fix**: Relaxed `action_horizontal` thresholds (`fill_ratio > 0.1`) to prevent wide fight scenes from being misclassified as `talking_closeup` (which caused abrupt decapitation zooms).
-
-**v6.3.0 improvements:**
-- Continuous Scoring Matrix dynamically selects the optimal camera profile instead of relying on a rigid waterfall model.
-- Complete thread-safety for OpenCV C-level stderr suppression.
-- **Close-up hair detection**: The tracker now detects close-up shots (`roi_h > 40 % of frame height`) and clips the detection zone to skip the top 25 % (hair) and keep the 35 % below (eyes). Prevents camera drift toward forehead/hair on anime-style content.
-- **Face-priority camera fix**: `face_priority_mode` in `camera.py` now uses `cy = y + h/2.0` (ROI centre) instead of the buggy `ideal_top + crop_h/2` formula that placed the camera ~300 px below the actual face.
-- **C-level stderr suppression**: `_quiet_c_stderr()` context manager in `reader.py` uses `os.dup2` to redirect file-descriptor 2 to `/dev/null` during `cv2.VideoCapture()` construction, silencing `[mp3float @ ...] Header missing` messages that bypass Python's logging system entirely.
-
-**v6.0.0 architectural improvements:**
-- **Full OOP refactoring**: Every class now implements a strict ABC interface (`IDetector`, `ITracker`, `IRenderer`). See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for class diagrams and sequence diagrams.
-- **`DetectorFactory`**: The ONNX detector instantiation is now decoupled behind a factory — swap the backend without touching the pipeline.
-- **`TrackingEngine` implements `ITracker`**: `last_roi` and `cam_full_view` are now proper `@property` accessors, not raw attributes.
-- **`Renderer` implements `IRenderer`**: Crop and render logic is fully encapsulated.
+- **ONNX YOLOv8 nano detector**: Person detector runs on **ONNX YOLOv8 nano** (~6 MB, CPU-only), fixing macOS ARM64 crashes and eliminating false positives on animated backgrounds.
+- **Direct rawvideo FFmpeg pipe**: Intermediate encoding uses a direct rawvideo pipe to FFmpeg (H.264 ultrafast) — ~30 % faster and ~5–10× smaller intermediate.
+- **Headless library & Streaming API**: Zero-UI Docker/server execution with direct `.rgb565` and `.rgb565.stream` generation for HUB75 displays.
+- **Enhanced floor and line-of-action tracking**: Improved centering on game sprites and main characters in action/platformer scenes without ceiling/sky drift.
+- **Uncapped video duration and FPS**: Clean handling of longer clips up to 120s and high frame rates up to 60 FPS without forced 25 FPS quantization.
+- **Tracker Pipeline Architecture**: Modular Chain-of-Responsibility pipeline using discrete, testable stages (`DetectionStage`, `FaceClippingStage`, `LookAheadStage`, etc.).
+- **Letterbox containment**: Strict letterbox boundary containment prevents panning into black bars on widescreen cinema clips.
+- **Dynamic Logging**: Real-time `[DYNAMIC]` logs tracking camera cuts and continuous scoring profile activation.
+- **Scene classification**: Tuned `action_horizontal` thresholds (`fill_ratio > 0.1`) prevent wide fight scenes from being misclassified as `talking_closeup`.
+- **Continuous Scoring Matrix**: Dynamically selects the optimal camera profile instead of relying on a rigid waterfall model, with close-up hair clipping and thread-safe C-level stderr suppression.
+- **Strict OOP Interfaces**: Every component implements a strict ABC interface (`IDetector`, `ITracker`, `IRenderer`). See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for class diagrams and sequence diagrams.
 - **`AbstractDetector`**: Intermediate abstract class between `IDetector` and `_FrameDetector` — extend it to add custom backends without subclassing the concrete implementation.
 
 ---

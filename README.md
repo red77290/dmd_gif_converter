@@ -1,6 +1,6 @@
-# 🎞️ DMD GIF Converter — v7.1.0
+# 🎞️ DMD GIF Converter
 
-Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into a format optimised for a **128×32 HUB75 LED matrix panel** driven by an ESP32 (compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
+Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into formats (`.gif`, `.rgb565.stream`) optimised for **HUB75 LED matrix panels** (`128×32`, `128×64`, `256×64`, `64×64`, and vertical TATE `64×128` / `32×128`) driven by **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)**, and the companion **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** streaming server (also compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
@@ -47,7 +47,7 @@ Tired of manually cropping and adjusting videos for your low-res LED matrix? Thi
 | **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
 | **Multi-select file list** | Ctrl+click / Shift+click to select multiple files · Del removes all selected at once |
 | **Smart Conversion Lists** | Files move from **Files To Convert** to **Converted Files** automatically upon completion. |
-| **DMD Quality Score** | Converted files receive a 0-100% Quality Score and |
+| **DMD Quality Score** | Converted files receive a 0-100% Quality Score (color-coded from Red to Premium Green) based on contrast, occupancy, and shape separation. |
 | **Preview Panel** | Shows the original video, the OpenCV Auto-Action crop bounding box (if enabled), and the final DMD representation. |
 | **Cleanup Assistant** | Instantly send bad conversions (e.g. <=30%, <=50%, or custom threshold) to the trash with one click. Files and metadata are permanently removed from the disk. |
 | **Sortable List** | Click on the `File`, `Score`, or `Category` column headers in the Converted List to sort items in ascending/descending order. |
@@ -113,6 +113,10 @@ LED matrices wash out dark colors and overdrive bright ones. **Smart Color Boost
 ### [💻 CLI Automation Mastery](docs/CLI_MANUAL.md)
 Everything you can do in the UI, you can automate in the Terminal. Download GIFs straight from DuckDuckGo, process entire folders in parallel, overlay pixel-art text, and automatically trash low-quality conversions!
 👉 **[Read the CLI Manual](docs/CLI_MANUAL.md)**
+
+### [📦 Headless Python Library & `.rgb565.stream` API](docs/LIBRARY_API.md)
+Embed `dmd_gif_converter` directly inside Docker containers, FastAPI servers, or automated backends (`pip install dmd-gif-converter`) with zero GUI dependencies, and export both `.gif` and raw `.rgb565.stream` assets!
+👉 **[Read the Headless Library API Guide](docs/LIBRARY_API.md)**
 
 ### [❓ Troubleshooting & Setup](docs/TROUBLESHOOTING.md)
 Running into OpenCV or FFmpeg issues? Need help with installation on a specific OS?

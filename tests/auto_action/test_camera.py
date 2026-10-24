@@ -49,6 +49,41 @@ class TestBuildCameraRectNoRoi(unittest.TestCase):
         # With auto_vertical_bias + no floor → bias=-1 → camera pushed up
         self.assertLessEqual(cam_top, 0.1)
 
+    def test_no_roi_platformer_with_floor_anchors_on_ground_line(self):
+        """
+        Regression test for 2D arcade / Metal Slug framing (304x224 -> 128x32):
+        When floor_y_est is known (80% of frame height = 179.2), roi=None must
+        anchor the camera on the ground line (~156.4) instead of jumping to
+        the top of the screen (38.0), even when auto_vertical_bias=True.
+        """
+        fw, fh = 304, 224
+        floor_y = fh * 0.80  # 179.2
+        cfg = _default_cfg(auto_vertical_bias=True, platformer_mode=True)
+        _, cy, _, ch = _build_camera_rect(
+            fw, fh, None, cfg,
+            floor_y_est=floor_y,
+            face_priority_mode=False,
+        )
+        self.assertGreater(cy, fh * 0.60, "Camera cy must start anchored on the ground line, not at top of screen")
+        self.assertGreaterEqual(cy + ch / 2.0, floor_y, "Camera window bottom must cover the ground line")
+
+    def test_platformer_tall_roi_stays_locked_to_floor(self):
+        """
+        In platformer_mode with floor_y_est, a tall/high motion ROI (e.g. background
+        explosion or tall boss) must not yank cy up toward the top HUD.
+        """
+        fw, fh = 304, 224
+        floor_y = fh * 0.80  # 179.2
+        cfg = _default_cfg(auto_vertical_bias=True, platformer_mode=True)
+        tall_roi = (20, 15, 260, 160)
+        _, cy, _, _ = _build_camera_rect(
+            fw, fh, tall_roi, cfg,
+            floor_y_est=floor_y,
+            face_priority_mode=False,
+        )
+        self.assertAlmostEqual(cy, 156.4, delta=2.0, msg="Platformer camera must stay locked to floor line")
+
+
 
 class TestBuildCameraRectFacePriorityCloseUp(unittest.TestCase):
     """

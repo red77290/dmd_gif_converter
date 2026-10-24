@@ -36,6 +36,7 @@ class VideoAnalyzer:
         self.locked_crop_size: Optional[Tuple[float, float]] = None
         self.median_subject_height: Optional[float] = None
         self.median_subject_width: Optional[float] = None
+        self.best_detector: str = getattr(cfg, "detector", "person")
         
     def analyze(self, src_path: str) -> None:
         """Runs smart/auto crop analysis and updates configuration variables."""
@@ -55,6 +56,9 @@ class VideoAnalyzer:
             try:
                 _decision = _smart_auto_crop_decision(src_path, self.cfg, self.frame_w, self.frame_h)
                 
+                if "best_detector" in _decision and _decision["best_detector"]:
+                    self.best_detector = _decision["best_detector"]
+                    self.cfg.detector = _decision["best_detector"]
                 if "median_height" in _decision:
                     self.median_subject_height = _decision["median_height"]
                 if "median_width" in _decision:
@@ -120,14 +124,24 @@ class VideoAnalyzer:
         self.effective_frame_top = int(self.frame_h * self.tcp)
         self.effective_frame_h   = max(self.cfg.target_height, int(self.frame_h * (1.0 - self.bcp))) - self.effective_frame_top
 
-        # Compute static locked crop dimensions upfront
+        # Compute static, detail-preserving locked crop dimensions upfront (once per shot -> zero zoom pumping)
         target_ratio = float(self.cfg.target_width) / max(1, self.cfg.target_height)
-        from src.engine.auto_action.camera import _compute_base_crop_dimensions
-        max_w, max_h = _compute_base_crop_dimensions(float(self.effective_frame_w), float(self.effective_frame_h), target_ratio)
+        from src.engine.auto_action.camera import _compute_detail_preserving_crop_dimensions
+        crop_w, crop_h = _compute_detail_preserving_crop_dimensions(
+            float(self.effective_frame_w),
+            float(self.effective_frame_h),
+            self.cfg,
+            median_h=self.median_subject_height,
+            median_w=self.median_subject_width,
+        )
+        self.locked_crop_size = (crop_w, crop_h)
 
-        # DMD Invariant: Zoom is strictly and exclusively performed to adapt to the
-        # target DMD aspect ratio within the frame bounds (via _compute_base_crop_dimensions).
-        # We never zoom in on the action to guarantee the widest possible shot for comprehension
-        # given the very tight DMD screen resolutions (e.g. 128x32).
-        self.locked_crop_size = (max_w, max_h)
+        # Align intermediate pre-render output dimensions with locked_crop_size (even integers)
+        # so Renderer avoids upscale->downscale double resampling and preserves maximum pixel detail.
+        if target_ratio >= 1.0:
+            self.out_w = max(2, int(round(min(crop_w, 1920.0) / 2.0)) * 2)
+            self.out_h = max(2, int(round(self.out_w / target_ratio / 2.0)) * 2)
+        else:
+            self.out_h = max(2, int(round(min(crop_h, 1920.0) / 2.0)) * 2)
+            self.out_w = max(2, int(round(self.out_h * target_ratio / 2.0)) * 2)
 
