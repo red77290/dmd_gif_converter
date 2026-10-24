@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v8.0.0
+# 🎞️ DMD GIF Converter
 
 Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into formats (`.gif`, `.rgb565.stream`) optimised for **HUB75 LED matrix panels** (`128×32`, `128×64`, `256×64`, `64×64`, and vertical TATE `64×128` / `32×128`) driven by **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)**, and the companion **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** streaming server (also compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 

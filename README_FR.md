@@ -1,4 +1,4 @@
-# 🎞️ DMD GIF Converter — v8.0.0
+# 🎞️ DMD GIF Converter
 
 Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en formats (`.gif`, `.rgb565.stream`) optimisés pour **dalles LED HUB75** (`128×32`, `128×64`, `256×64`, `64×64` et mode vertical TATE `64×128` / `32×128`) pilotées par **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)** et le serveur compagnon **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** (également compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
@@ -63,7 +63,7 @@ Marre de recadrer manuellement vos vidéos pour votre matrice LED basse résolut
 | **🎨 Smart Color Boost** | Colorimétrie IA en un clic — ajuste automatiquement contraste, saturation et gamma |
 | **🎞️ Config par GIF** | Toggle global — quand activé, chaque fichier stocke sa propre copie indépendante de tous les ~50 paramètres · config sauvegardée instantanément au changement de sélection |
 | **Tous les paramètres standards** | Curseurs et menus pour le mode, le scroll, les FPS, la colorimétrie |
-| **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, valeurs par défaut = sortie identique à v2.0 |
+| **🔧 Paramètres avancés** | Panneau rétractable — masqué par défaut, les valeurs par défaut n'altèrent jamais le rendu standard |
 | **Batch dossier** | Convertit un dossier entier en un clic |
 | **Convertir toute la liste** | Un clic pour traiter tous les fichiers listés |
 | **Journal en temps réel** | Progression visible dans l'interface |
