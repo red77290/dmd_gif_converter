@@ -21,15 +21,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify tag matches package __version__
+      - name: Stamp package version from Git release tag
         run: |
           TAG_VER="${GITHUB_REF_NAME#v}"
+          python -c "from pathlib import Path; import re; p=Path('pyproject.toml'); p.write_text(re.sub(r'^version = \".*\"', f'version = \"{TAG_VER}\"', p.read_text(), count=1, flags=re.M)); a=Path('src/engine/api.py'); a.write_text(re.sub(r'__version__ = \".*\"', f'__version__ = \"{TAG_VER}\"', a.read_text()))"
           PKG_VER=$(python -c "import src.engine.api as a; print(a.__version__)")
-          echo "Tag version: $TAG_VER | Package version: $PKG_VER"
-          if [ "$TAG_VER" != "$PKG_VER" ]; then
-            echo "Error: git tag ($TAG_VER) does not match __version__ ($PKG_VER)"
-            exit 1
-          fi
+          echo "Stamped version from release tag: $PKG_VER"
 
       - name: Build Python Wheel and Source Distribution
         run: |

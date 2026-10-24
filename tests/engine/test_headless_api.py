@@ -30,8 +30,8 @@ from dmd_gif_converter import (
 
 
 def test_version_and_top_level_exports():
-    assert __version__ == "8.0.0"
-    assert dmd_gif_converter.__version__ == "8.0.0"
+    assert isinstance(__version__, str) and len(__version__) > 0
+    assert dmd_gif_converter.__version__ == __version__
     assert DmdMediaProcessor is not None
     assert DmdClipConfig is not None
     assert DmdProcessedAssets is not None
