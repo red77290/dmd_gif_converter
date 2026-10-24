@@ -24,7 +24,7 @@ jobs:
       - name: Stamp package version from Git release tag
         run: |
           python - <<'PY'
-          import os, re
+          import os, re, tomllib
           from pathlib import Path
 
           ver = os.environ["GITHUB_REF_NAME"].removeprefix("v")
@@ -38,9 +38,14 @@ jobs:
               path = Path(rel_path)
               if path.exists():
                   path.write_text(re.sub(pattern, repl, path.read_text(), count=1, flags=re.M))
+
+          toml_ver = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          api_match = re.search(r'^__version__\s*=\s*"([^"]+)"', Path("src/engine/api.py").read_text(), flags=re.M)
+          assert toml_ver == ver and api_match and api_match.group(1) == ver, (
+              f"Version stamp mismatch: expected {ver}, got pyproject={toml_ver}, api={api_match.group(1) if api_match else None}"
+          )
+          print(f"Stamped version from release tag: {ver}")
           PY
-          PKG_VER=$(python -c "import src.engine.api as a; print(a.__version__)")
-          echo "Stamped version from release tag: $PKG_VER"
 
       - name: Build Python Wheel and Source Distribution
         run: |
