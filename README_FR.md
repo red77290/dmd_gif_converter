@@ -1,6 +1,6 @@
 # 🎞️ DMD GIF Converter — v8.0.0
 
-Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en un format optimisé pour une **dalle LED HUB75 128×32 pixels** pilotée par un ESP32 (compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
+Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, WEBM…) en formats (`.gif`, `.rgb565.stream`) optimisés pour **dalles LED HUB75** (`128×32`, `128×64`, `256×64`, `64×64` et mode vertical TATE `64×128` / `32×128`) pilotées par **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)** et le serveur compagnon **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** (également compatible [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) et la bibliothèque [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF)).
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
@@ -187,8 +187,6 @@ pip install customtkinter Pillow "darkdetect==0.7.1" opencv-python onnxruntime d
 > `dmd_gif_converter.py` (moteur CLI) **n'a aucune dépendance externe** — bibliothèque standard Python uniquement.  
 > `opencv-python` et `onnxruntime` sont optionnels — uniquement nécessaires pour la fonctionnalité **Auto Action** IA. En leur absence, Auto Action est silencieusement ignoré.  
 > Le modèle YOLOv8n ONNX (~6 Mo) est téléchargé automatiquement dans `~/.cache/dmd_gif_converter/` au premier lancement.
-
----
 
 ---
 

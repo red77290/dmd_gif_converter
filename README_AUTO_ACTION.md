@@ -1,4 +1,4 @@
-# Auto Action Framing (v7.1.0)
+# Auto Action Framing (v8.0.0)
 
 This feature runs **before** the regular ffmpeg conversion pipeline.
 It creates an intermediate video that follows action/person areas at the target aspect ratio, then the normal DMD conversion runs on it.
@@ -24,6 +24,11 @@ It creates an intermediate video that follows action/person areas at the target 
 **v5.0.0 architectural improvements:**
 - Person detector upgraded from HOG/SVM to **ONNX YOLOv8 nano** (~6 MB, CPU-only).  Fixes macOS ARM64 crashes and eliminates false positives on animated backgrounds.
 - Intermediate encoding now uses a **direct rawvideo pipe to FFmpeg** (H.264 ultrafast). No `cv2.VideoWriter`, no bulky `mp4v` temp file — ~30 % faster and ~5–10× smaller intermediate.
+
+**v8.0.0 improvements:**
+- **Headless library and V3 Streaming API**: Zero-UI Docker/server execution with direct `.rgb565` and `.rgb565.stream` generation for HUB75 displays.
+- **Enhanced floor and line-of-action tracking**: Improved centering on game sprites and main characters in action/platformer scenes without ceiling/sky drift.
+- **Uncapped video duration and FPS**: Clean handling of longer clips up to 120s and high frame rates up to 60 FPS without forced 25 FPS quantization.
 
 **v7.1.0 improvements:**
 - **Tracker Pipeline Architecture**: The monolithic `TrackingEngine` was completely refactored into a modular Pipeline pattern (Chain of Responsibility) using 12 discrete, testable stages (e.g., `DetectionStage`, `FaceClippingStage`, `LookAheadStage`).
