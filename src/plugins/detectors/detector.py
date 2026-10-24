@@ -411,15 +411,24 @@ class _FrameDetector(AbstractDetector):
         if not contours:
             return None
 
-        frame_h = frame.shape[0]
+        frame_h, frame_w = frame.shape[:2]
 
         def score_contour(c):
             area = cv2.contourArea(c)
             if area < 120.0:
                 return 0.0
+            x, y, w, h = cv2.boundingRect(c)
+            # Reject full-frame camera scroll / global flash artifacts (>92% width and >85% height)
+            if w > frame_w * 0.92 and h > frame_h * 0.85:
+                return 0.0
+            if not platformer_mode and (w * h) < (frame_w * frame_h * 0.015):
+                return 0.0
             if platformer_mode:
-                x, y, w, h = cv2.boundingRect(c)
+                if (w > frame_w * 0.72 and h > frame_h * 0.65) or h > frame_h * 0.58:
+                    return 0.0
                 bottom_y = y + h
+                if bottom_y < frame_h * 0.30:
+                    return 0.0
                 if expected_floor_y is not None:
                     import math
                     dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)

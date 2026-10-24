@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v7.1.0)
+# DMD GIF Converter — Technical Architecture (v8.0.0)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -1012,9 +1012,9 @@ class MyPanel(ctk.CTkFrame, IPanel):
 
 ---
 
-*Last updated: v7.1.0 — June 2026*
+*Last updated: v8.0.0 — October 2026*
 
-## 12. Concurrency & Performance Engineering (v7.1.0)
+## 12. Concurrency & Performance Engineering (v8.0.0)
 
 With the introduction of batch processing and high-performance previews, several architectural constraints were implemented to maintain system stability:
 

@@ -158,7 +158,7 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
             
             action_frames = max(1, reader.total_frames - intro_frames)
             required_smoothness = 0.10 ** (1.0 / max(5, action_frames))
-            dynamic_smoothness = max(0.50, min(cfg.smoothness, required_smoothness))
+            dynamic_smoothness = max(0.50, min(float(cfg.smoothness), required_smoothness)) if float(cfg.smoothness) > 0.0 else 0.0
             
             src_idx = 0
             
@@ -184,13 +184,8 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
 
                 cam_now = tracker.process_frame(frame, cam_prev, src_idx, analyzer.out_w, analyzer.out_h)
                 
-                # Snap camera immediately to target on the first frame or on a scene change cut
-                snap_camera = False
-                if src_idx == 0:
-                    if intro_frames == 0:
-                        snap_camera = True
-                elif getattr(tracker, "frames_since_scene_change", 999) == 1:
-                    snap_camera = True
+                # Snap camera immediately to target only on the very first frame when no intro pan is used
+                snap_camera = (src_idx == 0 and intro_frames == 0)
 
                 if snap_camera:
                     cam = cam_now

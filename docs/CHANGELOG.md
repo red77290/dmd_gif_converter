@@ -1,5 +1,12 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.0] - 2026-10-23 (Headless Library, V3 Streaming API, High-FPS Video & Robust Tracking)
+### Added
+- **Headless Core & Pip Installable Library**: Full headless conversion capabilities without Tkinter/X11 dependencies for Docker, microservices, and server orchestrators.
+- **Direct RGB565 Stream Generation (`DMDS`)**: Native export of multi-frame RGB565 stream binaries for HUB75 LED matrices.
+- **Uncapped Duration & Frame Rates**: Support for video playback durations up to 120s and frame rates up to 60 FPS without forced 25 FPS quantization.
+- **Smart Framing Stabilization**: Enhanced line-of-action and sprite-level camera centering for platformers and arcade retro games.
+
 ## [7.1.0] - 2026-06-17 (AI Moments V2, Thread Safety, UI Refactoring, Tests)
 ### Fixed
 - **AI Moments Scoring**: Restored full UI slider integration (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). The engine now dynamically builds its `ScoringStrategy` to match user parameters rather than using a hardcoded preset, explicitly penalizing text/credits.
