@@ -1,5 +1,12 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.0] - 2026-10-23 (Librairie Headless, API Streaming V3, Vidéo Haut FPS & Cadrage Robuste)
+### Ajouté
+- **Cœur Headless & Librairie Python Pip** : Exécution headless complète sans dépendance Tkinter/X11 pour conteneurs Docker, microservices et orchestrateurs.
+- **Génération Directe de Flux RGB565 (`DMDS`)** : Export natif de binaires de flux RGB565 pour matrices LED HUB75.
+- **Déblocage de la Durée et des Framerates** : Prise en charge des durées de vidéo jusqu'à 120s et jusqu'à 60 FPS sans quantification GIF forcée à 25 FPS.
+- **Stabilisation du Cadrage Auto-Action** : Amélioration du centrage dynamique sur les sprites et lignes d'action pour jeux de plateforme et rétro arcade.
+
 ## [V7.1.0] - 2026-06-17 (AI Moments V2, Thread Safety, Refonte UI, Tests)
 ### Corrigé
 - **Scoring AI Moments** : Restauration de l'intégration complète des sliders de l'interface (`w_action`, `w_character`, `w_epic`, `w_dmd`, `w_loopable`). Le moteur construit désormais dynamiquement sa stratégie de score (`ScoringStrategy`) pour correspondre aux paramètres de l'utilisateur plutôt que d'utiliser un preset codé en dur, ce qui permet de pénaliser explicitement les textes/génériques.

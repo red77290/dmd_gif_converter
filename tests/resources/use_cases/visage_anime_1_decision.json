@@ -1,5 +1,5 @@
 {
-  "task_id": "29ED4",
+  "task_id": "84AF4",
   "file_info": {
     "filename": "visage_anime_1.gif",
     "video_width": 500,
@@ -22,7 +22,7 @@
     "body_aspect": 0.7727272727272727,
     "floor_in_lower": true,
     "floor_var_score": 0.0013094570021973102,
-    "x_variance": 0.0001502222222222222,
+    "x_variance": 0.0001868888888888889,
     "y_variance": 1.7146776406035667e-06
   },
   "decisions": {
