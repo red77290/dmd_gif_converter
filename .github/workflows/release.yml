@@ -23,8 +23,22 @@ jobs:
 
       - name: Stamp package version from Git release tag
         run: |
-          TAG_VER="${GITHUB_REF_NAME#v}"
-          python -c "from pathlib import Path; import re; p=Path('pyproject.toml'); p.write_text(re.sub(r'^version = \".*\"', f'version = \"{TAG_VER}\"', p.read_text(), count=1, flags=re.M)); a=Path('src/engine/api.py'); a.write_text(re.sub(r'__version__ = \".*\"', f'__version__ = \"{TAG_VER}\"', a.read_text()))"
+          python - <<'PY'
+          import os, re
+          from pathlib import Path
+
+          ver = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          targets = [
+              ("pyproject.toml", r'^version = ".*"', f'version = "{ver}"'),
+              ("src/engine/api.py", r'^__version__ = ".*"', f'__version__ = "{ver}"'),
+              ("src/ui/constants.py", r'^APP_VERSION\s*=\s*".*"', f'APP_VERSION   = "{ver}"'),
+              ("src/ui/models/application_state.py", r'^APP_VERSION\s*=\s*".*"', f'APP_VERSION = "{ver}"'),
+          ]
+          for rel_path, pattern, repl in targets:
+              path = Path(rel_path)
+              if path.exists():
+                  path.write_text(re.sub(pattern, repl, path.read_text(), count=1, flags=re.M))
+          PY
           PKG_VER=$(python -c "import src.engine.api as a; print(a.__version__)")
           echo "Stamped version from release tag: $PKG_VER"
 
@@ -36,7 +50,19 @@ jobs:
       - name: Publish GitHub Release with Wheel Artifacts
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: |
             dist/*.whl
             dist/*.tar.gz
           generate_release_notes: true
+
+      - name: Update floating 'latest' Git tag (stable releases only)
+        if: "!contains(github.ref_name, '-')"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml src/engine/api.py src/ui/constants.py src/ui/models/application_state.py
+          git commit -m "chore(release): stamp ${GITHUB_REF_NAME}" || true
+          git tag -f latest HEAD
+          git push origin refs/tags/latest --force

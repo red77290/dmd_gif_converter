@@ -8,7 +8,9 @@
 
 ### Installation Serveur / Docker Headless (Sans dépendances GUI)
 ```bash
-# Installer un tag de release depuis l'onglet GitHub Releases (recommandé en production) :
+# Installer automatiquement la dernière release stable via le tag flottant 'latest' :
+pip install "git+https://github.com/red77290/dmd_gif_converter.git@latest"
+# Ou figer un tag précis depuis l'onglet GitHub Releases :
 pip install "git+https://github.com/red77290/dmd_gif_converter.git@<release-tag>"
 # Ou depuis un clone local :
 pip install .

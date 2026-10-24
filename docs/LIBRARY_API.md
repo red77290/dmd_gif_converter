@@ -8,7 +8,9 @@
 
 ### Headless Server / Docker Installation (No GUI Dependencies)
 ```bash
-# Install a pinned release tag from the GitHub Releases tab (recommended for production):
+# Install the latest stable release automatically via the floating 'latest' Git tag:
+pip install "git+https://github.com/red77290/dmd_gif_converter.git@latest"
+# Or pin a specific release tag from the GitHub Releases tab:
 pip install "git+https://github.com/red77290/dmd_gif_converter.git@<release-tag>"
 # Or install directly from a local checkout:
 pip install .
