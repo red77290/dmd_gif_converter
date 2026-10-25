@@ -124,14 +124,15 @@ def _compute_auto_crop_margins(  # noqa: C901
     if not roi_tops:
         return 0.0, 0.0, False
 
-    face_priority = face_priority_count > len(roi_tops) * 0.5
+    is_platformer_cfg = getattr(cfg, "platformer_mode", False) is True
+    face_priority = (face_priority_count > len(roi_tops) * 0.5) and not is_platformer_cfg
     median_h = float(np.median(roi_heights))
     median_w = float(np.median(roi_widths)) if roi_widths else max(1.0, median_h)
     aspect   = median_h / max(1.0, median_w)
 
     if face_priority:
         pad_top_px    = frame_h * 0.15
-        pad_bottom_px = frame_h * 0.10
+        pad_bottom_px = frame_h * 0.25
     else:
         if aspect < 1.3:
             pad_frac = 0.15
@@ -347,6 +348,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
 
     decision_codes = {}
     
+    is_platformer_cfg = getattr(cfg, "platformer_mode", False) is True
     if scene_profile is not None:
         # Scene profile drives crop/tracking decisions
         auto_floor  = scene_profile.auto_vertical_bias
@@ -360,7 +362,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         reasons.append(f"SCENE={scene_profile.scene_type} → face_clip={scene_profile.face_clip_mode} floor={scene_profile.auto_vertical_bias}")
         decision_codes["driver"] = "scene_profile"
         
-    elif tall_ratio > TALL_FACTOR:
+    elif tall_ratio > TALL_FACTOR and not is_platformer_cfg:
         auto_bottom = True
         auto_floor  = False
         auto_top    = True
@@ -369,7 +371,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         reasons.append(f"GROUP 1 — tall-char {tall_ratio*100:.0f}% of DMD window → bottom-crop+face-priority ✓ / top-crop ✓ (narrows to head) / floor-track ✗ (contradictory)")
         decision_codes["driver"] = "tall_subject"
         
-    elif floor_in_lower and floor_var_score <= FLOOR_VAR_MAX:
+    elif is_platformer_cfg or (floor_in_lower and floor_var_score <= FLOOR_VAR_MAX):
         auto_floor  = True
         auto_top    = False
         auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
@@ -388,12 +390,16 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         reasons.append(f"GROUP 3 — no trackable floor")
         decision_codes["driver"] = "fallback"
 
-    face_priority = scene_profile.face_priority if scene_profile is not None else (tall_ratio > TALL_FACTOR)
+    face_priority = (
+        scene_profile.face_priority
+        if scene_profile is not None
+        else (tall_ratio > TALL_FACTOR and not is_platformer_cfg)
+    )
     aspect        = body_aspect
     if face_priority:
-        # Increase top padding heavily for face priority to protect tall hair
+        # Protect both tall hair above and the lower face/mouth/chin below
         pad_top_px    = frame_h * 0.35
-        pad_bottom_px = frame_h * 0.10
+        pad_bottom_px = frame_h * 0.25
     else:
         if aspect < 1.3:
             pad_frac = 0.15

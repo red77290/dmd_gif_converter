@@ -78,9 +78,9 @@ class SceneProfile:
 
     scene_type: str
     face_priority: bool          # enable face-aware camera positioning
-    face_clip_mode: str          # "none" | "closeup" | "full_body_head"
-    face_head_frac: float        # head height as fraction of body bbox
-    face_eye_offset: Optional[float]  # eye center as fraction from top of head
+    face_clip_mode: str          # "none" | "auto" | "closeup" | "full_body_head"
+    face_head_frac: Optional[float]   # expressive/head height fraction override (None = geometric default)
+    face_eye_offset: Optional[float]  # vertical offset fraction override (None = geometric default)
     platformer_mode: bool        # lock camera to stable floor
     auto_vertical_bias: bool     # enable asymmetric floor EMA
     suggested_strength: float    # tracking tightness (0–1)
@@ -96,7 +96,7 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         scene_type=SceneType.TALKING_CLOSEUP,
         face_priority=True,
         face_clip_mode="closeup",
-        face_head_frac=0.40,
+        face_head_frac=None,
         face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
@@ -108,8 +108,8 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         scene_type=SceneType.FULL_BODY_TALL,
         face_priority=True,
         face_clip_mode="full_body_head",
-        face_head_frac=0.22,
-        face_eye_offset=None,
+        face_head_frac=0.20,
+        face_eye_offset=0.19,
         platformer_mode=False,
         auto_vertical_bias=False,
         suggested_strength=0.35,
@@ -119,8 +119,8 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
     SceneType.TALKING_MEDIUM: SceneProfile(
         scene_type=SceneType.TALKING_MEDIUM,
         face_priority=True,
-        face_clip_mode="full_body_head",
-        face_head_frac=0.22,
+        face_clip_mode="auto",
+        face_head_frac=None,
         face_eye_offset=None,
         platformer_mode=False,
         auto_vertical_bias=False,
@@ -310,8 +310,10 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.TOP_DOWN_ISOMETRIC] -= 5.0
 
     if fill_ratio >= 0.50:
-        # If the subject is extremely close (fill_ratio >= 0.70), relax body aspect checks
-        if (body_aspect <= 1.4 and body_aspect >= 0.85) or fill_ratio >= 0.70:
+        # Close-up portraits (including 16:9 widescreen crops) have compact/wide
+        # aspect ratios (~0.55..1.55), whereas standing full-body characters have
+        # tall aspect ratios (> 1.60) even when filling 70%+ of the frame height.
+        if (0.55 <= body_aspect <= 1.55) or (fill_ratio >= 0.70 and body_aspect <= 1.60):
             scores[SceneType.TALKING_CLOSEUP] += 5.0
         # Only give TALKING_MEDIUM points if there is NO floor (i.e. it's truly a conversation scene)
         if not has_dialogue_floor:
@@ -353,14 +355,19 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         scores[SceneType.MENU_STATIC] -= 2.0
         
     if body_aspect > 1.6:
-        # Very tall bodies are humans/anime characters, not platformer sprites
+        # Very tall bodies are standing humans/anime characters, not platformer sprites or close-ups
         scores[SceneType.PLATFORMER] -= 3.0
+        scores[SceneType.TALKING_CLOSEUP] -= 3.0
+        if tall_ratio >= 0.60:
+            scores[SceneType.FULL_BODY_TALL] += 2.0
+            scores[SceneType.TALKING_MEDIUM] -= 1.0
     elif tall_ratio >= 0.35 and body_aspect > 1.2:
         scores[SceneType.FIGHTING_2D] += 1.0
         
-    # 3b. Wide Aspect -> Fighting / Action (not a single face)
+    # 3b. Wide Aspect -> Fighting / Action (unless it is a dominant close-up portrait/bust)
     if body_aspect < 0.85:
-        scores[SceneType.TALKING_CLOSEUP] -= 3.0
+        if fill_ratio < 0.50 or body_aspect < 0.55:
+            scores[SceneType.TALKING_CLOSEUP] -= 3.0
         scores[SceneType.ACTION_HORIZONTAL] += 1.0
         if x_variance >= 0.02:
             scores[SceneType.FIGHTING_2D] += 2.0
@@ -413,9 +420,12 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         if not has_dialogue_floor:
             scores[SceneType.PLATFORMER] -= 3.0
             if fill_ratio >= 0.4:
-                # Huge static subject -> portrait or closeup, NOT a menu
-                scores[SceneType.TALKING_CLOSEUP] += 2.0
-                scores[SceneType.TALKING_MEDIUM] += 2.0
+                # Huge static subject -> full-body portrait if tall, else talking/closeup (NOT a menu)
+                if body_aspect > 1.6:
+                    scores[SceneType.FULL_BODY_TALL] += 2.0
+                else:
+                    scores[SceneType.TALKING_CLOSEUP] += 2.0
+                    scores[SceneType.TALKING_MEDIUM] += 2.0
                 scores[SceneType.MENU_STATIC] -= 2.0
             elif fill_ratio >= 0.2:
                 scores[SceneType.TALKING_MEDIUM] += 2.0

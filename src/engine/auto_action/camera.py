@@ -174,7 +174,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
 
     if roi is None:
         cx = effective_frame_left + effective_frame_w / 2.0
-        cy = effective_frame_top + effective_frame_h / 2.0
+        scene_type_none = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
+        if face_priority_mode and scene_type_none == "talking_closeup" and abs(_bias) < 1e-4:
+            cy = effective_frame_top + effective_frame_h * 0.57
+        else:
+            cy = effective_frame_top + effective_frame_h / 2.0
         if floor_y_est is not None and (_platformer or _auto) and not face_priority_mode:
             cy = _apply_auto_floor(cy, floor_y_est, crop_h)
         else:
@@ -184,13 +188,30 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     x, y, w, h = roi
     hair_headroom = h * 0.05
     ideal_top = max(0.0, y - hair_headroom)
-    total_h = h + (y - ideal_top)
     cx = x + w / 2.0
     cy = y + h / 2.0
 
+    roi_aspect = float(h) / max(1.0, float(w))
+    is_implicit_closeup = (
+        not face_priority_mode
+        and not _platformer
+        and target_ratio >= 1.2
+        and abs(_bias) < 1e-4
+        and float(h) >= crop_h * 0.85
+        and float(h) >= float(effective_frame_h) * 0.45
+        and roi_aspect <= 1.4
+    )
+
     if face_priority_mode:
+        # `roi` has already been clipped to the expressive eye-to-mouth region
+        # (for close-ups) or head region (for full-body). Center directly on it
+        # without clamping upward toward the hairline/forehead.
         cy = y + h / 2.0
-        cy = min(cy, y + 0.25 * crop_h)
+    elif is_implicit_closeup:
+        # Mid-video cut or unclipped close-up portrait when face_priority_mode is off:
+        # anchor on the expressive eye-to-mouth band (centre ~0.57*h) instead of
+        # floor-tracking or top-clamping onto the forehead.
+        cy = y + 0.57 * h
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
@@ -199,7 +220,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
             cy = cy_floor
         elif (cy_floor - crop_h / 2.0) > ideal_top:
             scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
-            if scene_type in ("platformer", "fighting_2d", "action_horizontal") or total_h > crop_h * 0.8:
+            if scene_type in ("platformer", "fighting_2d", "action_horizontal"):
                 cy = cy_floor
             else:
                 cy = ideal_top + crop_h / 2.0

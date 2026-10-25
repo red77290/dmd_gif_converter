@@ -181,7 +181,7 @@ class FaceClippingStage(ITrackerStage):
 
 
 class FloorEstimationStage(ITrackerStage):
-    """Estimates floor level for platformer modes."""
+    """Estimates floor level for platformer and ground-tracked modes."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.floor_est is not None:
             roi_bottom = None
@@ -194,8 +194,12 @@ class FloorEstimationStage(ITrackerStage):
                     min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.42
                     if float(rh) <= float(engine.effective_frame_h) * 0.55 and bottom_val >= min_valid_bottom:
                         roi_bottom = bottom_val
-                else:
-                    roi_bottom = float(ry + min(rh, float(engine.effective_frame_h) * 0.25))
+                elif not engine.face_priority_mode:
+                    # Non-platformer ground estimation: use actual feet bottom (never ry + 0.25*H,
+                    # which falsely treated a close-up character's forehead as their shoes),
+                    # and ignore dominant close-up/tall boxes where the bottom is a chest/frame clip.
+                    if float(rh) <= float(engine.effective_frame_h) * 0.65:
+                        roi_bottom = bottom_val
             context.floor_y_est = engine.floor_est.update(roi_bottom)
 
 
@@ -245,8 +249,10 @@ class SceneClassificationStage(ITrackerStage):
                 if engine.floor_est and engine.floor_est.floor_y and engine.floor_est.floor_y > (engine.cam_frame_h * 0.5):
                     floor_in_lower = True
                 
+                target_ratio = float(engine.cfg.target_width) / max(1, engine.cfg.target_height)
+                dmd_crop_h = float(engine.frame_w) / max(0.01, target_ratio)
                 scene_signals = {
-                    "tall_ratio":      median_h / float(engine.cam_frame_h) if engine.cam_frame_h > 0 else 0.0,
+                    "tall_ratio":      median_h / max(1.0, dmd_crop_h),
                     "fill_ratio":      float(np.median(fill_ratios)),
                     "body_aspect":     median_h / max(1.0, median_w),
                     "floor_in_lower":  floor_in_lower,
@@ -268,6 +274,10 @@ class SceneClassificationStage(ITrackerStage):
                 
                 engine.cfg.scene_profile = new_profile
                 engine.cfg.scene_type = new_profile.scene_type
+                engine.cfg.face_clip_mode = new_profile.face_clip_mode
+                engine.cfg.platformer_mode = new_profile.platformer_mode
+                engine.cfg.auto_vertical_bias = new_profile.auto_vertical_bias
+                context.face_roi = engine._clip_to_face_roi(context.raw_roi)
 
 
 class DetectorFallbackStage(ITrackerStage):
@@ -523,7 +533,13 @@ class TrackingEngine(ITracker):
         return context.cam_now
 
     def _clip_to_face_roi(self, raw_roi: Optional[BoundingBox]) -> Optional[BoundingBox]:
-        """Apply face clipping based on the configured scene profile."""
+        """Apply face clipping based on box geometry and the configured scene profile.
+
+        For close-up portraits (`aspect <= 1.4`), anchors on the expressive
+        eye-to-mouth band (`[0.34*rh .. 0.80*rh]`, centred at `0.57*rh`) rather
+        than the forehead/hairline (`[0.00 .. 0.34*rh]`), so wide DMD strips
+        (`128x32`, `128x64`, `256x64`) capture both the eyes and the mouth.
+        """
         if raw_roi is None:
             return None
 
@@ -536,33 +552,48 @@ class TrackingEngine(ITracker):
 
         if clip_mode == "auto":
             clip_mode = "closeup" if aspect <= 1.4 else "full_body_head"
+        elif clip_mode == "full_body_head" and aspect <= 1.4:
+            # Self-healing guard: a compact/wide box (aspect <= 1.4) is a face or
+            # close-up portrait, never a standing full-body figure. Applying full-body
+            # head proportions (~10-20% at top) would clip pure forehead/hair.
+            clip_mode = "closeup"
+        elif clip_mode == "closeup" and aspect > 1.65:
+            # Self-healing guard: a tall vertical box (aspect > 1.65) is a standing
+            # character, not a close-up face; target the head rather than the torso.
+            clip_mode = "full_body_head"
+
+        sp = getattr(self.cfg, "scene_profile", None)
+        sp_mode = getattr(sp, "face_clip_mode", None) if sp is not None else None
 
         if clip_mode == "closeup":
-            head_frac = 0.35
-            eye_offset = 0.15  # Default to 15% down instead of 25% to avoid aiming at the mouth/chest
-            
-            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
-                if getattr(self.cfg.scene_profile, "face_eye_offset", None) is not None:
-                    eye_offset = self.cfg.scene_profile.face_eye_offset
-                if getattr(self.cfg.scene_profile, "face_head_frac", None) is not None:
-                    head_frac = self.cfg.scene_profile.face_head_frac
-                    
-            hair_skip = int(rh * eye_offset)
-            face_h    = max(8, int(rh * head_frac))
-            return BoundingBox(rx, ry + hair_skip, rw, face_h)
+            # Skip top 34% (hair + forehead) and keep 46% ([0.34..0.80] = eyes + nose + mouth).
+            eye_offset = 0.34
+            head_frac = 0.46
+
+            if sp is not None and sp_mode in ("closeup", "auto"):
+                if getattr(sp, "face_eye_offset", None) is not None:
+                    eye_offset = sp.face_eye_offset
+                if getattr(sp, "face_head_frac", None) is not None:
+                    head_frac = sp.face_head_frac
+
+            forehead_skip = int(rh * eye_offset)
+            face_h = max(8, int(rh * head_frac))
+            face_h = min(face_h, max(1, rh - forehead_skip))
+            return BoundingBox(rx, ry + forehead_skip, rw, face_h)
 
         if clip_mode == "full_body_head":
             eye_target_pct = min(0.22, max(0.08, 0.32 / (aspect + 0.6)))
             head_frac = 0.10
-            
-            if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
-                if getattr(self.cfg.scene_profile, "face_eye_offset", None) is not None:
-                    eye_target_pct = self.cfg.scene_profile.face_eye_offset
-                if getattr(self.cfg.scene_profile, "face_head_frac", None) is not None:
-                    head_frac = self.cfg.scene_profile.face_head_frac
-            
-            roi_h   = max(8, int(rh * head_frac))
+
+            if sp is not None and sp_mode in ("full_body_head", "auto"):
+                if getattr(sp, "face_eye_offset", None) is not None:
+                    eye_target_pct = sp.face_eye_offset
+                if getattr(sp, "face_head_frac", None) is not None:
+                    head_frac = sp.face_head_frac
+
+            roi_h = max(8, int(rh * head_frac))
             roi_top = max(0, int(rh * eye_target_pct - roi_h / 2.0))
+            roi_h = min(roi_h, max(1, rh - roi_top))
             return BoundingBox(rx, ry + roi_top, rw, roi_h)
 
         return raw_roi
