@@ -3,25 +3,28 @@ Comprehensive unit tests for close-up face framing across wide DMD aspect
 ratios (128x32 = 4:1, 128x64 = 2:1, 256x64 = 4:1).
 
 Verifies that:
-  1. Close-up face / portrait shots frame the expressive eye-to-mouth region
-     (~[0.34*fh .. 0.80*fh], centred near 0.57*fh) rather than the hairline and
-     forehead ([0.00 .. 0.30*fh]).
-  2. Removing the upward headroom clamp in `_build_camera_rect` preserves mouth
-     visibility even when the DMD strip height `crop_h` is smaller than `fh`.
-  3. `classify_scene()` and `_clip_to_face_roi()` handle widescreen 16:9 close-up
-     aspects (~0.60..1.40) without misapplying full-body head proportions, and
+  1. YOLOv8 `person` close-up / portrait boxes (crown/hair down to neck and upper
+     shoulders at the bottom of the frame) anchor on the expressive eye-to-mouth
+     band (`[0.23*rh .. 0.61*rh]` for wide/square close-ups, centred at `0.42*rh`,
+     and scaled smoothly upward for `1.0 < aspect <= 1.4` bust shots).
+  2. Both the eyes (`~0.26..0.35*rh`) AND the mouth (`~0.48..0.58*rh`) sit cleanly
+     inside `[cam_top, cam_bottom]` — preventing both the forehead+eyes upward bias
+     (`~0.27*rh`) and the nose+chin downward overshoot (`~0.57*rh`).
+  3. Letterboxed 2.39:1 cinema close-ups (`1920x1080` with 140px black bars) frame
+     eyes + mouth cleanly without leaking top/bottom black bars or cutting off eyes.
+  4. `classify_scene()` and `_clip_to_face_roi()` handle widescreen 16:9 close-up
+     aspects (`~0.60..1.40`) without misapplying full-body head proportions, and
      self-heal if a scene cut occurs mid-clip.
-  4. Non-`face_priority` close-ups (`auto_vertical_bias=True`) do not corrupt
-     floor estimation with `ry + 0.25 * frame_h` (forehead-as-floor regression)
-     and still frame the eye-to-mouth band.
-  5. Full-body, wide-shot, and platformer floor-locked shots remain intact.
+  5. Non-`face_priority` close-ups (`auto_vertical_bias=True`) and `roi=None`
+     intro/fallback frames also anchor on the eye-to-mouth band (`~0.42*h`), while
+     preserving full-body, wide-shot, and platformer floor-locked shots.
 """
 import unittest
 from unittest.mock import MagicMock, patch
 import numpy as np
 
 from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType, classify_scene
-from src.engine.auto_action.camera import _build_camera_rect
+from src.engine.auto_action.camera import _build_camera_rect, closeup_eye_mouth_fractions
 from src.engine.auto_action.interfaces import BoundingBox
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.plugins.trackers.tracker import TrackingEngine
@@ -41,6 +44,7 @@ def _make_engine(
     auto_vertical_bias: bool = False,
     platformer_mode: bool = False,
     dynamic_scene_detection: bool = False,
+    locked_crop_size: tuple[float, float] | None = None,
 ) -> TrackingEngine:
     profile = SCENE_PROFILES[scene_type] if scene_type else None
     cfg = AutoActionConfig(
@@ -78,6 +82,7 @@ def _make_engine(
             effective_frame_w=frame_w,
             face_priority_mode=face_priority,
             cfg=cfg,
+            locked_crop_size=locked_crop_size,
         )
     return engine
 
@@ -85,21 +90,26 @@ def _make_engine(
 class TestCloseUpEyesAndMouthFraming(unittest.TestCase):
     """End-to-end vertical crop verification on 128x32, 128x64, and 256x64 DMDs."""
 
-    def test_widescreen_closeup_covers_eyes_and_mouth_across_dmd_ratios(self):
+    def test_hd_widescreen_person_closeup_covers_eyes_and_mouth_not_forehead_or_chin(self):
         """
-        16:9 close-up portrait (496x278, face bbox [140, 12, 240, 190]):
-          - Forehead: [12 .. 69]   (0.00 .. 0.30 * fh)
-          - Eyes:     [80 .. 105]  (0.36 .. 0.49 * fh)
-          - Mouth:    [141 .. 164] (0.68 .. 0.80 * fh)
+        16:9 HD close-up person box (1920x1080, YOLOv8 person bbox [480, 60, 960, 1020]
+        from crown of hair down to neck/upper shoulders at frame bottom):
+          - Hair & forehead: [60 .. 284]   (0.00 .. 0.22 * rh)
+          - Eyes:            [325 .. 417]  (0.26 .. 0.35 * rh)
+          - Nose:            [427 .. 529]  (0.36 .. 0.46 * rh)
+          - Mouth:           [550 .. 652]  (0.48 .. 0.58 * rh)
+          - Chin & neck:     [733 .. 1080] (0.66 .. 1.00 * rh)
         On 128x32 (4:1), 256x64 (4:1), and 128x64 (2:1), the camera strip must
-        include both eyes and mouth rather than focusing on the forehead.
+        capture 100% of both eyes and mouth while avoiding forehead-only or
+        nose+chin framing.
         """
-        fw, fh_frame = 496, 278
-        fx, fy, fw_box, fh_box = 140, 12, 240, 190
-        forehead_band = (fy, fy + 0.30 * fh_box)
-        eyes_band = (fy + 0.36 * fh_box, fy + 0.49 * fh_box)
-        mouth_band = (fy + 0.68 * fh_box, fy + 0.80 * fh_box)
-        expressive_band = (fy + 0.35 * fh_box, fy + 0.80 * fh_box)
+        fw, fh_frame = 1920, 1080
+        rx, ry, rw, rh = 480, 60, 960, 1020
+        forehead_band = (ry, ry + 0.22 * rh)
+        eyes_band = (ry + 0.26 * rh, ry + 0.35 * rh)
+        mouth_band = (ry + 0.48 * rh, ry + 0.58 * rh)
+        expressive_band = (eyes_band[0], mouth_band[1])
+        neck_band = (ry + 0.72 * rh, ry + rh)
 
         for target_w, target_h in [(128, 32), (256, 64), (128, 64)]:
             with self.subTest(dmd=f"{target_w}x{target_h}"):
@@ -111,7 +121,7 @@ class TestCloseUpEyesAndMouthFraming(unittest.TestCase):
                     face_priority=True,
                     scene_type=SceneType.TALKING_CLOSEUP,
                 )
-                engine.detector.detect = MagicMock(return_value=BoundingBox(fx, fy, fw_box, fh_box))
+                engine.detector.detect = MagicMock(return_value=BoundingBox(rx, ry, rw, rh))
                 frame = np.zeros((fh_frame, fw, 3), dtype=np.uint8)
 
                 _, cy, _, ch = engine.process_frame(
@@ -120,39 +130,69 @@ class TestCloseUpEyesAndMouthFraming(unittest.TestCase):
                 cam_top = cy - ch / 2.0
                 cam_bottom = cy + ch / 2.0
 
-                # Both eyes and mouth must sit comfortably inside the selected DMD strip
+                # Anti-nose+chin check: eyes MUST NOT be cut off at the top
                 self.assertLessEqual(
                     cam_top, eyes_band[0],
                     f"{target_w}x{target_h}: cam_top={cam_top:.1f} cut into eyes={eyes_band}",
                 )
+                # Anti-forehead check: mouth MUST NOT be cut off at the bottom
                 self.assertGreaterEqual(
                     cam_bottom, mouth_band[1],
                     f"{target_w}x{target_h}: cam_bottom={cam_bottom:.1f} cut off mouth={mouth_band}",
                 )
 
-                # Expressive eye-to-mouth coverage must cover nearly 100% of [0.35..0.80]
-                # and strictly exceed forehead coverage ([0.00..0.30]). On 4:1 strips
-                # (ch < fh_box), forehead overlap is nearly zero (> 2.5x ratio).
                 forehead_cov = _overlap_1d(cam_top, cam_bottom, *forehead_band)
                 expressive_cov = _overlap_1d(cam_top, cam_bottom, *expressive_band)
+                neck_cov = _overlap_1d(cam_top, cam_bottom, *neck_band)
                 expressive_span = expressive_band[1] - expressive_band[0]
-                self.assertGreaterEqual(
-                    expressive_cov / expressive_span, 0.95,
-                    f"{target_w}x{target_h}: expected >=95% of eye-to-mouth band covered",
-                )
-                min_ratio = 2.5 if ch < fh_box else 1.4
-                self.assertGreater(
-                    expressive_cov, forehead_cov * min_ratio,
-                    f"{target_w}x{target_h}: too much forehead ({forehead_cov:.1f}px) vs "
-                    f"eyes+mouth ({expressive_cov:.1f}px)",
-                )
 
-    def test_extreme_fullscreen_closeup_excludes_upper_forehead_on_4_to_1_dmd(self):
+                self.assertGreaterEqual(expressive_cov / expressive_span, 0.99)
+                min_ratio = 2.5 if ch < rh * 0.55 else 1.4
+                self.assertGreater(expressive_cov, forehead_cov * min_ratio)
+                if ch < rh * 0.55:
+                    # On 4:1 DMD strips (ch=480), neck/collar below chin must stay excluded
+                    self.assertEqual(neck_cov, 0.0)
+
+    def test_letterboxed_cinema_closeup_frames_eyes_and_mouth_without_black_bars(self):
         """
-        Extreme close-up filling almost the entire 640x480 frame (face bbox [40, 0, 560, 460]):
-        On 128x32 (crop_h = 160 px < fh = 460 px), the 160 px strip cannot span the
-        entire head, so it MUST skip the forehead ([0 .. 138 px]) and centre on the
-        eye-to-mouth bridge (~0.57 * fh = 262 px -> [182 .. 342 px]).
+        2.39:1 cinema trailer encoded inside 1920x1080 (140px black bars top/bottom,
+        active picture y=[140..940], person close-up bbox [520, 145, 880, 795]):
+        On 128x32 (crop_h=480), both eyes and mouth must sit cleanly inside the strip
+        with zero black-bar leakage.
+        """
+        fw, fh_frame = 1920, 1080
+        rx, ry, rw, rh = 520, 145, 880, 795
+        eyes_band = (ry + 0.26 * rh, ry + 0.35 * rh)
+        mouth_band = (ry + 0.48 * rh, ry + 0.58 * rh)
+
+        engine = _make_engine(
+            frame_w=fw,
+            frame_h=fh_frame,
+            target_w=128,
+            target_h=32,
+            face_priority=True,
+            scene_type=SceneType.TALKING_CLOSEUP,
+        )
+        engine.detector.detect = MagicMock(return_value=BoundingBox(rx, ry, rw, rh))
+        frame = np.zeros((fh_frame, fw, 3), dtype=np.uint8)
+
+        _, cy, _, ch = engine.process_frame(frame, engine.cam_full_view, src_idx=0, out_w=128, out_h=32)
+        cam_top = cy - ch / 2.0
+        cam_bottom = cy + ch / 2.0
+
+        self.assertGreaterEqual(cam_top, 140.0, "Top letterbox bar leaked into DMD crop")
+        self.assertLessEqual(cam_bottom, 940.0, "Bottom letterbox bar leaked into DMD crop")
+        self.assertLessEqual(cam_top, eyes_band[0])
+        self.assertGreaterEqual(cam_bottom, mouth_band[1])
+
+    def test_extreme_4_by_3_closeup_captures_both_eyes_and_mouth_on_4_to_1_dmd(self):
+        """
+        Tight 4:3 close-up (640x480, person bbox [40, 0, 560, 460]):
+        On 128x32 (crop_h = 160 px = 0.348 * rh), the narrow 160 px strip must:
+          - Skip the upper forehead ([0 .. 0.22*rh = 101 px]),
+          - Include the eyes ([0.26*rh .. 0.35*rh = 120 .. 161 px]),
+          - Include the mouth ([0.48*rh .. 0.58*rh = 221 .. 267 px]),
+          - Exclude the lower chin & neck ([0.65*rh .. 1.00*rh = 299 .. 460 px]).
         """
         fw, fh_frame = 640, 480
         face_box = BoundingBox(40, 0, 560, 460)
@@ -171,39 +211,50 @@ class TestCloseUpEyesAndMouthFraming(unittest.TestCase):
         cam_top = cy - ch / 2.0
         cam_bottom = cy + ch / 2.0
 
-        # Upper 30% forehead ([0 .. 138]) must be completely outside the 128x32 strip
-        self.assertGreater(
-            cam_top, 0.30 * 460,
-            f"Extreme close-up cam_top={cam_top:.1f} still includes forehead ([0..138])",
-        )
-        # Camera centre must sit in the eye-to-mouth zone [0.50*fh .. 0.65*fh]
-        self.assertGreaterEqual(cy, 0.50 * 460)
-        self.assertLessEqual(cy, 0.65 * 460)
-        # Lower mouth region (~0.72*fh = 331 px) must be visible inside cam_bottom
-        self.assertGreaterEqual(cam_bottom, 0.72 * 460)
+        self.assertGreater(cam_top, 0.22 * 460, "Upper forehead should stay outside 4:1 strip")
+        self.assertLessEqual(cam_top, 0.26 * 460, "Eyes top must not be cut off")
+        self.assertGreaterEqual(cam_bottom, 0.58 * 460, "Mouth bottom must not be cut off")
+        self.assertLess(cam_bottom, 0.65 * 460, "Chin/neck should stay outside 4:1 strip")
 
-    def test_extreme_closeup_on_128x64_captures_full_eyes_and_mouth(self):
-        """On 128x64 (2:1, crop_h = 320 px), an extreme 460 px face captures both eyes and mouth."""
-        fw, fh_frame = 640, 480
-        face_box = BoundingBox(40, 0, 560, 460)
+    def test_bust_medium_closeup_scales_upward_to_preserve_eyes_when_zoomed(self):
+        """
+        Head-and-shoulders bust shot (`aspect = 1.25`, rw=720, rh=900 in 1920x1080)
+        under TALKING_MEDIUM (`1.25x` zoom -> crop_h = 384 px):
+        Because upper chest enters the bottom of `rh`, eyes sit higher (~0.21..0.28*rh)
+        and mouth sits around ~0.39..0.46*rh. Aspect-aware scaling keeps both inside.
+        """
+        fw, fh_frame = 1920, 1080
+        rx, ry, rw, rh = 600, 90, 720, 900
         engine = _make_engine(
             frame_w=fw,
             frame_h=fh_frame,
             target_w=128,
-            target_h=64,
+            target_h=32,
             face_priority=True,
-            scene_type=SceneType.TALKING_CLOSEUP,
+            scene_type=SceneType.TALKING_MEDIUM,
+            locked_crop_size=(1536.0, 384.0),
         )
-        engine.detector.detect = MagicMock(return_value=face_box)
+        engine.detector.detect = MagicMock(return_value=BoundingBox(rx, ry, rw, rh))
         frame = np.zeros((fh_frame, fw, 3), dtype=np.uint8)
 
-        _, cy, _, ch = engine.process_frame(frame, engine.cam_full_view, src_idx=0, out_w=128, out_h=64)
+        _, cy, _, ch = engine.process_frame(frame, engine.cam_full_view, src_idx=0, out_w=128, out_h=32)
         cam_top = cy - ch / 2.0
         cam_bottom = cy + ch / 2.0
 
-        # Eyes (~0.38*fh = 175 px) and mouth (~0.76*fh = 350 px) both inside [cam_top, cam_bottom]
-        self.assertLessEqual(cam_top, 0.38 * 460)
-        self.assertGreaterEqual(cam_bottom, 0.78 * 460)
+        self.assertLessEqual(cam_top, ry + 0.21 * rh, "Bust shot eyes must remain inside zoomed strip")
+        self.assertGreaterEqual(cam_bottom, ry + 0.46 * rh, "Bust shot mouth must remain inside zoomed strip")
+
+    def test_talking_closeup_intro_full_view_anchors_on_eyes_and_mouth_not_chin(self):
+        """When roi is None on intro/missed frames, TALKING_CLOSEUP centers at 0.42*H (not 0.57*H)."""
+        engine = _make_engine(
+            frame_w=1920,
+            frame_h=1080,
+            target_w=128,
+            target_h=32,
+            face_priority=True,
+            scene_type=SceneType.TALKING_CLOSEUP,
+        )
+        self.assertAlmostEqual(engine.cam_full_view[1], 1080 * 0.42, delta=1.0)
 
 
 class TestSceneClassificationAndSelfHealing(unittest.TestCase):
@@ -257,10 +308,11 @@ class TestSceneClassificationAndSelfHealing(unittest.TestCase):
             face_priority=True,
             scene_type=SceneType.FULL_BODY_TALL,
         )
-        clipped = engine._clip_to_face_roi(BoundingBox(140, 10, 240, 187))
+        clipped = engine._clip_to_face_roi(BoundingBox(100, 12, 280, 266))
         self.assertIsNotNone(clipped)
-        self.assertEqual(clipped.y, 10 + int(187 * 0.34))
-        self.assertEqual(clipped.h, int(187 * 0.46))
+        eye_off, band_frac = closeup_eye_mouth_fractions(266 / 280)
+        self.assertEqual(clipped.y, 12 + int(266 * eye_off))
+        self.assertEqual(clipped.h, int(266 * band_frac))
 
     def test_closeup_profile_self_heals_when_given_tall_standing_roi(self):
         """
@@ -283,13 +335,12 @@ class TestSceneClassificationAndSelfHealing(unittest.TestCase):
 class TestNonFacePriorityCloseUpAndNonRegression(unittest.TestCase):
     """Protects mid-trailer close-up cuts and preserves wide/platformer framing."""
 
-    def test_non_face_priority_closeup_does_not_treat_forehead_as_floor(self):
+    def test_non_face_priority_closeup_frames_eyes_and_mouth_without_sinking_to_chin(self):
         """
-        Regression test for FloorEstimationStage + _build_camera_rect:
-        Previously, when face_priority_mode=False and auto_vertical_bias=True
-        (e.g., ACTION_MOVING cutting to a close-up), FloorEstimationStage set
-        roi_bottom = ry + 0.25 * frame_h (= forehead!) and _apply_auto_floor
-        pinned cam_bottom to the forehead. Now it must frame eyes + mouth.
+        When face_priority_mode=False and auto_vertical_bias=True (e.g., ACTION_MOVING
+        cutting briefly to a close-up portrait [100, 12, 280, 266] in 496x278),
+        FloorEstimationStage + _build_camera_rect must neither clamp onto the forehead
+        nor sink to the nose+chin (0.57*rh), capturing both eyes and mouth cleanly.
         """
         engine = _make_engine(
             frame_w=496,
@@ -299,17 +350,16 @@ class TestNonFacePriorityCloseUpAndNonRegression(unittest.TestCase):
             face_priority=False,
             scene_type=SceneType.ACTION_MOVING,
         )
-        # Close-up face box [140, 12, 240, 190]
-        engine.detector.detect = MagicMock(return_value=BoundingBox(140, 12, 240, 190))
+        rx, ry, rw, rh = 100, 12, 280, 266
+        engine.detector.detect = MagicMock(return_value=BoundingBox(rx, ry, rw, rh))
         frame = np.zeros((278, 496, 3), dtype=np.uint8)
 
         _, cy, _, ch = engine.process_frame(frame, engine.cam_full_view, src_idx=0, out_w=128, out_h=32)
         cam_top = cy - ch / 2.0
         cam_bottom = cy + ch / 2.0
 
-        # Must cover eyes (~85 px) and mouth (~155 px), NOT clamp cam_bottom to forehead (~81 px)
-        self.assertLessEqual(cam_top, 85.0)
-        self.assertGreaterEqual(cam_bottom, 165.0)
+        self.assertLessEqual(cam_top, ry + 0.26 * rh)
+        self.assertGreaterEqual(cam_bottom, ry + 0.58 * rh)
 
     def test_wide_shot_small_character_still_tracks_ground_feet(self):
         """Wide/medium shot with a small walking character keeps feet anchored near floor."""
@@ -321,7 +371,6 @@ class TestNonFacePriorityCloseUpAndNonRegression(unittest.TestCase):
             smoothness=0.0,
         )
         cfg.scene_profile = SCENE_PROFILES[SceneType.WIDE_SHOT]
-        # Small character (w=50, h=90) standing with feet at y=410 in 640x480
         roi = BoundingBox(280, 320, 50, 90)
         _, cy, _, ch = _build_camera_rect(
             640, 480, roi, cfg, floor_y_est=410.0, face_priority_mode=False
@@ -341,7 +390,6 @@ class TestNonFacePriorityCloseUpAndNonRegression(unittest.TestCase):
             face_priority=False,
             scene_type=SceneType.PLATFORMER,
         )
-        # Feed ground-standing sprite first, then wide explosion/jump ROI
         frame = np.zeros((224, 304, 3), dtype=np.uint8)
         engine.detector.detect = MagicMock(return_value=BoundingBox(120, 140, 32, 44))
         cam1 = engine.process_frame(frame, engine.cam_full_view, src_idx=0, out_w=128, out_h=32)
@@ -351,13 +399,12 @@ class TestNonFacePriorityCloseUpAndNonRegression(unittest.TestCase):
 
         self.assertAlmostEqual(cam1[1], cam2[1], delta=2.0)
 
-
     def test_dynamic_scene_cut_to_closeup_syncs_clip_mode_and_frames_eyes_mouth(self):
         """
         When dynamic_scene_detection=True detects a cut from ACTION_MOVING
         (face_clip_mode='none', auto_vertical_bias=True) into a close-up face,
         SceneClassificationStage must sync face_clip_mode and re-clip face_roi
-        on the cut evaluation frame.
+        on the cut evaluation frame to frame eyes + mouth.
         """
         engine = _make_engine(
             frame_w=496,
@@ -368,21 +415,22 @@ class TestNonFacePriorityCloseUpAndNonRegression(unittest.TestCase):
             scene_type=SceneType.ACTION_MOVING,
             dynamic_scene_detection=True,
         )
+        rx, ry, rw, rh = 100, 12, 280, 266
         engine.roi_history_enabled = True
         engine.roi_history_max_len = 5
         for _ in range(4):
-            engine.roi_history.append((1.0, BoundingBox(140, 12, 240, 190)))
-        engine.frames_since_scene_change = 4  # SceneChangeStage increments to 5 == wait_frames
+            engine.roi_history.append((1.0, BoundingBox(rx, ry, rw, rh)))
+        engine.frames_since_scene_change = 4
 
-        engine.detector.detect = MagicMock(return_value=BoundingBox(140, 12, 240, 190))
+        engine.detector.detect = MagicMock(return_value=BoundingBox(rx, ry, rw, rh))
         frame = np.zeros((278, 496, 3), dtype=np.uint8)
         _, cy, _, ch = engine.process_frame(frame, engine.cam_full_view, src_idx=5, out_w=128, out_h=32)
 
         self.assertEqual(engine.cfg.scene_type, SceneType.TALKING_CLOSEUP)
         self.assertEqual(engine.cfg.face_clip_mode, "closeup")
         self.assertFalse(engine.cfg.auto_vertical_bias)
-        self.assertLessEqual(cy - ch / 2.0, 85.0)
-        self.assertGreaterEqual(cy + ch / 2.0, 165.0)
+        self.assertLessEqual(cy - ch / 2.0, ry + 0.26 * rh)
+        self.assertGreaterEqual(cy + ch / 2.0, ry + 0.58 * rh)
 
 
 if __name__ == "__main__":

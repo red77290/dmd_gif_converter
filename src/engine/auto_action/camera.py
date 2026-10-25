@@ -6,6 +6,33 @@ from src.engine.analysis.analysis import _clamp
 # Minimum source pixels per target DMD pixel to prevent upscaling / interpolation blur
 _MIN_DETAIL_SRC_PER_DMD_PX = 1.75
 
+# Canonical close-up eyes-to-mouth vertical band inside a YOLOv8 `person` close-up ROI.
+# In real close-up / portrait shots (`aspect = rh / rw <= 1.4`), a `person` box spans from
+# crown/hair (`0.00*rh`) down to the neck and upper shoulders at the frame bottom (`1.00*rh`):
+#   - Hair & forehead: ~0.00 .. 0.22 * rh
+#   - Eyes & eyebrows: ~0.25 .. 0.35 * rh
+#   - Nose:            ~0.36 .. 0.46 * rh
+#   - Mouth / lips:    ~0.48 .. 0.58 * rh
+#   - Chin & neck:     ~0.64 .. 1.00 * rh
+# Anchoring on `[0.23..0.61]*rh` (midpoint `0.42*rh`) centers wide DMD strips (4:1 / 2:1)
+# across both the eyes and the mouth instead of framing eyes+forehead (~0.27*rh) or
+# nose+chin (~0.57*rh).
+_CLOSEUP_BASE_EYE_OFFSET = 0.23
+_CLOSEUP_BASE_BAND_FRAC = 0.38
+_CLOSEUP_DEFAULT_CENTER_FRAC = _CLOSEUP_BASE_EYE_OFFSET + (_CLOSEUP_BASE_BAND_FRAC / 2.0)  # 0.42
+
+
+def closeup_eye_mouth_fractions(aspect: float) -> Tuple[float, float]:
+    """Return `(eye_offset, head_frac)` for a close-up `person` ROI of `aspect = rh / rw`.
+
+    For wide/square close-ups (`aspect <= 1.0`), returns `(0.23, 0.38)` (`[0.23..0.61]*rh`,
+    centred at `0.42*rh`). For taller bust / head-and-shoulders close-ups (`1.0 < aspect <= 1.4`),
+    additional upper chest enters the bottom of `rh` while shoulder width `rw` remains constant,
+    so the eye-to-mouth band scales smoothly upward with `aspect`.
+    """
+    scale = 1.0 / (1.0 + 0.50 * max(0.0, float(aspect) - 1.0))
+    return _CLOSEUP_BASE_EYE_OFFSET * scale, _CLOSEUP_BASE_BAND_FRAC * scale
+
 
 def _compute_base_crop_dimensions(eff_w: float, eff_h: float, target_ratio: float) -> Tuple[float, float]:
     """Compute maximum crop window dimensions fitting within effective frame bounds for any aspect ratio."""
@@ -176,7 +203,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cx = effective_frame_left + effective_frame_w / 2.0
         scene_type_none = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
         if face_priority_mode and scene_type_none == "talking_closeup" and abs(_bias) < 1e-4:
-            cy = effective_frame_top + effective_frame_h * 0.57
+            cy = effective_frame_top + effective_frame_h * _CLOSEUP_DEFAULT_CENTER_FRAC
         else:
             cy = effective_frame_top + effective_frame_h / 2.0
         if floor_y_est is not None and (_platformer or _auto) and not face_priority_mode:
@@ -209,9 +236,10 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cy = y + h / 2.0
     elif is_implicit_closeup:
         # Mid-video cut or unclipped close-up portrait when face_priority_mode is off:
-        # anchor on the expressive eye-to-mouth band (centre ~0.57*h) instead of
-        # floor-tracking or top-clamping onto the forehead.
-        cy = y + 0.57 * h
+        # anchor on the expressive eye-to-mouth band (~0.42*h for wide/square close-ups,
+        # scaled for bust shots) instead of floor-tracking onto forehead or sinking to chin.
+        eye_off, band_frac = closeup_eye_mouth_fractions(roi_aspect)
+        cy = y + (eye_off + band_frac / 2.0) * h
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)

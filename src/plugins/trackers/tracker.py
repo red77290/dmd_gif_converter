@@ -37,7 +37,7 @@ class SceneChangeScore:
 
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.plugins.detectors.detector import _FrameDetector, DetectorFactory
-from src.engine.auto_action.camera import _build_camera_rect, _apply_look_ahead
+from src.engine.auto_action.camera import _build_camera_rect, _apply_look_ahead, closeup_eye_mouth_fractions
 from src.engine.analysis.analysis import _FloorEstimator, _clamp
 from src.engine.auto_action.interfaces import ITracker, BoundingBox, CamRect
 from src.engine.auto_action.renderer import Renderer
@@ -535,10 +535,12 @@ class TrackingEngine(ITracker):
     def _clip_to_face_roi(self, raw_roi: Optional[BoundingBox]) -> Optional[BoundingBox]:
         """Apply face clipping based on box geometry and the configured scene profile.
 
-        For close-up portraits (`aspect <= 1.4`), anchors on the expressive
-        eye-to-mouth band (`[0.34*rh .. 0.80*rh]`, centred at `0.57*rh`) rather
-        than the forehead/hairline (`[0.00 .. 0.34*rh]`), so wide DMD strips
-        (`128x32`, `128x64`, `256x64`) capture both the eyes and the mouth.
+        For close-up `person` portraits (`aspect <= 1.4`), anchors on the expressive
+        eye-to-mouth band (`[0.23*rh .. 0.61*rh]` for wide/square close-ups, centred at
+        `0.42*rh`, and scaled smoothly upward for `1.0 < aspect <= 1.4` bust shots where
+        upper chest enters `rh`) so wide DMD strips (`128x32`, `128x64`, `256x64`) frame
+        both the eyes and the mouth without drifting up into the forehead or down onto
+        the nose and chin.
         """
         if raw_roi is None:
             return None
@@ -566,9 +568,7 @@ class TrackingEngine(ITracker):
         sp_mode = getattr(sp, "face_clip_mode", None) if sp is not None else None
 
         if clip_mode == "closeup":
-            # Skip top 34% (hair + forehead) and keep 46% ([0.34..0.80] = eyes + nose + mouth).
-            eye_offset = 0.34
-            head_frac = 0.46
+            eye_offset, head_frac = closeup_eye_mouth_fractions(aspect)
 
             if sp is not None and sp_mode in ("closeup", "auto"):
                 if getattr(sp, "face_eye_offset", None) is not None:

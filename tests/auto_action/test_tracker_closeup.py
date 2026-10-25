@@ -3,8 +3,9 @@ Unit tests for tracker.py face-detection clip logic (v6.1.0+).
 
 Regression coverage:
   - face_priority_mode + face/head close-up (bbox aspect <= 1.4): tracker must
-    skip forehead/hair (top 34 %) and keep the expressive eye-to-mouth region
-    (46 %, spanning [0.34*rh .. 0.80*rh]).
+    skip hair/upper forehead (top 23 % for wide/square close-ups, scaled smoothly
+    for bust aspects 1.0..1.4) and keep the expressive eye-to-mouth region
+    (38 %, spanning [0.23*rh .. 0.61*rh], centred at 0.42*rh).
   - face_priority_mode + full-body shot (bbox aspect > 1.4): tracker must
     extract the head/eye zone near the top of the body bbox rather than
     centering on the waist/chest.
@@ -91,9 +92,9 @@ class TestTrackerCloseUpClip(unittest.TestCase):
 
     def test_closeup_clips_to_eye_region(self):
         """
-        Face close-up: bbox (rw=540, rh=460) → aspect 0.85 <= 1.4.
-        Clip skips forehead/hair (top 34 %) and keeps eye-to-mouth region (46 %).
-        Expected: ry_new = 0 + 156, rh_new = 211.
+        Face close-up: bbox (rw=540, rh=460) → aspect 0.85 <= 1.0.
+        Clip skips hair/upper forehead (top 23 %) and keeps eye-to-mouth region (38 %),
+        centred at 0.42 * rh (avoiding both 0.27*rh forehead and 0.57*rh nose+chin).
         """
         original = (50, 0, 540, 460)   # wide face bbox, aspect ≈ 0.85
         result = self._get_processed_roi(original, frame_h=480)
@@ -102,33 +103,31 @@ class TestTrackerCloseUpClip(unittest.TestCase):
         rx, ry, rw, rh = result
         orig_rh = 460
 
-        # Check forehead/hair was skipped and eye-to-mouth band retained
-        expected_skip = int(orig_rh * 0.34)
-        expected_h    = max(8, int(orig_rh * 0.46))
+        expected_skip = int(orig_rh * 0.23)
+        expected_h    = max(8, int(orig_rh * 0.38))
 
         self.assertEqual(ry, 0 + expected_skip,
-                         f"ry should skip top 34 % (forehead/hair) of original bbox. "
+                         f"ry should skip top 23 % (hair/upper forehead) of original bbox. "
                          f"Got {ry}, expected {0 + expected_skip}")
         self.assertEqual(rh, expected_h,
-                         f"rh should be 46 % (eye-to-mouth band) of original bbox. "
+                         f"rh should be 38 % (eye-to-mouth band) of original bbox. "
                          f"Got {rh}, expected {expected_h}")
 
     def test_closeup_is_not_top_28_percent(self):
-        """Face close-up (aspect <= 1.4) must NOT use the old top-28 % formula (= hair/forehead)."""
+        """Face close-up (aspect <= 1.4) must NOT use the old top-28 % formula (= hair/forehead) nor 0.57 chin centre."""
         original = (50, 0, 540, 460)
         result = self._get_processed_roi(original, frame_h=480)
         rx, ry, rh_clip = result[0], result[1], result[3]
 
-        old_clip_h = max(8, int(460 * 0.28))  # old formula: 128 px (hair)
-        new_clip_h = max(8, int(460 * 0.46))  # eye-to-mouth formula: 211 px
+        old_clip_h = max(8, int(460 * 0.28))  # legacy formula: 128 px (hair)
+        new_clip_h = max(8, int(460 * 0.38))  # eye-to-mouth formula: 174 px
 
-        # The clipped height should match the eye-to-mouth close-up formula
         self.assertEqual(rh_clip, new_clip_h,
-                         "Face close-up should use 46 % eye-to-mouth clip height, not 28 %")
+                         "Face close-up should use 38 % eye-to-mouth clip height, not 28 %")
         self.assertNotEqual(rh_clip, old_clip_h)
-        # And ry must skip the entire forehead band ([0..30 %])
-        self.assertGreaterEqual(ry, int(460 * 0.30),
-                                "ry must skip the forehead band (>= 30 % of face height)")
+        center_frac = (ry + rh_clip / 2.0) / 460.0
+        self.assertGreater(center_frac, 0.38, "Centre must sit below forehead (> 0.38*rh)")
+        self.assertLess(center_frac, 0.48, "Centre must not sink onto nose/chin (< 0.48*rh)")
 
     def test_full_body_shot_clips_to_head_eye_region(self):
         """
@@ -203,13 +202,13 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
     def test_square_bbox_uses_face_closeup_clip(self):
         """
         Square bbox (rw=200, rh=200) → aspect 1.0 <= 1.4 → face close-up path.
-        Must skip forehead (34 %) + keep eye-to-mouth region (46 %).
+        Must skip hair/upper forehead (23 %) + keep eye-to-mouth region (38 %).
         """
         result = self._get_roi((50, 0, 200, 200), frame_h=480)
         self.assertIsNotNone(result)
-        expected_skip = int(200 * 0.34)   # 68
-        expected_h    = max(8, int(200 * 0.46))  # 92
-        self.assertEqual(result[1], expected_skip, "ry should skip forehead for square bbox")
+        expected_skip = int(200 * 0.23)   # 46
+        expected_h    = max(8, int(200 * 0.38))  # 76
+        self.assertEqual(result[1], expected_skip, "ry should skip hair/upper forehead for square bbox")
         self.assertEqual(result[3], expected_h,    "rh should be eye-to-mouth region for square bbox")
 
     def test_tall_bbox_uses_fullbody_head_clip(self):
@@ -229,12 +228,14 @@ class TestTrackerCloseUpThreshold(unittest.TestCase):
         self.assertEqual(result[3], expected_h,    "rh: full-body eye zone")
 
     def test_borderline_aspect_just_below_threshold_uses_face_clip(self):
-        """bbox aspect = 1.4 (border) → aspect <= 1.4 → face close-up path."""
+        """bbox aspect = 1.4 (border) → aspect <= 1.4 → aspect-scaled bust close-up path."""
+        from src.engine.auto_action.camera import closeup_eye_mouth_fractions
         # rw=100, rh=140 → aspect exactly 1.4
         result = self._get_roi((50, 0, 100, 140), frame_h=480)
         self.assertIsNotNone(result)
-        expected_skip = int(140 * 0.34)
-        expected_h    = max(8, int(140 * 0.46))
+        eye_off, band_frac = closeup_eye_mouth_fractions(1.4)
+        expected_skip = int(140 * eye_off)
+        expected_h    = max(8, int(140 * band_frac))
         self.assertEqual(result[1], expected_skip)
         self.assertEqual(result[3], expected_h)
 
