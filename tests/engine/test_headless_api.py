@@ -183,6 +183,146 @@ def test_process_poster_and_pan_backdrop(tmp_path: Path):
     assert pan_tate.height == 128
 
 
+def test_tate_panorama_left_to_right_scroll_and_zero_aspect_distortion(tmp_path: Path):
+    from dmd_gif_converter import resolve_panorama_scroll_axis
+
+    # 1. Verify orientation-driven axis matrix:
+    #    - TATE (H > W) ALWAYS scrolls left-to-right ("horizontal")
+    #    - YOKO (W > H) ALWAYS scrolls top-to-bottom ("vertical")
+    #    - Square (W == H) scrolls "horizontal" when src_w > src_h else "vertical"
+    assert resolve_panorama_scroll_axis(400, 600, 64, 128) == "horizontal"
+    assert resolve_panorama_scroll_axis(400, 600, 32, 128) == "horizontal"
+    assert resolve_panorama_scroll_axis(1280, 720, 64, 128) == "horizontal"
+    assert resolve_panorama_scroll_axis(320, 224, 64, 128) == "horizontal"
+    assert resolve_panorama_scroll_axis(320, 224, 32, 128) == "horizontal"
+    assert resolve_panorama_scroll_axis(800, 240, 64, 128) == "horizontal"
+
+    assert resolve_panorama_scroll_axis(400, 600, 128, 32) == "vertical"
+    assert resolve_panorama_scroll_axis(1280, 720, 128, 32) == "vertical"
+    assert resolve_panorama_scroll_axis(1280, 720, 128, 64) == "vertical"
+    assert resolve_panorama_scroll_axis(800, 240, 128, 64) == "vertical"
+    assert resolve_panorama_scroll_axis(800, 240, 128, 32) == "vertical"
+    assert resolve_panorama_scroll_axis(800, 200, 256, 64) == "vertical"
+
+    assert resolve_panorama_scroll_axis(1280, 720, 64, 64) == "horizontal"
+    assert resolve_panorama_scroll_axis(400, 600, 64, 64) == "vertical"
+
+    processor = DmdMediaProcessor()
+
+    # 2. Wide screenshot / marquee (360x180, 2:1) on TATE 64x128 -> MUST pan Left -> Right
+    #    Left third = RED, Center third = GREEN (with a 60x60 white square to check 1:1 ratio), Right third = BLUE
+    wide_arr = np.zeros((180, 360, 3), dtype=np.uint8)
+    wide_arr[:, :120, 0] = 240       # Left = Red
+    wide_arr[:, 120:240, 1] = 240    # Middle = Green
+    wide_arr[:, 240:, 2] = 240       # Right = Blue
+    wide_arr[60:120, 150:210, :] = 255  # 60x60 exact 1:1 square in center
+    wide_path = tmp_path / "wide_scene.png"
+    Image.fromarray(wide_arr).save(wide_path)
+
+    res_tate = processor.process_image_panorama(
+        wide_path,
+        tmp_path,
+        width=64,
+        height=128,
+        duration_s=2.5,
+        fps=16,
+        smart_color_boost=False,
+        stem="tate_ltr",
+    )
+    assert res_tate.gif_path is not None and res_tate.gif_path.exists()
+    frames_tate, _ = extract_frames_from_gif(res_tate.gif_path)
+    assert len(frames_tate) >= 20
+    assert frames_tate[0].shape == (128, 64, 3)
+
+    # Zero black bars on top or bottom
+    assert frames_tate[0][:4, :, :].max(axis=2).mean() > 120
+    assert frames_tate[0][-4:, :, :].max(axis=2).mean() > 120
+
+    first_mean = frames_tate[0].mean(axis=(0, 1))
+    mid_frame = frames_tate[len(frames_tate) // 2]
+    last_mean = frames_tate[-1].mean(axis=(0, 1))
+
+    # Starts on Left (Red dominant) and finishes on Right (Blue dominant)
+    assert first_mean[0] > first_mean[2] + 80, f"Expected Red start on left, got {first_mean}"
+    assert last_mean[2] > last_mean[0] + 80, f"Expected Blue end on right, got {last_mean}"
+
+    # Verify zero aspect-ratio distortion: 60px square in 180px height scaled uniformly to 128px height
+    # must have height ~= 60 * (128 / 180) = 42.7px (NOT stretched to 128px or squashed!)
+    white_mask = (
+        (mid_frame[:, :, 0] > 210)
+        & (mid_frame[:, :, 1] > 210)
+        & (mid_frame[:, :, 2] > 210)
+    )
+    ys, xs = np.where(white_mask)
+    assert len(ys) > 0, "Centered white square should be visible at mid-pan"
+    box_h = int(ys.max() - ys.min() + 1)
+    box_w = int(xs.max() - xs.min() + 1)
+    assert 36 <= box_h <= 48, f"Expected ~43px undistorted square height, got {box_h}"
+    assert abs(box_w - box_h) <= 6, f"Expected 1:1 undistorted square, got {box_w}x{box_h}"
+
+    # 3. Portrait jacket (200x360) on TATE 64x128 -> ALSO pans Left -> Right (never static!),
+    #    zooms to cover with zero black bars, and centers vertically!
+    port_arr = np.zeros((360, 200, 3), dtype=np.uint8)
+    port_arr[:, :90, 0] = 240    # Left = Red
+    port_arr[:, 110:, 2] = 240   # Right = Blue
+    port_arr[150:210, :, 1] = 220  # Vertical center band = Green
+    port_path = tmp_path / "portrait_jacket.png"
+    Image.fromarray(port_arr).save(port_path)
+
+    res_port = processor.process_image_panorama(
+        port_path,
+        tmp_path,
+        width=64,
+        height=128,
+        duration_s=2.5,
+        fps=16,
+        smart_color_boost=False,
+        stem="tate_jacket_ltr",
+    )
+    assert res_port.gif_path is not None
+    frames_port, _ = extract_frames_from_gif(res_port.gif_path)
+    p_first = frames_port[0].mean(axis=(0, 1))
+    p_last = frames_port[-1].mean(axis=(0, 1))
+    assert p_first[0] > p_first[2] + 40, f"Expected Left=Red start on TATE portrait jacket, got {p_first}"
+    assert p_last[2] > p_last[0] + 40, f"Expected Right=Blue end on TATE portrait jacket, got {p_last}"
+    # Zero black bars on top/bottom and green band remains vertically centered around row 64
+    assert frames_port[0][:4, :, :].max(axis=2).mean() > 100
+    assert frames_port[0][-4:, :, :].max(axis=2).mean() > 100
+    green_rows = np.where(frames_port[0][:, :, 1].mean(axis=1) > 120)[0]
+    assert len(green_rows) > 0 and abs(float(green_rows.mean()) - 63.5) <= 6.0
+
+    # 4. Wide 4:1 marquee (400x100) on YOKO 128x32 -> MUST pan Top -> Bottom (never static!),
+    #    zooming uniformly to eliminate black bars and centering horizontally!
+    yoko_marq = np.zeros((100, 400, 3), dtype=np.uint8)
+    yoko_marq[:45, :, 0] = 240    # Top = Red
+    yoko_marq[55:, :, 2] = 240    # Bottom = Blue
+    yoko_marq[:, 170:230, 1] = 230  # Horizontal center band = Green
+    yoko_path = tmp_path / "yoko_marquee.png"
+    Image.fromarray(yoko_marq).save(yoko_path)
+
+    res_yoko = processor.process_image_panorama(
+        yoko_path,
+        tmp_path,
+        width=128,
+        height=32,
+        duration_s=2.5,
+        fps=16,
+        smart_color_boost=False,
+        stem="yoko_marquee_ttb",
+    )
+    assert res_yoko.gif_path is not None
+    frames_yoko, _ = extract_frames_from_gif(res_yoko.gif_path)
+    y_first = frames_yoko[0].mean(axis=(0, 1))
+    y_last = frames_yoko[-1].mean(axis=(0, 1))
+    assert y_first[0] > y_first[2] + 50, f"Expected Top=Red start on YOKO marquee, got {y_first}"
+    assert y_last[2] > y_last[0] + 50, f"Expected Bottom=Blue end on YOKO marquee, got {y_last}"
+    # Zero black bars on left/right and green band remains horizontally centered around col 64
+    assert frames_yoko[0][:, :4, :].max(axis=2).mean() > 100
+    assert frames_yoko[0][:, -4:, :].max(axis=2).mean() > 100
+    green_cols = np.where(frames_yoko[0][:, :, 1].mean(axis=0) > 120)[0]
+    assert len(green_cols) > 0 and abs(float(green_cols.mean()) - 63.5) <= 6.0
+
+
 def test_process_video_trailer_end_to_end(tmp_path: Path):
     video_path = tmp_path / "synthetic_trailer.mp4"
     fps = 15

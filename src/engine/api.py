@@ -22,7 +22,12 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
 
-from src.engine.conversion.core import DEFAULT_PARAMS, LET_ME_HANDLE_PARAMS, process_file
+from src.engine.conversion.core import (
+    DEFAULT_PARAMS,
+    LET_ME_HANDLE_PARAMS,
+    process_file,
+    resolve_panorama_scroll_axis,
+)
 from src.engine.conversion.ffmpeg_utils import get_metadata
 from src.engine.conversion.quality import evaluate_gif_quality
 
@@ -51,6 +56,7 @@ class DmdClipConfig:
     use_auto_action: bool = True
     use_smart_color_boost: bool = True
     scroll_enabled: bool = False
+    scroll_direction: str = "auto"
     brightness: float = -0.02
     contrast: float = 1.45
     saturation: float = 1.85
@@ -408,6 +414,8 @@ class DmdMediaProcessor:
             "fps_max": config.fps,
             "max_duration": config.max_duration_s,
             "scroll_enabled": False if config.use_auto_action else config.scroll_enabled,
+            "scroll_direction": config.scroll_direction,
+            "force_panorama_scroll": bool(not config.use_auto_action and config.scroll_enabled),
             "let_me_handle_it": config.use_auto_action,
             "auto_action_enabled": config.use_auto_action,
             "action_smart_auto_crop": config.use_auto_action,
@@ -550,6 +558,7 @@ class DmdMediaProcessor:
         scroll_cycles: float = 0.999,
         bottom_crop_pct: float = 0.0,
         top_crop_pct: float = 0.0,
+        scroll_direction: str = "auto",
         export_gif: bool = True,
         export_rgb565_stream: bool = True,
         stem: str = "pan",
@@ -557,10 +566,11 @@ class DmdMediaProcessor:
     ) -> DmdProcessedAssets:
         """
         Convert a static image (Jacket/Poster, Marquee/Banner, or Snapshot/Backdrop)
-        into a vertical scrolling panorama `.gif` and `.rgb565.stream` (`DMDS`) using
-        the native `dmd_gif_converter` FFmpeg pipeline (`process_file`), including
-        Smart Color Boost (`analyze_and_compensate`), Lanczos scaling, and multi-resolution
-        / TATE geometry support.
+        into an aspect-ratio-preserving, zero-black-bar scrolling panorama `.gif` and
+        `.rgb565.stream` (`DMDS`) using `process_file`:
+        - TATE panels (`height > width`) always pan left-to-right, centering vertically if zoomed.
+        - YOKO panels (`width > height`) always pan top-to-bottom, centering horizontally if zoomed.
+        - Square panels (`width == height`) pan left-to-right when `src_w > src_h` and top-to-bottom otherwise.
         """
         _ = (hold_start_s, hold_end_s)
         out_dir = Path(output_dir)
@@ -574,7 +584,13 @@ class DmdMediaProcessor:
         temp_src_path: Optional[Path] = None
         if isinstance(input_image, Image.Image):
             temp_src_path = out_dir / f"_tmp_src_{stem}_{width}x{height}.png"
-            input_image.convert("RGB").save(temp_src_path, format="PNG")
+            if input_image.mode in ("RGBA", "LA") or "transparency" in input_image.info:
+                rgba = input_image.convert("RGBA")
+                bg = Image.new("RGBA", rgba.size, (0, 0, 0, 255))
+                bg.alpha_composite(rgba)
+                bg.convert("RGB").save(temp_src_path, format="PNG")
+            else:
+                input_image.convert("RGB").save(temp_src_path, format="PNG")
             src_path = temp_src_path
         else:
             src_path = Path(input_image)
@@ -592,6 +608,7 @@ class DmdMediaProcessor:
             "fps_min": float(fps_clamped),
             "fps_max": float(fps_clamped),
             "scroll_enabled": True,
+            "scroll_direction": str(scroll_direction or "auto"),
             "force_panorama_scroll": True,
             "scroll_cycles": float(scroll_cycles),
             "scroll_duration": duration_clamped,

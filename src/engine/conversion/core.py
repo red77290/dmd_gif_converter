@@ -142,6 +142,107 @@ def _terminal_log(msg: str, level: str = "info") -> None:
         pass
 
 
+def resolve_panorama_scroll_axis(
+    src_w: int,
+    src_h: int,
+    target_width: int,
+    target_height: int,
+    scroll_direction: str = "auto",
+) -> str:
+    """Determine whether a panorama / scroll animation pans vertically or horizontally.
+
+    Under ``"auto"``:
+    - TATE panels (``target_height > target_width``, e.g. ``64x128``, ``32x128``) ALWAYS
+      pan from left to right (``"horizontal"``), zooming uniformly to cover the frame
+      with zero black bars and centering vertically if height overflows.
+    - YOKO panels (``target_width > target_height``, e.g. ``128x32``, ``128x64``, ``256x64``)
+      ALWAYS pan from top to bottom (``"vertical"``), zooming uniformly to cover the frame
+      with zero black bars and centering horizontally if width overflows.
+    - Square panels (``target_width == target_height``, e.g. ``64x64``) pan left to right
+      when ``src_w > src_h`` and top to bottom otherwise.
+    """
+    raw = str(scroll_direction or "auto").strip().lower()
+    if raw in ("horizontal", "left_to_right", "ltr", "x"):
+        return "horizontal"
+    if raw in ("vertical", "top_to_bottom", "ttb", "y"):
+        return "vertical"
+    if target_width <= 0 or target_height <= 0:
+        return "vertical"
+    if target_height > target_width:
+        return "horizontal"
+    if target_width > target_height:
+        return "vertical"
+    if src_w > 0 and src_h > 0 and src_w > src_h:
+        return "horizontal"
+    return "vertical"
+
+
+def _compute_scroll_motion(
+    scroll_dist: int,
+    cycles: float,
+    scroll_dur_req: float,
+    scroll_speed: float,
+    fps_render: float,
+    duration_src: float,
+    offset: int = 0,
+) -> tuple:
+    """Build the 1D FFmpeg crop coordinate expression and output duration."""
+    full_cyc = int(cycles)
+    frac = round(cycles - full_cyc, 10)
+
+    if scroll_dur_req > 0.0:
+        total_travel_px = max(float(scroll_dist), (2.0 * full_cyc + frac) * scroll_dist)
+        req_speed = total_travel_px / max(1.0, scroll_dur_req)
+        step = max(1, round(req_speed / fps_render))
+    else:
+        step = max(1, round(scroll_speed / fps_render))
+
+    frames_one_way = math.ceil(scroll_dist / step)
+    frames_full_cycle = 2 * frames_one_way
+
+    stop_pos = min(round(frac * scroll_dist), scroll_dist)
+    frames_partial = math.ceil(stop_pos / step) if stop_pos > 0 else 0
+
+    n_cyc_end = full_cyc * frames_full_cycle
+    frames_move = n_cyc_end + frames_partial
+    frames_src = max(1, round(duration_src * fps_render)) if duration_src > 0 else 1
+    frames_total = max(frames_move + 1, frames_src)
+    duration_out = str(frames_total / fps_render)
+
+    if full_cyc > 0:
+        n_seq = f"mod(n,{frames_full_cycle})"
+        cycle_expr = (
+            f"if(lte({n_seq},{frames_one_way}),"
+            f"min({n_seq}*{step},{scroll_dist}),"
+            f"max({scroll_dist}-({n_seq}-{frames_one_way})*{step},0))"
+        )
+        if frac > 0:
+            pn = f"(n-{n_cyc_end})"
+            expr = (
+                f"if(lt(n,{n_cyc_end}),"
+                f"{cycle_expr},"
+                f"if(lt(n,{frames_move}),"
+                f"min({pn}*{step},{stop_pos}),"
+                f"{stop_pos}))"
+            )
+        else:
+            expr = f"if(lt(n,{n_cyc_end}),{cycle_expr},0)"
+    else:
+        if frac > 0:
+            expr = (
+                f"if(lt(n,{frames_partial}),"
+                f"min(n*{step},{stop_pos}),"
+                f"{stop_pos})"
+            )
+        else:
+            expr = "0"
+
+    if offset > 0:
+        expr = f"({offset}+{expr})" if expr != "0" else str(offset)
+
+    return expr, duration_out, step, stop_pos, frac, full_cyc
+
+
 SUPPORTED_EXTENSIONS = {
     ".gif", ".mp4", ".avi", ".mkv", ".mov", ".webm",
     ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp",
@@ -185,9 +286,10 @@ DEFAULT_PARAMS = {
     "sharpen_chr": 0.5,
     "dither": "none",
     # ── Advanced: Positioning ──────────────────────────────────────────────────
-    # scroll_enabled=True  → default vertical auto-scroll behaviour (unchanged)
+    # scroll_enabled=True  → default auto-scroll behaviour
     "scroll_enabled": True,
-    "zoom":           1.0,   # scale multiplier (1.0 = fit to 128 px width)
+    "scroll_direction": "auto",  # "auto" | "vertical" | "horizontal"
+    "zoom":           1.0,   # scale multiplier (1.0 = fit to panel axis)
     "manual_x":       0,     # horizontal crop offset in pixels (manual mode)
     "manual_y":       0,     # vertical   crop offset in pixels (manual mode)
     # ── Advanced: Visual effects (all default to "no change") ─────────────────
@@ -464,115 +566,130 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         log(f"[TEXT  ] {filename} — ffmpeg drawtext unavailable (no libfreetype); "
             "using Pillow fallback", "warning")
 
-    # ── Scale (zoom-aware & multi-resolution / TATE-safe) ────────────────────
-    # When zoom=1.0 (default), target_w=128 — identical to previous behaviour.
-    target_w_scaled = max(target_width, round(target_width * zoom / 2) * 2)   # even, ≥ target_width
-    scaled_h = math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2
+    # ── Scale (zoom-to-cover, zero black bars, zero distortion & TATE/YOKO aware) ──
+    scroll_direction = str(p.get("scroll_direction", "auto") or "auto")
+    scroll_axis = (
+        resolve_panorama_scroll_axis(src_w, src_h, target_width, target_height, scroll_direction)
+        if (scroll_enabled and not keep_original_resolution and src_w > 0 and src_h > 0)
+        else "vertical"
+    )
+    force_panorama = bool(p.get("force_panorama_scroll", False))
 
-    if not keep_original_resolution and src_h > 0:
-        top_crop_pct_pre = float(p.get("top_crop_pct", 0.0))
-        bot_crop_pct_pre = float(p.get("bottom_crop_pct", 0.15))
-        usable_frac = max(0.25, 1.0 - top_crop_pct_pre - bot_crop_pct_pre)
-        if scroll_enabled and bool(p.get("force_panorama_scroll", False)):
-            min_scaled_h = math.ceil((target_height * 1.45 / usable_frac) / 2.0) * 2
+    if scroll_axis == "horizontal":
+        horiz_top_crop = max(0.0, float(caller_params.get("top_crop_pct", 0.0)))
+        horiz_bot_crop = max(0.0, float(caller_params.get("bottom_crop_pct", 0.0)))
+        usable_frac_h = max(0.25, 1.0 - horiz_top_crop - horiz_bot_crop)
+        req_h = max(target_height, math.ceil((target_height * zoom / usable_frac_h) / 2.0) * 2)
+        if force_panorama:
+            min_pan_x = max(12, math.ceil((target_width * 0.35) / 2.0) * 2)
+            req_w = max(target_width + min_pan_x, round(target_width * zoom / 2.0) * 2)
         else:
-            min_scaled_h = target_height
-        if scaled_h < min_scaled_h:
-            target_w_scaled = max(
-                target_w_scaled,
-                math.ceil(((min_scaled_h / src_h) * src_w) / 2.0) * 2,
-            )
-            scaled_h = max(
-                min_scaled_h,
-                math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2,
-            )
+            req_w = max(target_width, round(target_width * zoom / 2.0) * 2)
+        scale_k = max(req_w / float(src_w), req_h / float(src_h))
+        target_w_scaled = max(req_w, math.ceil((src_w * scale_k) / 2.0) * 2)
+        scaled_h = max(req_h, math.ceil((src_h * scale_k) / 2.0) * 2)
+    else:
+        req_w = max(target_width, round(target_width * zoom / 2) * 2)   # even, ≥ target_width
+        if not keep_original_resolution and src_h > 0:
+            top_crop_pct_pre = max(0.0, float(p.get("top_crop_pct", 0.0)))
+            bot_crop_pct_pre = max(0.0, float(p.get("bottom_crop_pct", 0.15)))
+            usable_frac_v = max(0.25, 1.0 - top_crop_pct_pre - bot_crop_pct_pre)
+            if scroll_enabled and force_panorama:
+                min_pan_y = max(12, math.ceil((target_height * 0.45) / 2.0) * 2)
+                req_h = math.ceil(((target_height + min_pan_y) / usable_frac_v) / 2.0) * 2
+            else:
+                req_h = target_height
+            scale_k = max(req_w / float(src_w), req_h / float(src_h))
+            target_w_scaled = max(req_w, math.ceil((src_w * scale_k) / 2.0) * 2)
+            scaled_h = max(req_h, math.ceil((src_h * scale_k) / 2.0) * 2)
+        else:
+            target_w_scaled = req_w
+            scaled_h = math.ceil(((target_w_scaled / src_w) * src_h) / 2.0) * 2
 
     if scroll_enabled:
-        # ── Auto-scroll (default behaviour, unchanged) ────────────────────────
-        # Top crop: ignore the top fraction of the scaled image (e.g. title bars).
-        # top_offset is always an even number (ffmpeg requires even crop coordinates).
-        top_crop_pct = float(p.get("top_crop_pct", 0.0))
-        top_offset   = math.floor(scaled_h * top_crop_pct / 2) * 2
+        cycles = float(p.get("scroll_cycles", 1.5))
+        scroll_dur_req = float(p.get("scroll_duration", 0.0))
 
-        effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
-        effective_h = max(effective_h - top_offset, target_height)
-        scroll_dist = effective_h - target_height
-        # Horizontal: centered when zoomed (= "0" for default zoom=1.0)
-        crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
-
-        if scroll_dist > 0:
-            # ── Cycle decomposition ───────────────────────────────────────────
-            cycles   = float(p.get("scroll_cycles", 1.5))
-            full_cyc = int(cycles)
-            frac     = round(cycles - full_cyc, 10)
-
-            scroll_dur_req = float(p.get("scroll_duration", 0.0))
+        if scroll_axis == "horizontal":
+            horiz_top_crop = max(0.0, float(caller_params.get("top_crop_pct", 0.0)))
+            horiz_bot_crop = max(0.0, float(caller_params.get("bottom_crop_pct", 0.0)))
+            top_off_h = math.floor(scaled_h * horiz_top_crop / 2) * 2
+            eff_h_horiz = max(
+                math.floor(scaled_h * (1.0 - horiz_bot_crop) / 2) * 2 - top_off_h,
+                target_height,
+            )
+            center_y = min(
+                max(0, scaled_h - target_height),
+                top_off_h + max(0, (eff_h_horiz - target_height) // 2),
+            )
+            crop_y = str(center_y)
+            avail_dist_x = max(0, target_w_scaled - target_width)
             if scroll_dur_req > 0.0:
-                total_travel_px = max(float(scroll_dist), (2.0 * full_cyc + frac) * scroll_dist)
-                req_speed = total_travel_px / max(1.0, scroll_dur_req)
-                step = max(1, round(req_speed / fps_render))
-            else:
-                step = max(1, round(p["scroll_speed"] / fps_render))
-
-            frames_one_way    = math.ceil(scroll_dist / step)
-            frames_full_cycle = 2 * frames_one_way
-
-            stop_pos       = min(round(frac * scroll_dist), scroll_dist)
-            frames_partial = math.ceil(stop_pos / step) if stop_pos > 0 else 0
-
-            n_cyc_end    = full_cyc * frames_full_cycle
-            frames_move  = n_cyc_end + frames_partial
-            frames_src   = max(1, round(duration_src * fps_render)) if duration_src > 0 else 1
-            frames_total = max(frames_move + 1, frames_src)
-            duration_out = str(frames_total / fps_render)
-
-            # ── FFmpeg crop_y expression (relative to start of usable area) ───
-            if full_cyc > 0:
-                n_seq   = f"mod(n,{frames_full_cycle})"
-                cycle_y = (
-                    f"if(lte({n_seq},{frames_one_way}),"
-                    f"min({n_seq}*{step},{scroll_dist}),"
-                    f"max({scroll_dist}-({n_seq}-{frames_one_way})*{step},0))"
+                max_pan_dist_x = max(
+                    target_width * 4,
+                    round(target_width * 1.35 * max(2.5, scroll_dur_req)),
                 )
-                if frac > 0:
-                    pn = f"(n-{n_cyc_end})"
-                    crop_y = (
-                        f"if(lt(n,{n_cyc_end}),"
-                        f"{cycle_y},"
-                        f"if(lt(n,{frames_move}),"
-                        f"min({pn}*{step},{stop_pos}),"
-                        f"{stop_pos}))"
-                    )
-                else:
-                    crop_y = f"if(lt(n,{n_cyc_end}),{cycle_y},0)"
+                scroll_dist = min(avail_dist_x, max_pan_dist_x)
             else:
-                if frac > 0:
-                    crop_y = (
-                        f"if(lt(n,{frames_partial}),"
-                        f"min(n*{step},{stop_pos}),"
-                        f"{stop_pos})"
-                    )
-                else:
-                    crop_y = "0"
+                scroll_dist = avail_dist_x
+            left_offset = (avail_dist_x - scroll_dist) // 2
 
-            # Apply top offset: shift the whole scroll window down by top_offset px
-            if top_offset > 0:
-                crop_y = f"({top_offset}+{crop_y})" if crop_y != "0" else str(top_offset)
-
-            log(
-                f"[SCROLL ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} "
-                f"| scroll_dist={scroll_dist}px | top_off={top_offset}px | cycles={cycles} "
-                f"(full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
-                f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
-            )
+            if scroll_dist > 0:
+                crop_x, duration_out, step, stop_pos, frac, full_cyc = _compute_scroll_motion(
+                    scroll_dist=scroll_dist,
+                    cycles=cycles,
+                    scroll_dur_req=scroll_dur_req,
+                    scroll_speed=float(p["scroll_speed"]),
+                    fps_render=fps_render,
+                    duration_src=duration_src,
+                    offset=left_offset,
+                )
+                log(
+                    f"[HSCROLL] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{scaled_h} "
+                    f"| scroll_dist_x={scroll_dist}px (avail={avail_dist_x}px, left_off={left_offset}px, y={center_y}px) "
+                    f"| cycles={cycles} (full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
+                    f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
+                )
+            else:
+                duration_out = str(max(duration_src, 1.0))
+                crop_x = "(in_w-out_w)/2"
+                log(
+                    f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{scaled_h} (centered) "
+                    f"| y={center_y}px | fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
+                )
         else:
-            duration_out = str(max(duration_src, 1.0))
-            # Center within the usable (non-cropped) area
-            crop_y = str(top_offset) if top_offset > 0 else "(in_h-out_h)/2"
-            log(
-                f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} (centered) "
-                f"| top_off={top_offset}px | fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
-            )
+            top_crop_pct = max(0.0, float(p.get("top_crop_pct", 0.0)))
+            top_offset = math.floor(scaled_h * top_crop_pct / 2) * 2
+            effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
+            effective_h = max(effective_h - top_offset, target_height)
+            scroll_dist = effective_h - target_height
+            # Horizontal: centered whenever uniform zoom makes width exceed panel width
+            crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
+
+            if scroll_dist > 0:
+                crop_y, duration_out, step, stop_pos, frac, full_cyc = _compute_scroll_motion(
+                    scroll_dist=scroll_dist,
+                    cycles=cycles,
+                    scroll_dur_req=scroll_dur_req,
+                    scroll_speed=float(p["scroll_speed"]),
+                    fps_render=fps_render,
+                    duration_src=duration_src,
+                    offset=top_offset,
+                )
+                log(
+                    f"[SCROLL ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} "
+                    f"| scroll_dist={scroll_dist}px | top_off={top_offset}px | cycles={cycles} "
+                    f"(full={full_cyc} frac={frac:.2f} stop={stop_pos}px) "
+                    f"| fps={fps_render} | step={step}px | total={float(duration_out):.2f}s"
+                )
+            else:
+                duration_out = str(max(duration_src, 1.0))
+                # Center within the usable (non-cropped) area
+                crop_y = str(top_offset) if top_offset > 0 else "(in_h-out_h)/2"
+                log(
+                    f"[CENTER ] {filename} | src {src_w}x{src_h} → {target_w_scaled}x{effective_h} (centered) "
+                    f"| top_off={top_offset}px | fps_src={fps_src:.1f} → render={fps_render} | duration={float(duration_out):.2f}s"
+                )
     else:
         # ── Manual positioning mode ───────────────────────────────────────────
         max_x      = max(0, target_w_scaled - target_width)
@@ -619,13 +736,19 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             f"{mid_filters}"
         )
     else:
-        # Original filter graph with scaling and cropping
+        if not keep_original_resolution:
+            fg_scale_filter = (
+                f"scale={target_w_scaled}:{scaled_h}:flags=lanczos:force_original_aspect_ratio=increase,"
+                f"crop={target_w_scaled}:{scaled_h}"
+            )
+        else:
+            fg_scale_filter = f"scale={target_w_scaled}:-2:flags=lanczos"
         filter_graph_base = (
             f"color=black:s={target_w_scaled}x{scaled_h}:r={fps_render}[bg];"
-            f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},scale={target_w_scaled}:-2:flags=lanczos[fg];"
+            f"[0:v]setpts=PTS-STARTPTS,fps={fps_render},{fg_scale_filter}[fg];"
             f"[bg][fg]overlay=0:0:shortest=1,format=rgb24,"
             f"{mid_filters},"
-            f"crop={target_width}:{target_height}:{crop_x}:'{crop_y}'"
+            f"crop={target_width}:{target_height}:'{crop_x}':'{crop_y}'"
         )
 
     # ── Build filter graph (text via ffmpeg drawtext when available) ──────────
