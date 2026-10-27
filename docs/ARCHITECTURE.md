@@ -879,7 +879,7 @@ graph TD
 | `multi_roi_fusion_enabled` | `bool` | `True` | Fuse multiple detections into one box |
 | `min_subject_dmd_px` | `int` | `4` | Minimum subject size in DMD pixels |
 | `platformer_mode` | `bool` | `False` | Lock floor visibility (side-scrollers) |
-| `platformer_floor_ratio` | `float` | `0.80` | Floor position ratio in platformer mode |
+| `platformer_floor_ratio` | `float` | `0.90` | Floor position ratio in platformer mode |
 | `roi_confidence_min` | `float` | `0.0` | Minimum YOLO confidence to accept |
 | `dynamic_roi_confidence_enabled` | `bool` | `True` | Lower threshold when subject tracked consistently |
 | `roi_persistence_score_enabled` | `bool` | `True` | Track confidence across frames |

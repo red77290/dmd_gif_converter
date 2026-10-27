@@ -400,7 +400,7 @@ Standard tracking centres the subject, meaning the floor moves up and down as th
 | Field | Default | Description |
 |-------|---------|-------------|
 | `platformer_mode` | `False` | Enable platformer-specific framing logic. |
-| `platformer_floor_ratio` | `0.80` | Vertical position of the floor (0.80 = 80% down from the top). |
+| `platformer_floor_ratio` | `0.90` | Vertical position of the floor (0.90 = 90% down from the top, ~3 px ground on 32 px DMD). |
 
 ---
 

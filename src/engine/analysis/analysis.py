@@ -1,4 +1,5 @@
-from typing import Optional, Tuple
+import collections
+from typing import Deque, Optional, Tuple
 import numpy as np
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -6,19 +7,26 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 
 class _FloorEstimator:
-    """Asymmetric exponential moving average for floor/ground level estimation."""
+    """Stance-aware bidirectional floor/platform level estimator."""
 
     # α ∈ (0, 1] — higher = faster response
-    _ALPHA_ATTACK  = 0.28   # fast: character lands lower / new lower platform
-    _ALPHA_RELEASE = 0.02   # very slow: character in the air / moving upward
+    _ALPHA_ATTACK         = 0.25   # smooth downward landing / lower platform convergence
+    _ALPHA_RELEASE_JUMP   = 0.04   # gentle release during transient jumps on the same platform
+    _ALPHA_RELEASE_STANCE = 0.28   # upward re-anchoring onto a confirmed upper platform
 
     def __init__(self, frame_h: int) -> None:
         self._frame_h: float = float(frame_h)
         self._floor_y: Optional[float] = None
+        self._has_detection: bool = False
+        self._window: Deque[float] = collections.deque(maxlen=10)
+        self._consecutive_bottom_spikes: int = 0
+        self._consecutive_elevated: int = 0
+        self._reanchoring_up: bool = False
 
     def update(self, roi_bottom: Optional[float]) -> float:
         """Feed the latest roi_bottom and return the current floor estimate."""
         if roi_bottom is None:
+            self._consecutive_bottom_spikes = 0
             # No detection: keep last known floor (camera stays anchored).
             if self._floor_y is None:
                 # Very first frame with no ROI → default to 80 % of frame.
@@ -26,13 +34,74 @@ class _FloorEstimator:
             return self._floor_y
 
         rb = float(roi_bottom)
-        if self._floor_y is None:
-            self._floor_y = rb          # first detection: snap immediately
+        if not self._has_detection or self._floor_y is None:
+            self._floor_y = rb          # first real detection: snap immediately
+            self._has_detection = True
+            self._window.append(rb)
+            self._consecutive_bottom_spikes = 0
+            self._consecutive_elevated = 0
+            self._reanchoring_up = False
             return self._floor_y
 
-        # Asymmetric update
-        alpha = self._ALPHA_ATTACK if rb >= self._floor_y else self._ALPHA_RELEASE
-        self._floor_y += alpha * (rb - self._floor_y)
+        # Reject isolated 1-frame downward spikes near the extreme frame bottom
+        # (prevents single-frame bottom-border scroll noise from snapping _floor_y
+        # to the bottom of a thick ground slab) unless corroborated by >= 2 samples.
+        is_extreme_bottom_spike = (
+            rb > self._floor_y + 0.12 * self._frame_h
+            and rb >= 0.96 * self._frame_h
+        )
+        if is_extreme_bottom_spike:
+            self._consecutive_bottom_spikes += 1
+            if self._consecutive_bottom_spikes < 2:
+                return self._floor_y
+        else:
+            self._consecutive_bottom_spikes = 0
+
+        self._window.append(rb)
+
+        # Normal downward landing or drop to lower platform
+        if rb >= self._floor_y:
+            self._consecutive_elevated = 0
+            self._reanchoring_up = False
+            self._floor_y += self._ALPHA_ATTACK * (rb - self._floor_y)
+            return self._floor_y
+
+        # Character is elevated above current floor (rb < self._floor_y)
+        if rb <= self._floor_y - 0.04 * self._frame_h:
+            self._consecutive_elevated += 1
+        else:
+            self._consecutive_elevated = 0
+
+        recent = list(self._window)
+        stance_detected = False
+        stance_target = rb
+
+        if len(recent) >= 5:
+            recent_5 = recent[-5:]
+            spread_5 = max(recent_5) - min(recent_5)
+            if spread_5 > 0.10 * self._frame_h:
+                self._reanchoring_up = False
+            elif spread_5 <= 0.09 * self._frame_h:
+                elev_thresh = (
+                    self._floor_y
+                    if self._reanchoring_up
+                    else (self._floor_y - 0.03 * self._frame_h)
+                )
+                if all(s <= elev_thresh for s in recent_5):
+                    stance_detected = True
+                    stance_target = float(np.median(recent_5))
+
+        if not stance_detected and self._consecutive_elevated >= 9 and len(recent) >= 9:
+            recent_9 = recent[-9:]
+            stance_detected = True
+            stance_target = float(np.median(recent_9[-5:]))
+
+        if stance_detected:
+            self._reanchoring_up = True
+            self._floor_y += self._ALPHA_RELEASE_STANCE * (stance_target - self._floor_y)
+        else:
+            self._floor_y += self._ALPHA_RELEASE_JUMP * (rb - self._floor_y)
+
         return self._floor_y
 
     @property

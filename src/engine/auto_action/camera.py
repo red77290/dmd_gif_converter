@@ -106,7 +106,7 @@ def _compute_detail_preserving_crop_dimensions(
     padding = _clamp(float(getattr(cfg, "padding", 0.20)), 0.0, 1.0)
     _platformer = getattr(cfg, "platformer_mode", False)
     _auto = getattr(cfg, "auto_vertical_bias", False)
-    _floor_ratio = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
+    _floor_ratio = getattr(cfg, "platformer_floor_ratio", 0.90) if _platformer else 0.93
 
     ideal_h = float(median_h) * (1.0 + padding)
     if _auto or _platformer:
@@ -166,7 +166,7 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         elif _auto and abs(_bias) < 1e-4:
             _bias = -1.0  # person smart pushes up to ensure head is visible
 
-    _FLOOR_RATIO: float = getattr(cfg, "platformer_floor_ratio", 0.80) if _platformer else 0.93
+    _FLOOR_RATIO: float = getattr(cfg, "platformer_floor_ratio", 0.90) if _platformer else 0.93
 
     def _cy_min(crop_h: float) -> float:
         return effective_frame_top + crop_h / 2.0
@@ -243,17 +243,30 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
-        
-        if _platformer:
-            cy = cy_floor
-        elif (cy_floor - crop_h / 2.0) > ideal_top:
-            scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
-            if scene_type in ("platformer", "fighting_2d", "action_horizontal"):
-                cy = cy_floor
+        cy = cy_floor
+
+        # Ignore scene-wide background explosion / full-frame flash boxes in platformer mode
+        is_scene_explosion = (
+            _platformer
+            and floor_y_est is not None
+            and float(w) > float(effective_frame_w) * 0.65
+            and float(h) > float(effective_frame_h) * 0.58
+        )
+        if not is_scene_explosion:
+            head_margin = min(crop_h * 0.12, max(crop_h * 0.06, float(h) * 0.08))
+            foot_margin = min(crop_h * 0.10, max(2.0, crop_h * (1.0 - _FLOOR_RATIO)))
+            if float(h) + head_margin + foot_margin <= crop_h:
+                max_allowed_cy = (float(y) - head_margin) + crop_h / 2.0
+                min_allowed_cy = (float(y + h) + foot_margin * 0.5) - crop_h / 2.0
+                if cy > max_allowed_cy:
+                    cy = max_allowed_cy
+                elif cy < min_allowed_cy:
+                    cy = min_allowed_cy
             else:
-                cy = ideal_top + crop_h / 2.0
-        else:
-            cy = cy_floor
+                # Sprite taller than crop_h: anchor on upper-body/head-to-torso without cutting off the head
+                cy_upper = float(y) + float(h) * 0.45
+                max_head_cy = max(float(effective_frame_top), float(y) - crop_h * 0.04) + crop_h / 2.0
+                cy = min(cy_upper, max_head_cy)
     else:
         cy = _apply_bias(cy, crop_h)
 

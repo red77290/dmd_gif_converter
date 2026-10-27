@@ -261,36 +261,53 @@ class _FrameDetector(AbstractDetector):
             return None
 
         if platformer_mode:
+            boxes_bottom = boxes_raw[:, 1] + boxes_raw[:, 3] / 2.0
+            bottomness = boxes_bottom / float(self._model_h)
+            bw_norm = boxes_raw[:, 2] / float(self._model_w)
+            aspect_wh = boxes_raw[:, 2] / np.maximum(1.0, boxes_raw[:, 3])
+
+            # Reject wide horizontal ground/HUD scroll bands and bottom-border slabs
+            wide_band = (bw_norm > 0.40) & (aspect_wh > 2.4)
+            bottom_slab = (bottomness >= 0.98) & (bw_norm > 0.24) & (aspect_wh > 1.8)
+            mask = mask & ~wide_band & ~bottom_slab
+
+            # Playfield-balanced vertical weighting: favor 0.50..0.92 (covering thick ground)
+            # and upper platforms (0.30..0.50) without favoring 0.99 bottom-border tile noise.
+            playfield_weight = np.where(
+                (bottomness >= 0.50) & (bottomness <= 0.92),
+                1.25,
+                np.where(
+                    (bottomness >= 0.30) & (bottomness < 0.50),
+                    0.75 + 2.5 * (bottomness - 0.30),
+                    np.where(
+                        (bottomness > 0.92) & (bottomness <= 0.95),
+                        1.05,
+                        np.where(bottomness > 0.95, 0.55, 0.30),
+                    ),
+                ),
+            )
+
             if expected_floor_y is not None:
                 sy_model = self._model_h / float(h)
                 expected_floor_model = expected_floor_y * sy_model
-                boxes_bottom = boxes_raw[:, 1] + boxes_raw[:, 3] / 2.0
                 dist_to_floor = np.abs(boxes_bottom - expected_floor_model) / float(self._model_h)
-                
+
                 # Reject ONLY hard ceiling pareidolia: detections whose TOP is above the
                 # established floor_y AND whose bottom is far from the floor.
-                # This lets Mario jump freely (his bottom follows the arc), but blocks
-                # a ceiling block that is fully above the floor line.
                 boxes_top = boxes_raw[:, 1] - boxes_raw[:, 3] / 2.0
                 is_above_floor = boxes_top < expected_floor_model
-                is_far_from_floor = dist_to_floor > 0.60
+                is_far_from_floor = dist_to_floor > 0.65
                 ceiling_block = is_above_floor & is_far_from_floor
                 mask = mask & ~ceiling_block
-                
-                platformer_scores = person_scores * mask * (0.01 + 100.0 * np.exp(-dist_to_floor * 10.0))
+
+                floor_weight = 0.15 + np.exp(-dist_to_floor * 4.0)
+                platformer_scores = person_scores * mask * playfield_weight * floor_weight
             else:
-                # Initial floor discovery: only bias toward bottom half, do NOT hard-reject.
-                # boxes_raw[:, 1] is the CENTER y in model coords — a box at the very top
-                # of the screen has center ~0.0, one at the very bottom ~1.0.
-                center_y_norm = boxes_raw[:, 1] / self._model_h
-                # Strong bias toward low-center detections (boxes near the bottom of screen)
-                # but never fully zero out boxes at the top — Mario could start a jump on frame 1.
-                floor_bias = (0.1 + center_y_norm) ** 4   # ~0.0001 at top, ~1.3 at bottom
-                platformer_scores = person_scores * mask * floor_bias * 100.0
-                
+                platformer_scores = person_scores * mask * playfield_weight
+
             if not np.any(mask):
                 return None
-                
+
             best_i = int(np.argmax(platformer_scores))
         else:
             valid_indices = np.where(mask)[0]
@@ -407,11 +424,24 @@ class _FrameDetector(AbstractDetector):
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=2)
 
+        frame_h, frame_w = frame.shape[:2]
+        if platformer_mode:
+            # Reject global camera flashes before band suppression
+            if cv2.countNonZero(mask) > int(frame_w * frame_h * 0.70):
+                return None
+            # Strip wide horizontal ground/HUD scroll bands (>= 38% frame width)
+            # so a compact player sprite standing directly on top of a scrolling
+            # thick ground slab is cleanly separated rather than fused into it.
+            band_w = max(16, int(frame_w * 0.38))
+            horiz_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (band_w, 3))
+            wide_bands = cv2.morphologyEx(mask, cv2.MORPH_OPEN, horiz_kernel)
+            stripped = cv2.bitwise_and(mask, cv2.bitwise_not(wide_bands))
+            if cv2.countNonZero(stripped) > 0:
+                mask = stripped
+
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
-
-        frame_h, frame_w = frame.shape[:2]
 
         def score_contour(c):
             area = cv2.contourArea(c)
@@ -427,16 +457,43 @@ class _FrameDetector(AbstractDetector):
                 if (w > frame_w * 0.72 and h > frame_h * 0.65) or h > frame_h * 0.58:
                     return 0.0
                 bottom_y = y + h
-                if bottom_y < frame_h * 0.30:
+                if bottom_y < frame_h * 0.22:
                     return 0.0
-                if expected_floor_y is not None:
-                    import math
-                    dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
-                    return area * (0.01 + 100.0 * math.exp(-dist_to_floor * 10.0))
+                aspect_wh = float(w) / max(1.0, float(h))
+                # Reject wide horizontal ground/HUD scroll bands and thick bottom-border slabs
+                if w > frame_w * 0.40 and aspect_wh > 2.4:
+                    return 0.0
+                if bottom_y >= frame_h * 0.98 and w > frame_w * 0.24 and aspect_wh > 1.8:
+                    return 0.0
+                if bottom_y >= frame_h * 0.98 and w > frame_w * 0.42 and aspect_wh > 1.35:
+                    return 0.0
+
+                eff_area = min(float(area), float(frame_w * frame_h) * 0.06)
+                aspect_hw = float(h) / max(1.0, float(w))
+                if 0.60 <= aspect_hw <= 2.6:
+                    shape_weight = 1.35
+                elif 0.35 <= aspect_hw <= 3.2:
+                    shape_weight = 1.0
                 else:
-                    bottomness = bottom_y / frame_h
-                    # Extreme floor tracking: massive penalty for ceiling to prevent boss/fx tracking
-                    return area * (0.01 + 100.0 * (bottomness ** 4))
+                    shape_weight = 0.25
+
+                bottomness = bottom_y / float(frame_h)
+                if 0.50 <= bottomness <= 0.92:
+                    playfield_weight = 1.25
+                elif 0.30 <= bottomness < 0.50:
+                    playfield_weight = 0.75 + 2.5 * (bottomness - 0.30)
+                elif 0.92 < bottomness <= 0.95:
+                    playfield_weight = 1.05
+                elif bottomness > 0.95:
+                    playfield_weight = 0.55
+                else:
+                    playfield_weight = 0.30
+
+                base_score = eff_area * shape_weight * playfield_weight
+                if expected_floor_y is not None:
+                    dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
+                    return base_score * (0.15 + math.exp(-dist_to_floor * 4.0))
+                return base_score
             return area
 
         c_best = max(contours, key=score_contour)

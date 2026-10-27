@@ -53,7 +53,7 @@ class TestBuildCameraRectNoRoi(unittest.TestCase):
         """
         Regression test for 2D arcade / Metal Slug framing (304x224 -> 128x32):
         When floor_y_est is known (80% of frame height = 179.2), roi=None must
-        anchor the camera on the ground line (~156.4) instead of jumping to
+        anchor the camera on the ground line (~148.8 at 0.90 floor ratio) instead of jumping to
         the top of the screen (38.0), even when auto_vertical_bias=True.
         """
         fw, fh = 304, 224
@@ -81,7 +81,7 @@ class TestBuildCameraRectNoRoi(unittest.TestCase):
             floor_y_est=floor_y,
             face_priority_mode=False,
         )
-        self.assertAlmostEqual(cy, 156.4, delta=2.0, msg="Platformer camera must stay locked to floor line")
+        self.assertAlmostEqual(cy, 148.8, delta=2.0, msg="Platformer camera must stay locked to floor line")
 
 
 

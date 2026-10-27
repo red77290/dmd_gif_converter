@@ -191,7 +191,7 @@ class FloorEstimationStage(ITrackerStage):
                 bottom_val = float(ry + rh)
                 if engine._platformer:
                     # Only update floor from ground-plausible character boxes (ignore giant explosions or high HUD/sky objects)
-                    min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.42
+                    min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.30
                     if float(rh) <= float(engine.effective_frame_h) * 0.55 and bottom_val >= min_valid_bottom:
                         roi_bottom = bottom_val
                 elif not engine.face_priority_mode:
