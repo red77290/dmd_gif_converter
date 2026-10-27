@@ -66,7 +66,8 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `action_top_crop` | Top crop % | `0 %` | Exclude the top N % of the frame from detection (manual — overridden when auto is active) |
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Automatically** detect where the subject starts at the top (head / sky) — adapts padding to face vs full-body content |
 | `action_vertical_bias` | Vertical bias | `0.0` | Manually shift the camera: `+1.0` = as low as possible (floor visible), `-1.0` = as high as possible |
-| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground level using an asymmetric EMA — resists jumps, follows landings. Overrides the manual vertical bias. Ideal for 2-D platformers. |
+| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Automatically** tracks the ground and elevated platforms using a stance-aware bidirectional floor estimator (`_FloorEstimator`) — resists jumps, follows landings, and re-anchors upward onto higher platforms. Overrides the manual vertical bias. Ideal for 2-D platformers. |
+| `platformer_floor_ratio` | *(Auto / Config)* | `0.90` | Vertical floor anchor in platformer mode (`0.90` = 90 % down from the top, showing ~3 px of ground on a 32 px DMD while preserving headroom above thick ground slabs). |
 | `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Engine analyses 60 frames and activates the optimal camera profile** using a **Continuous Scoring Matrix**. It scores 9 different scene types (e.g., `talking_closeup`, `platformer`, `action_horizontal`) based on metrics like height ratio, X/Y variance, and bounding box properties. The scene with the highest score wins, automatically configuring top/bottom crops, floor tracking, and padding. The UI logs show a `=== Scene Classification Scoreboard ===` detailing exactly how the AI made its decision. |
 
 ### Detector modes
@@ -78,19 +79,20 @@ For batch conversion of large libraries, this cost adds up. If you are convertin
 | `hybrid` | Merges person + motion bounding boxes — broadest coverage |
 | `center` | No detection — keeps the camera centred (intro pan only) |
 
-### Auto floor detect — dynamic ground tracking
+### Auto floor detect — dynamic bidirectional ground & platform tracking
 
-> **Best for 2-D platformers** and any content where the floor level changes.
+> **Best for 2-D platformers** and any content where the floor or platform elevation changes.
 
-When **Auto floor detect** is enabled, the camera uses an **asymmetric exponential moving average (EMA)** to memorise the floor position frame by frame:
+When **Auto floor detect** (or the `platformer` profile) is enabled, the camera uses a **stance-aware bidirectional floor estimator (`_FloorEstimator`)** anchored at `platformer_floor_ratio = 0.90` (~3 px ground strip on a 32 px DMD) together with a strict character headroom/footroom visibility guard:
 
 | Situation | Behaviour |
 |---|---|
-| Character **lands** / descends to a lower platform | Floor estimate updates quickly (α = 0.28 — reaches new floor in ~10 frames) |
-| Character **jumps** or moves upward | Floor estimate barely moves (α = 0.02 — < 30 px drift over 8 frames of airtime) |
-| Subject **off-screen** (no detection) | Camera holds last known floor level — no drift |
+| Character **lands** / drops to a lower platform | Floor estimate converges smoothly (`α = 0.25`), while isolated 1-frame bottom-border scroll spikes (`>= 96 %` frame height) are rejected |
+| Character **jumps** transiently | Floor estimate holds steady (`α = 0.04`) so the ground does not bounce during airtime |
+| Character **climbs & stands** on an upper platform | Stance detector confirms the elevated platform (5-sample spread `<= 9 %` frame height or 9 consecutive elevated samples) and re-anchors upward (`α = 0.28`), backed by `_build_camera_rect` headroom/footroom protection |
+| Subject **off-screen** (no detection) | Camera holds last known floor level without drift, and snaps immediately on the very first real detection |
 
-This means the camera stays anchored to the ground during jumps and naturally follows the character when they land on a new (lower) platform.
+This keeps the ground anchored during normal jumps while smoothly following the player both downward and upward across multi-tier platformer stages without clipping the character's head on thick ground slabs (morphologically stripped via `cv2.MORPH_OPEN` in `_FrameDetector`).
 
 **Priority rules:**
 1. `auto_vertical_bias = True` → auto floor tracking active, manual `vertical_bias` ignored
@@ -175,7 +177,7 @@ The scene profile with the highest total score dictates the final camera behavio
 - **`menu_static`**: For title screens, menus, and highly static scenes. Locks the camera and heavily smooths any micro-movements to keep the screen stable.
 
 #### 👤 People & Dialogue Profiles
-- **`talking_closeup`**: For anime, vlogs, or dialogue where the face fills the frame. Enables **Face Priority Mode**. The camera ignores the lower body and rigidly locks onto the eye region (ignoring the top 25% hair/forehead, and targeting the next 35% face height) so the face doesn't bounce around during speech.
+- **`talking_closeup`**: For anime, vlogs, or dialogue where the face fills the frame. Enables **Face Priority Mode** and calibrates framing via `closeup_eye_mouth_fractions(aspect)` onto the expressive **eyes-to-mouth band** (`[0.23..0.61]*rh`, centred at `0.42*rh` for wide/square portraits and scaled smoothly upward across bust shots `1.0 < aspect <= 1.4`) so 4:1 and 2:1 DMD strips capture both the eyes and the mouth without drifting into the forehead or sinking to the chin.
 - **`talking_medium`**: For news anchors or waist-up shots. Enables Face Priority Mode, calculating the head as the top 22% of the visible body bounding box.
 - **`full_body_tall`**: For standing characters or tall anime sprites. Enables Face Priority Mode, calculating the head as the top 22% of the body bounding box, ensuring the face is centered rather than cutting them off at the shoulders.
 - **`full_body_medium`**: Standard generic tracking for full-body subjects without Face Priority. Uses tighter tracking margins.
@@ -303,29 +305,33 @@ If OpenCV is unavailable, the feature falls back silently to the standard preset
 
 ---
 
-## 🔍 How it works
+## 🔍 How it works — Orientation-Aware Panorama & Zoom-to-Cover
 
-### Tall sources — smart scroll
+### Deterministic TATE / YOKO scroll axis (`resolve_panorama_scroll_axis`)
+
+When `scroll_enabled = True`, `scroll_direction = "auto"` (default) deterministically selects the pan axis from the target HUB75 panel geometry:
+
+| Panel Geometry | Examples | Scroll Axis (`"auto"`) | Perpendicular Framing |
+|---|---|---|---|
+| **YOKO** (`width > height`) | `128×32`, `128×64`, `256×64` | **Top-to-bottom** (`"vertical"`) | Horizontally centred when zoomed |
+| **TATE** (`height > width`) | `64×128`, `32×128` | **Left-to-right** (`"horizontal"`) | Vertically centred when zoomed |
+| **Square** (`width == height`) | `64×64` | **Left-to-right** if `src_w > src_h`, else **top-to-bottom** | Centred on the non-scrolling axis |
 
 ```
-[cycle 1]  top ──down──▶ bottom ──up──▶ top
-[partial]  top ──down──▶ stop_pos ──hold until source ends──▶ (loop)
+[cycle 1]  start ──forward──▶ end ──reverse──▶ start
+[partial]  start ──forward──▶ stop_pos ──hold until source ends──▶ (loop)
 ```
 
-- **`scroll_cycles = 1.5`** (default): 1 full round-trip then descends to centre (50 % of scroll distance), holds there
-- **Bottom crop** (`bottom_crop_pct`): bottom 15 % (feet, floor) ignored → shorter scroll distance
-- Speed constant in **px/second** regardless of source FPS
-- Output FPS snapped to clean GIF values (10, 12.5, 20, 25 fps) — no judder
-
-### Wide sources — static centring
-
-Vertically centred on the 32-pixel panel. Natural source duration preserved (minimum 1 s).
+- **Uniform 1:1 Zoom-to-Cover (zero black bars)**: Images and videos are scaled uniformly with Lanczos resampling (`force_original_aspect_ratio=increase` + exact crop) so the target panel is 100 % covered with zero aspect-ratio distortion and zero letterbox/pillarbox bars. In panorama mode (`force_panorama_scroll`), a minimum travel margin is guaranteed along the active scroll axis.
+- **`scroll_cycles = 1.5`** (default): 1 full round-trip then travels halfway (`50 %` of scroll distance) and holds cleanly.
+- **Bottom crop** (`bottom_crop_pct`): bottom 15 % ignored by default on standard vertical scrolls → shorter, tighter travel.
+- Speed constant in **px/second** regardless of source FPS (or exact duration match when `scroll_duration > 0`).
 
 ### Transparency elimination
 
 | Layer | Mechanism |
 |---|---|
-| `color=black` + `overlay` | Source alpha → black — no clock bleed-through |
+| Pre-composite + `color=black` + `overlay` | RGBA / LA / palette alpha composited onto pure `#000000` black — no clock bleed-through or halo artifacts |
 | `-gifflags -offsetting-transdiff` | Disables GIF delta encoding |
 | `-f gif` (explicit) | Forces GIF output format regardless of input extension |
 

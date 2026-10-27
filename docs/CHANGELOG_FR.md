@@ -1,5 +1,26 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.4] - 2026-10-28 (Suivi de Sol Bidirectionnel Platformer & Protection de la Tête)
+### Corrigé & Amélioré
+- **Estimateur de Sol Bidirectionnel Sensible à la Posture (`_FloorEstimator`)** : Évolution du suivi de sol d'un simple EMA asymétrique descendant vers un estimateur bidirectionnel (`_ALPHA_ATTACK = 0.25`, `_ALPHA_RELEASE_JUMP = 0.04`, `_ALPHA_RELEASE_STANCE = 0.28`). Ré-ancre dynamiquement la caméra vers le haut sur les plateformes élevées confirmées (dispersion sur 5 frames `<= 9 %` de la hauteur ou 9 échantillons élevés consécutifs), verrouille immédiatement la première vraie détection après des frames initiales `None`, et rejette les pics isolés d'une frame en bordure inférieure (`rb >= 0.96 * frame_h`).
+- **Ratio de Sol Platformer (`platformer_floor_ratio = 0.90`)** : Relèvement de l'ancrage de sol par défaut de `0.80` à `0.90` (~3 px de sol visible sur une dalle DMD de 32 px de haut) afin que les dalles de sol épaisses ne consomment plus le budget vertical au détriment de la tête du joueur.
+- **Enveloppe de Visibilité Tête / Pieds (`_build_camera_rect`)** : Ajout de gardes explicites de marge haute (`headroom`) et basse (`footroom`) dans `_build_camera_rect` (avec repli haut du corps `y + 0.45 * h` pour les grands sprites et filtrage des explosions plein écran) garantissant la visibilité complète du personnage lors des changements de plateforme.
+- **Suppression Morphologique des Bandes de Sol & Pondération Playfield (`_FrameDetector`)** : Suppression par ouverture morphologique (`cv2.MORPH_OPEN`) des larges bandes horizontales de sol/HUD en défilement (`>= 38 %` de la largeur) sur les masques de mouvement, et pondération verticale équilibrée de l'aire de jeu (`0.50..0.92` et plateformes hautes `0.30..0.50`) pour YOLOv8 et la détection de mouvement (validé par 15 tests unitaires dans `tests/engine/test_platformer_framing.py`).
+
+## [V8.0.3] - 2026-10-27 (Panoramique Déterministe TATE/YOKO & Zoom-to-Cover Zéro Bande Noire)
+### Ajouté & Amélioré
+- **Axe de Défilement Panoramique Déterministe (`resolve_panorama_scroll_axis`)** : Ajout de la fonction publique `resolve_panorama_scroll_axis()` et du paramètre `scroll_direction` (`"auto"`, `"horizontal"`, `"vertical"`). En mode `"auto"`, les dalles verticales TATE (`height > width`, ex. `64×128`, `32×128`) défilent toujours de gauche à droite, les dalles horizontales YOKO (`width > height`, ex. `128×32`, `128×64`, `256×64`) défilent toujours de haut en bas, et les dalles carrées (`64×64`) s'adaptent automatiquement au ratio paysage/portrait de la source.
+- **Zoom-to-Cover Uniforme & Zéro Bande Noire** : Mise à l'échelle Lanczos uniforme 1:1 (`force_original_aspect_ratio=increase` + découpe exacte) garantissant l'absence totale de bandes noires, une distance minimale de travelling en mode `force_panorama_scroll`, et un centrage propre sur l'axe perpendiculaire en cas de zoom.
+- **Composition Alpha sur Noir Pur** : Aplatissement préalable des images RGBA, LA et à palette transparente sur fond noir pur (`#000000`) dans `DmdMediaProcessor.process_image_panorama` avant l'encodage FFmpeg.
+
+## [V8.0.2] - 2026-10-25 (Calibration Gros Plan sur la Bande Yeux-Bouche)
+### Corrigé
+- **Bande Expressive Canonique (`closeup_eye_mouth_fractions`)** : Calibration verticale des gros plans YOLOv8 `person` sur `[0.23..0.61]*rh` (centre `0.42*rh`) pour les portraits larges/carrés avec mise à l'échelle progressive sur les plans buste (`1.0 < aspect <= 1.4`), éliminant la dérive vers le nez/menton et conservant simultanément les yeux et la bouche sur les afficheurs DMD 4:1 et 2:1.
+
+## [V8.0.1] - 2026-10-25 (Protection Front Gros Plan & Isolation Platformer)
+### Corrigé
+- **Cadrage Gros Plan & Garde Platformer** : Ancrage des portraits rapprochés (`talking_closeup` et gros plans implicites `aspect <= 1.4`) sur la zone expressive yeux-bouche plutôt que sur le front/cheveux, augmentation de la marge basse visage (`25 %`), et désactivation stricte de `face_priority` lorsque `platformer_mode=True`.
+
 ## [V8.0.0] - 2026-10-23 (Librairie Headless, API Streaming V3, Vidéo Haut FPS & Cadrage Robuste)
 ### Ajouté
 - **Cœur Headless & Librairie Python Pip** : Exécution headless complète sans dépendance Tkinter/X11 pour conteneurs Docker, microservices et orchestrateurs.

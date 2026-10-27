@@ -1,6 +1,6 @@
-# 📦 Headless Python Library & Binary Stream Reference
+# 📦 Headless Python Library & Binary Stream Reference (`v8.0.4`)
 
-`dmd_gif_converter` is packaged as a standard **PEP 621 Python library** (`dmd-gif-converter`) with strict separation between its **Headless Core Engine** (zero X11 / Tkinter dependency, ready for Docker and server backends) and its optional **Desktop GUI (`[ui]`)**.
+`dmd_gif_converter` is packaged as a standard **PEP 621 Python library** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.4"`) with strict separation between its **Headless Core Engine** (zero X11 / Tkinter dependency, ready for Docker and server backends) and its optional **Desktop GUI (`[ui]`)**.
 
 ---
 
@@ -37,6 +37,7 @@ from pathlib import Path
 from dmd_gif_converter import (
     DmdClipConfig,
     DmdMediaProcessor,
+    resolve_panorama_scroll_axis,
     truncate_rgb565_stream,
     __version__,
 )
@@ -86,7 +87,34 @@ snap_png, snap_rgb565 = processor.process_pan_backdrop(
     height=72,
     stem="snap",
 )
+
+# 4. Generate a zero-black-bar scrolling panorama (.gif + .rgb565.stream) for YOKO or TATE panels
+axis = resolve_panorama_scroll_axis(src_w=1920, src_h=1080, target_width=64, target_height=128)
+assert axis == "horizontal"  # TATE panels (H > W) always pan left-to-right
+
+pan_assets = processor.process_image_panorama(
+    input_image=Path("marquee_or_poster.png"),  # RGBA alpha is composited onto pure #000000 black
+    output_dir=Path("/tmp/dmd_out"),
+    width=64,
+    height=128,
+    duration_s=5.0,
+    fps=20,
+    scroll_direction="auto",  # "auto" | "horizontal" | "vertical"
+    export_gif=True,
+    export_rgb565_stream=True,
+    stem="pan_tate",
+)
 ```
+
+### Orientation-Aware Panorama & Framing Guarantees (`v8.0.3`–`v8.0.4`)
+
+- **`resolve_panorama_scroll_axis(src_w, src_h, target_width, target_height, scroll_direction="auto") -> str`**:
+  - **TATE (`target_height > target_width`)**: Always returns `"horizontal"` (left-to-right pan), centering vertically when zoomed.
+  - **YOKO (`target_width > target_height`)**: Always returns `"vertical"` (top-to-bottom pan), centering horizontally when zoomed.
+  - **Square (`target_width == target_height`)**: Returns `"horizontal"` when `src_w > src_h` and `"vertical"` otherwise.
+  - Supports explicit overrides (`"horizontal"` / `"left_to_right"` / `"ltr"` / `"x"` and `"vertical"` / `"top_to_bottom"` / `"ttb"` / `"y"`), also configurable on `DmdClipConfig(scroll_enabled=True, scroll_direction="auto")`.
+- **Uniform Zoom-to-Cover**: Preserves 1:1 pixel aspect ratio via Lanczos resampling with zero black bars and guaranteed non-static travel in panorama mode; RGBA/palette transparency is composited onto pure black before encoding.
+- **Auto-Action Framing (`use_auto_action=True`)**: Ships with stance-aware bidirectional 2D platformer floor tracking (`platformer_floor_ratio=0.90`, ~3 px ground strip on 32 px DMDs, headroom/footroom visibility envelope) and calibrated eyes-to-mouth close-up framing (`closeup_eye_mouth_fractions`).
 
 ---
 

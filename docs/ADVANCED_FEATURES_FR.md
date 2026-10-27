@@ -66,7 +66,8 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `action_top_crop` | Top crop % | `0 %` | Exclut les N % supérieurs du frame de la détection (manuel — ignoré si auto actif) |
 | `action_auto_top_crop` | Auto top crop | `OFF` | **Détecte automatiquement** la limite haute du sujet (tête / ciel) — adapte la marge selon face ou corps entier |
 | `action_vertical_bias` | Vertical bias | `0,0` | Décalage vertical manuel : `+1,0` = caméra vers le bas (sol visible), `-1,0` = caméra vers le haut |
-| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Détecte automatiquement** le niveau du sol via un EMA asymétrique — résiste aux sauts, suit les atterrissages. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
+| `action_auto_vertical_bias` | Auto floor detect | `OFF` | **Suit automatiquement** le sol et les plateformes élevées via un estimateur bidirectionnel sensible à la posture (`_FloorEstimator`) — résiste aux sauts, suit les atterrissages et se ré-ancre vers le haut sur les plateformes supérieures. Écrase le bias manuel. Idéal pour les jeux de plateformes 2D. |
+| `platformer_floor_ratio` | *(Auto / Config)* | `0,90` | Position verticale d'ancrage du sol en mode platformer (`0,90` = 90 % depuis le haut, soit ~3 px de sol visible sur une dalle DMD de 32 px tout en protégeant la marge au-dessus de la tête sur sol épais). |
 | `action_smart_auto_crop` | 🧠 Smart Auto Crop | `OFF` | **Le moteur analyse 60 images et active le profil de caméra optimal** via une **Matrice de Score Continue**. Il évalue 9 types de scènes (ex: `talking_closeup`, `platformer`, `action_horizontal`) sur la base du ratio de hauteur, variance X/Y, et dimensions de la boîte. La scène avec le meilleur score l'emporte, configurant automatiquement les crops, le suivi du sol et la marge. Les logs UI affichent un `=== Scene Classification Scoreboard ===` détaillant comment l'IA a pris sa décision. |
 | **🚀 Let Me Handle It** | Mode full-auto en un clic — active les 5 systèmes IA (Smart Color Boost + Auto Action + Smart Auto Crop + Soustraction de fond + DMD Visibility Score) et grise les réglages non pertinents |
 
@@ -79,19 +80,20 @@ Pour les bibliothèques de sprites rétro ou de GIFs pixel art, le pipeline scro
 | `hybrid` | Fusionne les boîtes person + motion — couverture la plus large |
 | `center` | Pas de détection — caméra centrée (panoramique intro uniquement) |
 
-### Auto floor detect — suivi dynamique du sol
+### Auto floor detect — suivi dynamique bidirectionnel du sol et des plateformes
 
-> **Idéal pour les jeux de plateformes 2D** et tout contenu où le niveau du sol change.
+> **Idéal pour les jeux de plateformes 2D** et tout contenu où l'élévation du sol ou des plateformes évolue.
 
-Quand **Auto floor detect** est activé, la caméra utilise un **EMA asymétrique** (Exponential Moving Average) pour mémoriser le niveau du sol image par image :
+Quand **Auto floor detect** (ou le profil `platformer`) est activé, la caméra utilise un **estimateur de sol bidirectionnel sensible à la posture (`_FloorEstimator`)** ancré à `platformer_floor_ratio = 0.90` (~3 px de sol sur une dalle DMD de 32 px) couplé à une enveloppe stricte de visibilité tête/pieds :
 
 | Situation | Comportement |
 |---|---|
-| Personnage **atterrit** / descend sur une plateforme plus basse | L'estimation du sol se met à jour rapidement (α = 0,28 — atteint le nouveau sol en ~10 images) |
-| Personnage **saute** ou monte | L'estimation du sol bouge à peine (α = 0,02 — < 30 px de dérive sur 8 frames en l'air) |
-| Sujet **hors-champ** (pas de détection) | La caméra maintient le dernier niveau de sol connu — pas de dérive |
+| Personnage **atterrit** / descend sur une plateforme plus basse | L'estimation du sol converge en douceur (`α = 0,25`), tout en rejetant les pics parasites d'une seule frame en bordure basse (`>= 96 %` de la hauteur) |
+| Personnage **saute** ponctuellement | L'estimation du sol reste stable (`α = 0,04`) pour que le terrain ne rebondisse pas en plein saut |
+| Personnage **grimpe et se stabilise** sur une plateforme haute | La détection de posture confirme la nouvelle plateforme (dispersion sur 5 frames `<= 9 %` de la hauteur ou 9 échantillons élevés consécutifs) et ré-ancre la caméra vers le haut (`α = 0,28`), épaulée par la protection `headroom`/`footroom` de `_build_camera_rect` |
+| Sujet **hors-champ** (pas de détection) | La caméra maintient le dernier niveau de sol connu sans dérive, et verrouille immédiatement la toute première vraie détection |
 
-La caméra reste ainsi ancrée au sol pendant les sauts et suit naturellement le personnage quand il atterrit sur une nouvelle plateforme (plus basse).
+La caméra reste ainsi ancrée au sol pendant les sauts classiques tout en accompagnant fluidement le joueur vers le bas **et** vers le haut sur les niveaux multi-étages, sans jamais couper la tête du sprite à cause de dalles de sol épaisses (supprimées morphologiquement via `cv2.MORPH_OPEN` dans `_FrameDetector`).
 
 **Règles de priorité :**
 1. `auto_vertical_bias = True` → suivi auto du sol actif, `vertical_bias` manuel ignoré
@@ -193,7 +195,7 @@ Le profil de scène avec le score total le plus élevé dicte le comportement fi
 - **`menu_static`** : Pour les écrans titres, les menus et les scènes très statiques. Verrouille la caméra et lisse fortement les micro-mouvements pour garder l'écran stable.
 
 #### 👤 Profils Humains & Dialogue
-- **`talking_closeup`** : Pour les animes, vlogs ou dialogues où le visage remplit le cadre. Active le **Mode Priorité Visage**. La caméra ignore le bas du corps et se verrouille rigidement sur la région des yeux (en sautant les 25% supérieurs pour les cheveux, et en ciblant les 35% suivants pour le visage) pour que le visage ne rebondisse pas pendant la prise de parole.
+- **`talking_closeup`** : Pour les animes, vlogs ou dialogues où le visage remplit le cadre. Active le **Mode Priorité Visage** et calibre le cadrage via `closeup_eye_mouth_fractions(aspect)` sur la **bande expressive yeux-bouche** (`[0.23..0.61]*rh`, centrée à `0.42*rh` pour les portraits larges/carrés et ajustée progressivement sur les plans buste `1.0 < aspect <= 1.4`) afin que les afficheurs DMD 4:1 et 2:1 capturent simultanément les yeux et la bouche sans dériver vers le front ni descendre sur le menton.
 - **`talking_medium`** : Pour les présentateurs de journaux ou les plans taille-tête. Active le Mode Priorité Visage, calculant la tête comme les 22% supérieurs de la boîte englobante du corps visible.
 - **`full_body_tall`** : Pour les personnages debout ou les grands sprites d'anime. Active le Mode Priorité Visage, calculant la tête comme les 22% supérieurs du corps, ce qui garantit que le visage est centré plutôt que de couper le sujet aux épaules.
 - **`full_body_medium`** : Suivi générique standard pour les sujets en pied sans Priorité Visage. Utilise des marges de suivi plus serrées.
@@ -395,29 +397,33 @@ Utilisez le menu **Filter** dans le bas du panneau log :
 
 ---
 
-## 🔍 Comportement détaillé
+## 🔍 Comportement détaillé — Panoramique TATE/YOKO & Zoom-to-Cover
 
-### Contenu haut — scroll intelligent
+### Axe de défilement déterministe TATE / YOKO (`resolve_panorama_scroll_axis`)
+
+Lorsque `scroll_enabled = True`, `scroll_direction = "auto"` (défaut) sélectionne de manière déterministe l'axe de travelling selon l'orientation de la dalle HUB75 :
+
+| Géométrie de Dalle | Exemples | Axe de Défilement (`"auto"`) | Cadrage Perpendiculaire |
+|---|---|---|---|
+| **YOKO** (`width > height`) | `128×32`, `128×64`, `256×64` | **Haut vers bas** (`"vertical"`) | Centré horizontalement si zoomé |
+| **TATE** (`height > width`) | `64×128`, `32×128` | **Gauche vers droite** (`"horizontal"`) | Centré verticalement si zoomé |
+| **Carrée** (`width == height`) | `64×64` | **Gauche vers droite** si `src_w > src_h`, sinon **haut vers bas** | Centré sur l'axe fixe |
 
 ```
-[cycle 1]  haut ──bas──▶ fond ──haut──▶ haut
-[partiel]  haut ──bas──▶ stop_pos ──pause jusqu'à fin source──▶ (boucle)
+[cycle 1]  départ ──aller──▶ fin ──retour──▶ départ
+[partiel]  départ ──aller──▶ stop_pos ──pause jusqu'à fin source──▶ (boucle)
 ```
 
-- **`scroll_cycles = 1.5`** (défaut) : 1 aller-retour complet puis descend jusqu'au centre (50 % de la distance), s'arrête là
-- **Crop du bas** (`bottom_crop_pct`) : les 15 % inférieurs (pieds, sol) sont ignorés → distance de scroll réduite
-- Vitesse **constante en px/seconde** indépendamment du FPS source
-- FPS de sortie snappé sur les valeurs propres GIF (10, 12,5, 20, 25 fps) — zéro judder
-
-### Contenu large — centrage statique
-
-L'image est **centrée verticalement** sur les 32 px de la dalle. Durée source respectée (minimum 1 s).
+- **Zoom-to-Cover uniforme 1:1 (zéro bande noire)** : Mise à l'échelle Lanczos uniforme (`force_original_aspect_ratio=increase` + découpe exacte) couvrant 100 % de la dalle sans déformation de ratio ni bandes noires letterbox/pillarbox. En mode panoramique forcé (`force_panorama_scroll`), une amplitude minimale de travelling est garantie sur l'axe actif.
+- **`scroll_cycles = 1.5`** (défaut) : 1 aller-retour complet puis progression jusqu'au centre (`50 %` de la distance) avec maintien stable.
+- **Crop du bas** (`bottom_crop_pct`) : les 15 % inférieurs sont ignorés par défaut en scroll vertical standard → distance de scroll optimisée.
+- Vitesse **constante en px/seconde** indépendamment du FPS source (ou calée sur la durée exacte lorsque `scroll_duration > 0`).
 
 ### Élimination de la transparence
 
 | Couche | Mécanisme |
 |---|---|
-| `color=black` + `overlay` | Fond noir composite — alpha source → noir |
+| Pré-composition + `color=black` + `overlay` | Transparence RGBA / LA / palette aplatie sur noir pur `#000000` — aucun halo ni transparence résiduelle |
 | `-gifflags -offsetting-transdiff` | Désactive le delta encoding GIF |
 
 ## Performances et Sous-échantillonnage

@@ -4,6 +4,7 @@ Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into format
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
+[![Version](https://img.shields.io/badge/Version-v8.0.4-00C853?style=for-the-badge)](docs/CHANGELOG.md)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Project-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
 [![Telegram Community](https://img.shields.io/badge/Telegram-Join%20Community-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
 
@@ -14,7 +15,8 @@ Now ships with a **full cross-platform graphical interface** — no command line
 Tired of manually cropping and adjusting videos for your low-res LED matrix? This engine automates the entire process using AI and computer vision.
 
 - **🤖 AI Iconic Moments**: Automatically analyzes entire videos to find and extract the absolute best, most action-packed moments specifically tailored for a 128x32 display.
-- **🎥 Cinematic Auto-Action Framing**: Uses YOLOv8 AI to track subjects, pan the camera dynamically, and crop the floor/ceiling to keep the action perfectly centered.
+- **🎥 Cinematic Auto-Action Framing**: Uses YOLOv8 AI to track subjects, pan the camera dynamically, calibrate close-ups onto the eyes-to-mouth band, and track 2D platformer ground & elevated platforms bidirectionally (`platformer_floor_ratio=0.90`).
+- **🖼️ Zero-Bar TATE / YOKO Panoramas**: Deterministically pans left-to-right on TATE panels (`64×128`, `32×128`) and top-to-bottom on YOKO panels (`128×32`, `128×64`, `256×64`) with uniform 1:1 Lanczos zoom-to-cover scaling.
 - **🎨 Smart Color Boost**: Automatically detects dark or washed-out scenes and injects the perfect amount of brightness, contrast, and saturation so your GIFs pop on LED panels.
 - **🧠 Continuous Scoring Matrix**: Intelligently scores your scene (Platformer, Talking Closeup, Action) to select the perfect camera profile without any manual intervention.
 - **⚡ Hardware Acceleration & Multithreading**: Auto-detects and uses hardware encoders (VideoToolbox on macOS, NVENC/QSV/AMF on Windows/Linux) and utilizes intelligent CPU auto-workers to massively accelerate batch video processing up to 10x.

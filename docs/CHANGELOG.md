@@ -1,5 +1,26 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.4] - 2026-10-28 (Platformer Stance-Aware Floor Tracking & Headroom Protection)
+### Fixed & Improved
+- **Stance-Aware Bidirectional Floor Estimator (`_FloorEstimator`)**: Upgraded ground tracking from a strictly downward asymmetric EMA to a stance-aware bidirectional estimator (`_ALPHA_ATTACK = 0.25`, `_ALPHA_RELEASE_JUMP = 0.04`, `_ALPHA_RELEASE_STANCE = 0.28`). Re-anchors upward onto confirmed elevated platforms (5-sample spread `<= 9%` frame height or 9 consecutive elevated samples), snaps immediately on the first real detection after initial `None` frames, and rejects isolated single-frame bottom-border scroll spikes (`rb >= 0.96 * frame_h`).
+- **Platformer Floor Ratio (`platformer_floor_ratio = 0.90`)**: Raised default floor anchor from `0.80` to `0.90` (~3 px ground strip on 32 px DMDs) so thick ground slabs no longer consume vertical headroom budget or clip player heads.
+- **Character Headroom & Footroom Visibility Envelope**: Enforced explicit subject headroom and footroom bounds in `_build_camera_rect` (with upper-body fallback `y + 0.45 * h` for oversized sprites and full-screen explosion/flash filtering) to guarantee sprite heads and feet stay visible across platform transitions.
+- **Morphological Ground-Slab Stripping & Playfield Scoring (`_FrameDetector`)**: Added morphological opening suppression (`cv2.MORPH_OPEN`) of wide horizontal ground/HUD scroll bands (`>= 38%` frame width) on motion masks and balanced sprite-plausible playfield weighting (`0.50..0.92` and upper platforms `0.30..0.50`) across YOLOv8 and motion detectors, covered by 15 unit tests in `tests/engine/test_platformer_framing.py`.
+
+## [8.0.3] - 2026-10-27 (Deterministic TATE/YOKO Panorama Scrolling & Zero-Bar Zoom-to-Cover)
+### Added & Improved
+- **Deterministic Orientation-Aware Panorama Axis (`resolve_panorama_scroll_axis`)**: Added public `resolve_panorama_scroll_axis()` helper and `scroll_direction` config (`"auto"`, `"horizontal"`, `"vertical"`). Under `"auto"`, TATE panels (`height > width`, e.g. `64×128`, `32×128`) always pan left-to-right, YOKO panels (`width > height`, e.g. `128×32`, `128×64`, `256×64`) always pan top-to-bottom, and square panels (`64×64`) select horizontal vs vertical travel from source aspect ratio.
+- **Uniform Zoom-to-Cover & Zero Black Bars**: Enforced aspect-ratio-preserving 1:1 Lanczos scaling (`force_original_aspect_ratio=increase` + exact crop) with guaranteed minimum travel distance in `force_panorama_scroll` mode and perpendicular axis centering when zoomed.
+- **RGBA / Palette Transparency Black Compositing**: Pre-composited RGBA, LA, and palette-transparent source images onto pure `#000000` black in `DmdMediaProcessor.process_image_panorama` prior to FFmpeg Lanczos encoding.
+
+## [8.0.2] - 2026-10-25 (Close-Up Eyes-to-Mouth Band Calibration)
+### Fixed
+- **Canonical Close-Up Framing (`closeup_eye_mouth_fractions`)**: Calibrated YOLOv8 `person` close-up vertical framing onto `[0.23..0.61]*rh` (`0.42*rh` midpoint) for wide/square portraits with smooth upward scaling across bust shots (`1.0 < aspect <= 1.4`), preventing downward camera drift onto the nose, chin, and neck while preserving both eyes and mouth on 4:1 and 2:1 DMD strips.
+
+## [8.0.1] - 2026-10-25 (Close-Up Forehead Guard & Platformer Face-Priority Isolation)
+### Fixed
+- **Close-Up Forehead Clipping & Platformer Guard**: Anchored close-up portrait framing (`talking_closeup` and implicit `aspect <= 1.4` close-ups) on the expressive eye-to-mouth band instead of forehead/hairline, increased lower-face crop padding (`25%`), and blocked `face_priority` activation when `platformer_mode=True`.
+
 ## [8.0.0] - 2026-10-23 (Headless Library, V3 Streaming API, High-FPS Video & Robust Tracking)
 ### Added
 - **Headless Core & Pip Installable Library**: Full headless conversion capabilities without Tkinter/X11 dependencies for Docker, microservices, and server orchestrators.

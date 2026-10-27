@@ -394,7 +394,7 @@ If the estimated final dimensions are too small, the zoom is cancelled and the c
 Optimised specifically for side-scrolling 2-D games (Mario, Sonic, Metroid).
 
 Standard tracking centres the subject, meaning the floor moves up and down as the character jumps. Platformer mode instead:
-1. **Locks the floor:** Uses the asymmetric EMA floor estimator to anchor the camera vertically so the ground stays at a fixed height (default: bottom 20% of the strip).
+1. **Locks & tracks platforms bidirectionally:** Uses the stance-aware bidirectional floor estimator (`_FloorEstimator`) to anchor the ground at a fixed height (default `platformer_floor_ratio = 0.90`, bottom 10% of the strip, ~3 px on 32 px DMDs) while smoothly re-anchoring upward onto elevated platforms and enforcing headroom/footroom visibility guards.
 2. **Widens the view:** Expands the horizontal field of view by 50% to reveal more of the level ahead, preventing the "tunnel vision" effect.
 
 | Field | Default | Description |

@@ -4,6 +4,7 @@ Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, W
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
+[![Version](https://img.shields.io/badge/Version-v8.0.4-00C853?style=for-the-badge)](docs/CHANGELOG_FR.md)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Soutenir%20le%20Projet-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
 [![Communauté Telegram](https://img.shields.io/badge/Telegram-Rejoindre%20la%20Communaut%C3%A9-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
 
@@ -14,7 +15,8 @@ Désormais livré avec une **interface graphique complète multi-plateforme** �
 Marre de recadrer manuellement vos vidéos pour votre matrice LED basse résolution ? Ce moteur automatise l'intégralité du processus grâce à l'IA et la vision par ordinateur.
 
 - **🤖 AI Iconic Moments** : Analyse automatiquement de longues vidéos pour trouver et extraire les scènes les plus épiques, spécialement optimisées pour un affichage 128x32.
-- **🎥 Caméra Cinématique par IA** : Utilise YOLOv8 pour suivre les sujets, effectuer des panoramiques dynamiques et recadrer intelligemment le sol et le plafond afin de garder l'action centrée.
+- **🎥 Caméra Cinématique par IA** : Utilise YOLOv8 pour suivre les sujets, calibrer les gros plans sur la bande yeux-bouche, et accompagner bidirectionnellement le sol et les plateformes en jeu 2D (`platformer_floor_ratio=0.90`).
+- **🖼️ Panoramiques TATE / YOKO Zéro Bande Noire** : Défilement déterministe gauche-droite sur dalles TATE (`64×128`, `32×128`) et haut-bas sur dalles YOKO (`128×32`, `128×64`, `256×64`) avec zoom-to-cover Lanczos uniforme 1:1.
 - **🎨 Smart Color Boost** : Détecte automatiquement les scènes sombres ou délavées et injecte la quantité parfaite de luminosité, de contraste et de saturation pour que vos GIFs soient éclatants.
 - **🧠 Matrice de Score Continue** : Évalue intelligemment chaque scène (Platformer, Talking Closeup, Action) pour sélectionner le profil de caméra parfait sans aucune intervention manuelle.
 - **⚡ Accélération Matérielle & Multithreading** : Détecte et utilise automatiquement les encodeurs matériels (VideoToolbox sur macOS, NVENC/QSV/AMF sur Windows/Linux) et exploite toute la puissance de votre processeur (auto-workers intelligents) pour accélérer le traitement vidéo massif jusqu'à 10x.

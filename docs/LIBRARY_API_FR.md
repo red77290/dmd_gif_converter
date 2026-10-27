@@ -1,6 +1,6 @@
-# 📦 Référence de la Librairie Python Headless & Flux Binaire
+# 📦 Référence de la Librairie Python Headless & Flux Binaire (`v8.0.4`)
 
-`dmd_gif_converter` est packagé comme une **librairie Python standard (PEP 621)** (`dmd-gif-converter`) avec une séparation stricte entre son **Moteur Core Headless** (zéro dépendance X11 / Tkinter, prêt pour Docker et les serveurs d'API) et son **Interface Graphique Desktop optionnelle (`[ui]`)**.
+`dmd_gif_converter` est packagé comme une **librairie Python standard (PEP 621)** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.4"`) avec une séparation stricte entre son **Moteur Core Headless** (zéro dépendance X11 / Tkinter, prêt pour Docker et les serveurs d'API) et son **Interface Graphique Desktop optionnelle (`[ui]`)**.
 
 ---
 
@@ -37,6 +37,7 @@ from pathlib import Path
 from dmd_gif_converter import (
     DmdClipConfig,
     DmdMediaProcessor,
+    resolve_panorama_scroll_axis,
     truncate_rgb565_stream,
     __version__,
 )
@@ -83,7 +84,34 @@ snap_png, snap_rgb565 = processor.process_pan_backdrop(
     height=72,
     stem="snap",
 )
+
+# 4. Générer un panorama animé zéro bande noire (.gif + .rgb565.stream) pour dalles YOKO ou TATE
+axis = resolve_panorama_scroll_axis(src_w=1920, src_h=1080, target_width=64, target_height=128)
+assert axis == "horizontal"  # Les dalles TATE (H > W) défilent toujours de gauche à droite
+
+pan_assets = processor.process_image_panorama(
+    input_image=Path("marquee_or_poster.png"),  # Alpha RGBA aplati sur fond noir pur #000000
+    output_dir=Path("/tmp/dmd_out"),
+    width=64,
+    height=128,
+    duration_s=5.0,
+    fps=20,
+    scroll_direction="auto",  # "auto" | "horizontal" | "vertical"
+    export_gif=True,
+    export_rgb565_stream=True,
+    stem="pan_tate",
+)
 ```
+
+### Garanties Panoramiques TATE/YOKO & Cadrage IA (`v8.0.3`–`v8.0.4`)
+
+- **`resolve_panorama_scroll_axis(src_w, src_h, target_width, target_height, scroll_direction="auto") -> str`** :
+  - **TATE (`target_height > target_width`)** : Retourne toujours `"horizontal"` (défilement gauche vers droite), centré verticalement en cas de zoom.
+  - **YOKO (`target_width > target_height`)** : Retourne toujours `"vertical"` (défilement haut vers bas), centré horizontalement en cas de zoom.
+  - **Carrée (`target_width == target_height`)** : Retourne `"horizontal"` si `src_w > src_h` et `"vertical"` sinon.
+  - Accepte les forçages explicites (`"horizontal"` / `"left_to_right"` / `"ltr"` / `"x"` et `"vertical"` / `"top_to_bottom"` / `"ttb"` / `"y"`), également disponibles via `DmdClipConfig(scroll_enabled=True, scroll_direction="auto")`.
+- **Zoom-to-Cover Uniforme** : Préserve strictement le ratio d'aspect 1:1 (Lanczos) sans aucune bande noire, garantit une amplitude minimale de mouvement en mode panorama, et aplatit la transparence RGBA/palette sur fond noir pur avant l'encodage.
+- **Cadrage Auto-Action (`use_auto_action=True`)** : Intègre le suivi de sol bidirectionnel sensible à la posture pour jeux de plateformes 2D (`platformer_floor_ratio=0.90`, ~3 px de sol visible sur dalle 32 px, enveloppe de protection tête/pieds) ainsi que la calibration gros plan yeux-bouche (`closeup_eye_mouth_fractions`).
 
 ---
 
