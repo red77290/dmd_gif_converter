@@ -121,12 +121,34 @@ def _brightness_delta(mean_lum: float) -> float:
     return _linear_interp(mean_lum, xp, fp)
 
 
+_STATIC_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+
+
 def _sample_frames(src_str: str, is_gif: bool, cv2) -> list:
     """Open the source and return a list of BGR frames sampled at key positions.
 
-    GIF  → frame 0 only  (sequential decode is O(N), keep it cheap).
-    Video → frames at 25 %, 50 %, 75 % of duration.
+    Static image → decoded directly via imdecode/imread (avoids OpenCV VideoCapture
+                   FFmpeg backend stderr errors for PNG/JPEG codecs on Windows and
+                   supports Unicode file paths).
+    GIF          → frame 0 only  (sequential decode is O(N), keep it cheap).
+    Video        → frames at 25 %, 50 %, 75 % of duration.
     """
+    if src_str.lower().endswith(_STATIC_IMAGE_EXTS):
+        if hasattr(cv2, "imdecode"):
+            try:
+                import numpy as _np
+                raw = _np.fromfile(src_str, dtype=_np.uint8)
+                if raw.size > 0:
+                    img = cv2.imdecode(raw, getattr(cv2, "IMREAD_COLOR", 1))
+                    if img is not None:
+                        return [img]
+            except Exception:
+                pass
+        if hasattr(cv2, "imread"):
+            img = cv2.imread(src_str)
+            return [img] if img is not None else []
+        return []
+
     cap = cv2.VideoCapture(src_str)
     if not cap.isOpened():
         if is_gif and hasattr(cv2, "imread"):

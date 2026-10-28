@@ -1,5 +1,11 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.7] - 2026-10-28 (Durcissement Bundle Portable Windows & Colorimétrie Images Statiques)
+### Corrigé & Amélioré
+- **Décodage Direct des Images Statiques en Auto-Colorimétrie (`colorimetry._sample_frames`)** : Décode les fichiers `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp` et `.tiff` directement via `numpy.fromfile` + `cv2.imdecode` (repli `cv2.imread`) sans passer par `cv2.VideoCapture`, éliminant les erreurs C++ OpenCV/FFmpeg `Could not find decoder for codec_id=61` sous Windows tout en supportant les chemins Unicode.
+- **Validation Conditionnelle des Polices (`core.process_file`)** : N'exécute la vérification `font_path.exists()` et le log `[TEXT  ] Font file ... not found` que lorsque `text_overlay_enabled` est actif avec un texte non vide, supprimant les faux messages d'erreur dans les exécutables figés PyInstaller (`_internal`).
+- **Déduplication des Logs en Mode Serveur Embarqué (`quiet_terminal_log`)** : Ajout de l'option `quiet_terminal_log` (`False` par défaut en CLI/GUI autonome) permettant aux serveurs hôtes dotés de handlers Python `logging` d'éviter la double impression sur `stderr`.
+
 ## [V8.0.5] - 2026-10-28 (Stabilisation de la Caméra Platformer & Anti-Indécision)
 ### Corrigé & Amélioré
 - **Filtrage Strict des Frames Sous-Échantillonnées (`FloorEstimationStage`, `HistorySynthesisStage`)** : Empêche la réinjection des boîtes mises en cache lors du sous-échantillonnage YOLO (`subsample_frames > 1` ou `auto_fast_tracking`) dans `_FloorEstimator` et `roi_history`, éliminant les faux déclenchements de posture haute au sommet d'un saut.

@@ -340,6 +340,7 @@ DEFAULT_PARAMS = {
     "text_style":           "outline",  # none | bold | outline | shadow
     "text_bg":              False,      # draw a dark background box behind text
     "text_bg_opacity":      60,         # background box opacity 0-100
+    "quiet_terminal_log":   False,      # suppress direct stderr echo when embedded in a server with logging handlers
     "let_me_handle_it":     False,      # one-click full-auto mode
 }
 
@@ -402,11 +403,14 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     out_path = str(out_path)
     filename = os.path.basename(src_path)
 
+    quiet_terminal = bool(p.get("quiet_terminal_log", False))
+
     def log(msg, level="info"):
-        # 1. Always write directly to the original stderr — immune to
-        #    sys.stderr redirection by Tkinter / customtkinter / OpenCV.
-        _terminal_log(msg, level)
-        # 2. Logging framework (test capture, external file handlers).
+        # 1. Write directly to the original stderr for standalone CLI/GUI —
+        #    skipped when embedded in a host server with structured logging.
+        if not quiet_terminal:
+            _terminal_log(msg, level)
+        # 2. Logging framework (test capture, external file/server handlers).
         getattr(logger, level)(msg)
         # 3. Callback for the UI log panel.
         if callback:
@@ -542,17 +546,18 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     if text_overlay_enabled:
         log(f"[DEBUG ] {filename} — text_animation passed to core: '{text_animation}'", "debug")
 
-    # Resolve font path
+    # Resolve font path only when text overlay is enabled with non-empty text
     script_dir = Path(__file__).parent          # src/engine/conversion/
     root_dir = script_dir.parent.parent.parent   # project root (dmd_gif_converter/)
     font_path = root_dir / "media" / "fonts" / text_font_file
-    if not font_path.exists():
-        font_path = root_dir / "media" / text_font_file
+    if text_overlay_enabled and bool(text_content_raw):
         if not font_path.exists():
-            font_path = Path(text_font_file)
+            font_path = root_dir / "media" / text_font_file
             if not font_path.exists():
-                log(f"[TEXT  ] Font file '{text_font_file}' not found. Text overlay disabled.", "error")
-                text_overlay_enabled = False
+                font_path = Path(text_font_file)
+                if not font_path.exists():
+                    log(f"[TEXT  ] Font file '{text_font_file}' not found. Text overlay disabled.", "error")
+                    text_overlay_enabled = False
 
     font_path_str = str(font_path).replace("\\", "/")  # FFmpeg prefers forward slashes
 

@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v8.0.5)
+# DMD GIF Converter — Technical Architecture (v8.0.7)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -1047,4 +1047,4 @@ To prevent redundant YOLO execution, the UI's `PreviewPanel` strictly chains the
 
 ---
 
-*Last updated: v8.0.5 — October 2026*
+*Last updated: v8.0.7 — October 2026*

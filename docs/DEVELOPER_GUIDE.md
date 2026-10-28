@@ -66,7 +66,7 @@ All UI components are modular and contained in `src/ui/panels/` or `src/ui/setti
 
 ---
 
-## 🎯 Camera, Panorama & Tracker Invariants (v8.0.5)
+## 🎯 Camera, Panorama & Tracker Invariants (v8.0.7)
 
 When modifying conversion geometry (`core.py`), camera framing (`camera.py`), floor estimation (`analysis.py`), or sprite detection (`detector.py`), preserve the following deterministic invariants:
 

@@ -1,5 +1,11 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.7] - 2026-10-28 (Windows Frozen Bundle & Static Image Colorimetry Hardening)
+### Fixed & Improved
+- **Direct Static-Image Decode in Auto-Colorimetry (`colorimetry._sample_frames`)**: Decodes `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, and `.tiff` inputs directly via `numpy.fromfile` + `cv2.imdecode` (with `cv2.imread` fallback) instead of `cv2.VideoCapture`, eliminating OpenCV FFmpeg `Could not find decoder for codec_id=61` C++ stderr errors on Windows and supporting Unicode file paths.
+- **Conditional Font Validation (`core.process_file`)**: Skips `font_path.exists()` lookup and `[TEXT  ] Font file ... not found` error logging whenever `text_overlay_enabled` is `False` or `text_content` is empty, avoiding false error logs inside PyInstaller `_internal` frozen bundles.
+- **Embedded Host Log Deduplication (`quiet_terminal_log`)**: Added `quiet_terminal_log` parameter (`False` by default for standalone CLI/GUI) so embedded server hosts with structured `logging` handlers can suppress duplicate direct-stderr echoes.
+
 ## [8.0.5] - 2026-10-28 (Platformer Camera Stability & Anti-Indecision Hardening)
 ### Fixed & Improved
 - **Fresh-Sample-Only Floor & History Updates (`FloorEstimationStage`, `HistorySynthesisStage`)**: Prevented cached subsampled YOLO/motion detections (`subsample_frames > 1` or `auto_fast_tracking`) from feeding duplicate mid-air jump samples into `_FloorEstimator` and `roi_history`, eliminating false zero-spread upper-platform stance triggers during normal jumps.

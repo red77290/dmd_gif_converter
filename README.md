@@ -4,7 +4,7 @@ Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into format
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
-[![Version](https://img.shields.io/badge/Version-v8.0.5-00C853?style=for-the-badge)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v8.0.7-00C853?style=for-the-badge)](docs/CHANGELOG.md)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Project-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
 [![Telegram Community](https://img.shields.io/badge/Telegram-Join%20Community-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
 

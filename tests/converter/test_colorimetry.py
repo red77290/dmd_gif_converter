@@ -372,6 +372,30 @@ class TestAnalyzeAndCompensate(unittest.TestCase):
         self.assertLess(_BASE_GAMMA,         1.0)
         self.assertLess(abs(_BASE_BRIGHTNESS), 0.1)
 
+    def test_static_png_bypasses_video_capture(self):
+        """Static image files (.png/.jpg) must decode via imdecode/imread without opening VideoCapture."""
+        import tempfile
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            self.skipTest("opencv/numpy not available")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            png_path = f"{tmp}/sample_pan_jacket.png"
+            img = np.full((64, 64, 3), 120, dtype=np.uint8)
+            ok_encode, encoded = cv2.imencode(".png", img)
+            self.assertTrue(ok_encode)
+            encoded.tofile(png_path)
+
+            with patch("cv2.VideoCapture") as mock_vc:
+                ok, params, msg = analyze_and_compensate(png_path)
+                mock_vc.assert_not_called()
+
+        self.assertTrue(ok)
+        self.assertIn("contrast", params)
+        self.assertIn("1 frame", msg)
+
 
 if __name__ == "__main__":
     unittest.main()

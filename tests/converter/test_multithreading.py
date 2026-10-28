@@ -484,6 +484,64 @@ class TestTerminalLog(unittest.TestCase):
             f"Aucun log de conversion n'est apparu dans stderr. Sortie: {output[:200]!r}"
         )
 
+    def test_disabled_text_overlay_never_logs_missing_font_error(self):
+        """When text_overlay_enabled is False, missing/frozen font paths must never emit [TEXT] errors."""
+        import io, sys as _sys
+        captured = io.StringIO()
+        original = getattr(_sys, "__stderr__", None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out.gif")
+            try:
+                _sys.__stderr__ = captured
+                with patch("src.engine.conversion.core.get_metadata",
+                           return_value=(640, 480, 25.0, 4.0)):
+                    with patch("src.engine.conversion.core._run_ffmpeg_with_drain",
+                               return_value=(0, b"")):
+                        conv.process_file(
+                            "input.mp4",
+                            out,
+                            params={
+                                "text_overlay_enabled": False,
+                                "text_font_file": "/nonexistent/_internal/app/imaging_primitives.py",
+                            },
+                        )
+            finally:
+                if original is not None:
+                    _sys.__stderr__ = original
+
+        output = captured.getvalue()
+        self.assertNotIn("Font file", output)
+        self.assertNotIn("[TEXT  ]", output)
+
+    def test_quiet_terminal_log_suppresses_direct_stderr_only(self):
+        """quiet_terminal_log=True must suppress direct stderr echo for embedded server callers."""
+        import io, sys as _sys
+        captured = io.StringIO()
+        original = getattr(_sys, "__stderr__", None)
+        cb_messages = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "out.gif")
+            try:
+                _sys.__stderr__ = captured
+                with patch("src.engine.conversion.core.get_metadata",
+                           return_value=(640, 480, 25.0, 4.0)):
+                    with patch("src.engine.conversion.core._run_ffmpeg_with_drain",
+                               return_value=(0, b"")):
+                        conv.process_file(
+                            "input.mp4",
+                            out,
+                            params={"quiet_terminal_log": True},
+                            callback=lambda m, lvl: cb_messages.append((m, lvl)),
+                        )
+            finally:
+                if original is not None:
+                    _sys.__stderr__ = original
+
+        self.assertEqual(captured.getvalue(), "")
+        self.assertTrue(len(cb_messages) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()

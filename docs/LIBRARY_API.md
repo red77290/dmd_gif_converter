@@ -1,6 +1,6 @@
-# 📦 Headless Python Library & Binary Stream Reference (`v8.0.5`)
+# 📦 Headless Python Library & Binary Stream Reference (`v8.0.7`)
 
-`dmd_gif_converter` is packaged as a standard **PEP 621 Python library** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.5"`) with strict separation between its **Headless Core Engine** (zero X11 / Tkinter dependency, ready for Docker and server backends) and its optional **Desktop GUI (`[ui]`)**.
+`dmd_gif_converter` is packaged as a standard **PEP 621 Python library** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.7"`) with strict separation between its **Headless Core Engine** (zero X11 / Tkinter dependency, ready for Docker and server backends) and its optional **Desktop GUI (`[ui]`)**.
 
 ---
 

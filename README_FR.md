@@ -4,7 +4,7 @@ Convertit **n'importe quel GIF animé ou fichier vidéo** (MP4, MKV, MOV, AVI, W
 
 Désormais livré avec une **interface graphique complète multi-plateforme** — aucune ligne de commande nécessaire.
 
-[![Version](https://img.shields.io/badge/Version-v8.0.5-00C853?style=for-the-badge)](docs/CHANGELOG_FR.md)
+[![Version](https://img.shields.io/badge/Version-v8.0.7-00C853?style=for-the-badge)](docs/CHANGELOG_FR.md)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Soutenir%20le%20Projet-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
 [![Communauté Telegram](https://img.shields.io/badge/Telegram-Rejoindre%20la%20Communaut%C3%A9-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
 
