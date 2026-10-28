@@ -51,7 +51,20 @@ class VideoAnalyzer:
         _smart = getattr(self.cfg, "smart_auto_crop", False)
         _auto_pillarbox = getattr(self.cfg, "auto_pillarbox_crop", False)
         _auto_scene = getattr(self.cfg, "auto_scene_type", False)
-        
+        _explicit_scene = str(getattr(self.cfg, "scene_type", "") or "").strip()
+
+        if _explicit_scene:
+            from .scene_types import SCENE_PROFILES
+            if _explicit_scene in SCENE_PROFILES:
+                _sp_exp = SCENE_PROFILES[_explicit_scene]
+                self.scene_profile = _sp_exp
+                self.cfg.scene_profile = _sp_exp
+                self.cfg.face_clip_mode = _sp_exp.face_clip_mode
+                if _sp_exp.platformer_mode:
+                    self.cfg.platformer_mode = True
+                if _sp_exp.auto_vertical_bias:
+                    self.cfg.auto_vertical_bias = True
+
         if _smart or _auto_str or _auto_sm or _auto_pillarbox or _auto_scene:
             try:
                 _decision = _smart_auto_crop_decision(src_path, self.cfg, self.frame_w, self.frame_h)
@@ -61,6 +74,7 @@ class VideoAnalyzer:
                     self.cfg.detector = _decision["best_detector"]
                 if "median_height" in _decision:
                     self.median_subject_height = _decision["median_height"]
+                    self.cfg.median_subject_height = self.median_subject_height
                 if "median_width" in _decision:
                     self.median_subject_width = _decision["median_width"]
 

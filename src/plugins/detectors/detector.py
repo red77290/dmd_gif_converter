@@ -276,12 +276,17 @@ class _FrameDetector(AbstractDetector):
             boxes_bottom = boxes_raw[:, 1] + boxes_raw[:, 3] / 2.0
             bottomness = boxes_bottom / float(self._model_h)
             bw_norm = boxes_raw[:, 2] / float(self._model_w)
+            bh_norm = boxes_raw[:, 3] / float(self._model_h)
+            area_norm = bw_norm * bh_norm
             aspect_wh = boxes_raw[:, 2] / np.maximum(1.0, boxes_raw[:, 3])
 
-            # Reject wide horizontal ground/HUD scroll bands and bottom-border slabs
+            # Reject wide horizontal ground/HUD scroll bands, bulky background scenery
+            # pareidolia (e.g. cave rock arches spanning >40% screen width or >22% screen area),
+            # and bottom-border slabs.
             wide_band = (bw_norm > 0.40) & (aspect_wh > 2.4)
+            bulky_scenery = (bw_norm > 0.40) | (area_norm > 0.22)
             bottom_slab = (bottomness >= 0.98) & (bw_norm > 0.24) & (aspect_wh > 1.8)
-            mask = mask & ~wide_band & ~bottom_slab
+            mask = mask & ~wide_band & ~bulky_scenery & ~bottom_slab
 
             # Playfield-balanced vertical weighting: favor 0.50..0.92 (covering thick ground)
             # and upper platforms (0.30..0.50) without favoring 0.99 bottom-border tile noise.
@@ -300,14 +305,19 @@ class _FrameDetector(AbstractDetector):
             )
 
             # Horizontal subject continuity: prevent argmax ping-pong between player
-            # and secondary enemies/partners on opposite sides of the playfield.
-            if expected_cx is not None:
+            # and secondary enemies/partners, while penalizing static outer-border props
+            # (e.g. level-edge signposts at x < 7% or x > 93% of frame width).
+            cx_norm = boxes_raw[:, 0] / float(self._model_w)
+            edge_weight = np.where((cx_norm < 0.07) | (cx_norm > 0.93), 0.35, 1.0)
+            exp_cx_norm = (
+                float(expected_cx) / max(1.0, float(w)) if expected_cx is not None else -1.0
+            )
+            if expected_cx is not None and 0.07 <= exp_cx_norm <= 0.93:
                 cx_model = float(expected_cx) * (self._model_w / max(1.0, float(w)))
                 dx_norm = np.abs(boxes_raw[:, 0] - cx_model) / float(self._model_w)
-                horiz_weight = 1.0 + 0.90 * np.exp(-dx_norm * 5.0)
+                horiz_weight = (1.0 + 0.90 * np.exp(-dx_norm * 5.0)) * edge_weight
             else:
-                cx_norm = boxes_raw[:, 0] / float(self._model_w)
-                horiz_weight = 1.0 + 0.25 * np.maximum(0.0, 0.5 - np.abs(cx_norm - 0.5))
+                horiz_weight = (1.0 + 0.30 * np.maximum(0.0, 0.5 - np.abs(cx_norm - 0.5))) * edge_weight
 
             if expected_floor_y is not None:
                 sy_model = self._model_h / float(h)

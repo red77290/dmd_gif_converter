@@ -66,7 +66,7 @@ All UI components are modular and contained in `src/ui/panels/` or `src/ui/setti
 
 ---
 
-## 🎯 Camera, Panorama & Tracker Invariants (v8.0.9)
+## 🎯 Camera, Panorama & Tracker Invariants (v8.0.10)
 
 When modifying conversion geometry (`core.py`), camera framing (`camera.py`), floor estimation (`analysis.py`), or sprite detection (`detector.py`), preserve the following deterministic invariants:
 
@@ -89,9 +89,9 @@ When modifying conversion geometry (`core.py`), camera framing (`camera.py`), fl
      - `_ALPHA_RELEASE_STANCE = 0.28`: Upward re-anchoring onto a confirmed higher platform once `>= 6` fresh samples have foot spread `<= 0.045 * frame_h` while elevated (or `>= 12` consecutive elevated fresh samples).
    - Tracks `_has_detection` explicitly so the very first real ROI snaps `_floor_y = rb` immediately even if preceded by `None` frames, and rejects isolated 1-frame downward spikes at the extreme bottom border (`rb >= 0.96 * frame_h` and `rb > floor_y + 0.12 * frame_h`) unless corroborated by `>= 2` consecutive samples.
 
-4. **Outer-Boundary Headroom/Footroom Guard (`_build_camera_rect` & `platformer_floor_ratio = 0.90`)**:
-   - Default `platformer_floor_ratio` is `0.90` (~3 px ground strip on a 32 px DMD) so thick ground slabs do not starve vertical headroom.
-   - In `src/engine/auto_action/camera.py`, `platformer_mode` keeps `cy = cy_floor` 100% locked for all normal movement and jumps within the floor-anchored window, intervening only when a non-explosion sprite crosses outside `[cam_top_floor + 0.06 * crop_h, cam_bottom_floor]` (or exceeds `crop_h`).
+4. **Unified Small-Sprite vs Tall-Sprite Framing (`_build_camera_rect`, `_clip_to_face_roi` & `platformer_floor_ratio = 0.90`)**:
+   - Default `platformer_floor_ratio` is `0.90` (~3 px ground strip on a 32 px DMD) so thick ground slabs do not starve vertical headroom, shared across both `platformer` and `fighting_2d`.
+   - In `src/engine/auto_action/camera.py`, small/medium sprites (`h <= 0.84 * crop_h`) keep `cy = cy_floor` 100% locked for normal movement and jumps within the floor-anchored window, while tall sprites (`h > 0.84 * crop_h`) anchor the upper half and head/face near the top (`cy = (y - 0.06 * crop_h) + 0.5 * crop_h`), letting the floor line leave the frame below while preserving downward platform tracking.
 
 5. **Morphological Ground-Band Stripping, Active-Floor Affinity & Horizontal Subject Continuity (`_FrameDetector`)**:
    - In `src/plugins/detectors/detector.py`, platformer motion detection rejects global camera flashes (`> 70%` active mask) and applies morphological opening (`cv2.MORPH_OPEN` with width `max(16, int(frame_w * 0.38))`) to strip wide horizontal scrolling ground/HUD slabs before contour extraction.

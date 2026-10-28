@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmd-gif-converter"
-version = "8.0.9"
+version = "8.0.10"
 description = "Headless library, CLI, and GUI to convert videos, trailers, and images into HUB75 LED matrix / DMD formats (.gif, .rgb565, .rgb565.stream)"
 readme = "README.md"
 requires-python = ">=3.10"

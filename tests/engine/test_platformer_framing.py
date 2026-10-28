@@ -486,4 +486,165 @@ class TestCameraStabilityAndAntiIndecision:
         assert engine.floor_est.floor_y > 165.0
 
 
+class TestUnifiedSmallVsTallSpriteFraming:
+    """
+    Regression suite for v8.0.10 unified 2D Platformer & VS Fighting camera model:
+    - Small sprites (h <= 0.84 * crop_h) lock onto the floor line at 90% strip height.
+    - Tall sprites (h > 0.84 * crop_h, in both VS Fighting and tall-sprite Platformers)
+      anchor the character's head/face near the top of the DMD strip and allow the floor
+      line and lower legs out of frame below, with C0 continuity at the threshold.
+    """
+
+    def test_tall_sprite_focuses_upper_half_with_head_at_top_and_floor_below_frame(self):
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(target_width=128, target_height=32)
+        # crop_h = 76.0, max_fit_h = 76.0 * 0.84 = 63.84
+        for roi, floor_y in [
+            ((110, 92, 52, 98), 190.0),  # VS Fighting tall sprite (h=98)
+            ((124, 96, 38, 84), 180.0),  # Tall-sprite platformer e.g. Dracula (h=84)
+        ]:
+            _, cy, _, ch = _build_camera_rect(
+                fw, fh, roi, cfg, floor_y_est=floor_y, face_priority_mode=False
+            )
+            cam_top = cy - ch / 2.0
+            cam_bottom = cy + ch / 2.0
+            # Head anchored near top with 6% crop_h headroom pad
+            assert cam_top == pytest.approx(roi[1] - ch * 0.06, abs=0.25)
+            # Upper half of the character (head + torso) 100% inside the DMD strip
+            assert cam_bottom >= roi[1] + 0.50 * roi[3]
+            # Floor line / lower ankles deliberately allowed out of frame below
+            assert cam_bottom < roi[1] + roi[3]
+
+    def test_continuous_transition_at_max_fit_height_zero_vertical_jump(self):
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(target_width=128, target_height=32)
+        ch = 76.0
+        floor_y = 180.0
+        max_fit_h = ch * (0.90 - 0.06)  # 63.84
+
+        small_just_below = (120, floor_y - (max_fit_h - 0.05), 30, max_fit_h - 0.05)
+        tall_just_above = (120, floor_y - (max_fit_h + 0.05), 30, max_fit_h + 0.05)
+
+        _, cy_small, _, _ = _build_camera_rect(
+            fw, fh, small_just_below, cfg, floor_y_est=floor_y, face_priority_mode=False
+        )
+        _, cy_tall, _, _ = _build_camera_rect(
+            fw, fh, tall_just_above, cfg, floor_y_est=floor_y, face_priority_mode=False
+        )
+        assert abs(cy_tall - cy_small) < 0.15
+
+    def test_missed_detection_holds_tall_sprite_head_height_instead_of_plunging_to_floor(self):
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(target_width=128, target_height=32, median_subject_height=96.0)
+        _, cy_miss, _, ch = _build_camera_rect(
+            fw, fh, None, cfg, floor_y_est=190.0, face_priority_mode=False
+        )
+        expected_head_top = 190.0 - 96.0 - ch * 0.06
+        assert (cy_miss - ch / 2.0) == pytest.approx(expected_head_top, abs=0.25)
+
+    def test_fighting_2d_and_platformer_share_unified_profile_and_classifier_avoids_cinema_traps(self):
+        from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType, classify_scene
+
+        f2d = SCENE_PROFILES[SceneType.FIGHTING_2D]
+        plat = SCENE_PROFILES[SceneType.PLATFORMER]
+        assert f2d.platformer_mode is True
+        assert f2d.auto_vertical_bias is True
+        assert f2d.face_priority is False
+        assert f2d.suggested_smoothness == pytest.approx(plat.suggested_smoothness)
+
+        # Grounded tall 2D sprite (Dracula / SF2' PCE) -> platformer or fighting_2d, NEVER full_body_tall
+        prof_tall, _, _ = classify_scene(
+            {
+                "tall_ratio": 1.18,
+                "fill_ratio": 0.37,
+                "body_aspect": 2.1,
+                "floor_in_lower": True,
+                "floor_var_score": 0.14,
+                "x_variance": 0.18,
+            }
+        )
+        assert prof_tall.scene_type in (SceneType.PLATFORMER, SceneType.FIGHTING_2D)
+        assert prof_tall.platformer_mode is True
+
+        # Very tall Neo-Geo 2D fighter (Art of Fighting, fill_ratio=0.57) -> fighting_2d / platformer
+        prof_aof, _, _ = classify_scene(
+            {
+                "tall_ratio": 1.67,
+                "fill_ratio": 0.567,
+                "body_aspect": 1.85,
+                "floor_in_lower": True,
+                "floor_var_score": 0.12,
+                "x_variance": 0.08,
+            }
+        )
+        assert prof_aof.scene_type in (SceneType.PLATFORMER, SceneType.FIGHTING_2D)
+        assert prof_aof.platformer_mode is True
+
+        # Multi-tier vertical platformer (Earthworm Jim / Xenophobe) -> platformer, NEVER wide_shot
+        prof_multi, _, _ = classify_scene(
+            {
+                "tall_ratio": 0.65,
+                "fill_ratio": 0.17,
+                "body_aspect": 1.6,
+                "floor_in_lower": True,
+                "floor_var_score": 0.34,
+                "x_variance": 0.22,
+            }
+        )
+        assert prof_multi.scene_type in (SceneType.PLATFORMER, SceneType.ACTION_HORIZONTAL)
+        assert prof_multi.platformer_mode is True
+
+        # Small arcade sprite -> NEVER talking_closeup / talking_medium
+        prof_small, _, _ = classify_scene(
+            {
+                "tall_ratio": 0.42,
+                "fill_ratio": 0.12,
+                "body_aspect": 1.2,
+                "floor_in_lower": False,
+                "floor_var_score": 0.55,
+                "x_variance": 0.04,
+            }
+        )
+        assert prof_small.scene_type not in (SceneType.TALKING_CLOSEUP, SceneType.TALKING_MEDIUM)
+
+    def test_detector_rejects_bulky_cave_scenery_and_outer_edge_signpost_pareidolia(self):
+        det = _FrameDetector()
+        det._model_w = 640
+        det._model_h = 640
+
+        # Box 0: Giant cave ceiling rock pareidolia (Dracula: bw=340 -> 0.53 > 0.40, conf=0.82)
+        # Box 1: Left-border static signpost (Earthworm Jim: cx=22 -> 0.034 < 0.07, conf=0.72)
+        # Box 2: Actual player sprite in playfield (cx=310, cy=400, bw=64, bh=128, conf=0.52)
+        pred = np.zeros((1, 5, 3), dtype=np.float32)
+        pred[0, :, 0] = [320.0, 220.0, 340.0, 320.0, 0.82]
+        pred[0, :, 1] = [22.0, 400.0, 36.0, 120.0, 0.72]
+        pred[0, :, 2] = [310.0, 400.0, 64.0, 128.0, 0.52]
+
+        mock_session = MagicMock()
+        mock_input = MagicMock()
+        mock_input.name = "images"
+        mock_session.get_inputs.return_value = [mock_input]
+        mock_session.run.return_value = [pred]
+        det._onnx_session_fast = mock_session
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        # Even if expected_cx previously touched the left-edge signpost (x=22), must select Box 2!
+        roi = det._detect_yolo(
+            frame, platformer_mode=True, expected_floor_y=348.0, expected_cx=22.0
+        )
+        assert roi is not None
+        rx, _, rw, _ = roi
+        assert 260 <= rx <= 300
+        assert rw < 90
+
+    def test_explicit_dmd_clip_config_scene_type_forwards_to_auto_action_config(self):
+        from src.engine.api import DmdClipConfig
+
+        clip_cfg = DmdClipConfig(width=128, height=32, scene_type="platformer")
+        assert clip_cfg.scene_type == "platformer"
+        aa_cfg = AutoActionConfig.from_params({"action_scene_type": clip_cfg.scene_type})
+        assert aa_cfg.scene_type == "platformer"
+
+
+
 

@@ -211,9 +211,14 @@ class FloorEstimationStage(ITrackerStage):
                 engine._platformer = getattr(engine.cfg, "platformer_mode", False)
                 bottom_val = float(ry + rh)
                 if engine._platformer:
-                    # Only update floor from ground-plausible character boxes (ignore giant explosions or high HUD/sky objects)
+                    # Update floor from ground-plausible character boxes (including tall VS fighting
+                    # sprites up to 78% frame height, while ignoring wide full-screen explosions or high HUD objects)
                     min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.30
-                    if float(rh) <= float(engine.effective_frame_h) * 0.55 and bottom_val >= min_valid_bottom:
+                    is_wide_explosion = (
+                        float(rw) > float(engine.effective_frame_w) * 0.60
+                        and float(rh) > float(engine.effective_frame_h) * 0.55
+                    )
+                    if not is_wide_explosion and float(rh) <= float(engine.effective_frame_h) * 0.78 and bottom_val >= min_valid_bottom:
                         roi_bottom = bottom_val
                 elif not engine.face_priority_mode:
                     # Non-platformer ground estimation: use actual feet bottom (never ry + 0.25*H,
@@ -286,12 +291,14 @@ class SceneClassificationStage(ITrackerStage):
                 
                 target_ratio = float(engine.cfg.target_width) / max(1, engine.cfg.target_height)
                 dmd_crop_h = float(engine.frame_w) / max(0.01, target_ratio)
+                bottoms = [hr[1] + hr[3] for _, hr in engine.roi_history]
+                dyn_floor_var = float(np.std(bottoms)) / max(1.0, float(engine.cam_frame_h)) if bottoms else 1.0
                 scene_signals = {
                     "tall_ratio":      median_h / max(1.0, dmd_crop_h),
                     "fill_ratio":      float(np.median(fill_ratios)),
                     "body_aspect":     median_h / max(1.0, median_w),
                     "floor_in_lower":  floor_in_lower,
-                    "floor_var_score": 1.0, 
+                    "floor_var_score": dyn_floor_var,
                     "x_variance":      float(np.var(x_centers)) / max(1.0, float(engine.frame_w)**2),
                     "y_variance":      float(np.var(y_centers)) / max(1.0, float(engine.cam_frame_h)**2),
                 }
@@ -347,9 +354,15 @@ class CameraBuilderStage(ITrackerStage):
             # wobble and normal hops never cause bobbing, but responsive downward when dropping
             # onto a lower platform.
             is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
+            med_h = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
+            roi_h = float(context.face_roi[3]) if context.face_roi is not None else med_h
+            is_tall_sprite = is_platformer and max(med_h, roi_h) > ch * 0.84
             dead_x = cw * (0.065 if is_platformer else 0.04)
             if is_platformer:
-                dead_y = ch * (0.035 if dy > 0.0 else 0.085)
+                if dy > 0.0:
+                    dead_y = ch * 0.035
+                else:
+                    dead_y = ch * (0.05 if is_tall_sprite else 0.085)
             else:
                 dead_y = ch * 0.04
             target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
@@ -357,7 +370,10 @@ class CameraBuilderStage(ITrackerStage):
             # Maximum pan speed per frame before outer smoothing
             max_step_x = max(4.0, cw * (0.11 if is_platformer else 0.14))
             if is_platformer:
-                max_step_y = max(8.0, ch * 0.34) if dy > 0.0 else max(2.5, ch * 0.08)
+                if dy > 0.0:
+                    max_step_y = max(8.0, ch * 0.34)
+                else:
+                    max_step_y = max(5.0, ch * 0.22) if is_tall_sprite else max(2.5, ch * 0.08)
             else:
                 max_step_y = max(3.5, ch * 0.14)
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)

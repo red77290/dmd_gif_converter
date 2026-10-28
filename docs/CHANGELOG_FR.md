@@ -1,5 +1,12 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.10] - 2026-10-28 (Loi Unifiée Petits vs Grands Sprites & Rejet des Décors Pixel-Art)
+### Ajouté & Amélioré
+- **Loi Continue Unifiée Petits Sprites vs Grands Sprites (`_build_camera_rect`, `TrackingEngine._clip_to_face_roi`, `analyzer.py`, `api.py`)** : Unifie les scènes `platformer` et `fighting_2d` autour d'une règle géométrique unique pilotée par `sprite_height / crop_h` (avec support de `scene_type_hint` explicite dans `DmdClipConfig`) :
+  - **Petits & Moyens Sprites (`h <= 0.84 * crop_h`)** : Conserve le verrouillage calme sur la ligne de sol (`platformer_floor_ratio = 0.90`, tête + pieds + sol visibles).
+  - **Grands Sprites (`h > 0.84 * crop_h`)** : Cible la moitié haute du personnage avec le visage ancré près du bord supérieur (`cy = (y - 0.06 * crop_h) + 0.5 * crop_h`) aussi bien en VS Fighting qu'en Platformer à grands sprites, autorisant la ligne de sol hors-champ en bas tout en conservant la descente rapide inter-plateformes.
+- **Rejet des Arches de Décor Pixel-Art & Panneaux de Bordure (`detector.py`, `analysis.py`, `scene_types.py`)** : Active le filtrage `platformer_mode` dès `_run_scan` pour `"platformer"` et `"fighting_2d"`, pénalise les fausses détections YOLO sur les décors larges (`bw_norm > 0.40` ou `area_norm > 0.22`), réduit le poids des éléments de décor collés aux bords latéraux (`cx_norm < 0.07` ou `> 0.93`, poids `0.35`) et étend `is_grounded_2d_sprite` jusqu'à `fill_ratio < 0.62` pour les grands combattants Neo-Geo / CPS.
+
 ## [V8.0.9] - 2026-10-28 (Correctif Critique Troncature Vidéo Platformer Sans Intro)
 ### Corrigé
 - **Troncature Vidéo lors des Descentes Platformer Sans Intro (`auto_action/pipeline.py`)** : Suppression d'un `import CamRect` local redondant dans `if intro_frames > 0:` au sein de `processor_thread()`. Lorsque `intro_duration == 0.0` (mode serveur headless / DMD Media Showcase), Python masquait le symbole global `CamRect` dans toute la fonction, provoquant une `UnboundLocalError` dès la première descente de plateforme (`> 4 %` de la hauteur) et tronquant les vidéos de jeux entre `0,2 s` et `2,2 s`. Couvert par le test de non-régression `test_preprocess_platformer_zero_intro_downward_drop_does_not_truncate`.

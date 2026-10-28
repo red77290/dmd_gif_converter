@@ -45,6 +45,7 @@ class AutoActionConfig:
     # ── PRIORITY 8 — Smart Platformer Mode ───────────────────────────────────
     platformer_mode: bool = False
     platformer_floor_ratio: float = 0.90  # fraction of strip height for floor line (~3 px ground on 32 px DMD)
+    median_subject_height: Optional[float] = None
     # ── PRIORITY 10 — ROI Confidence System ──────────────────────────────────
     roi_confidence_min: float = 0.0   # [0..1], 0 = disabled
     # ── VNext Priority 1 & 8 — Dynamic ROI Confidence & Persistence ──────────

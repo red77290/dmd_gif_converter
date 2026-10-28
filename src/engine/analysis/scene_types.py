@@ -158,11 +158,11 @@ SCENE_PROFILES: dict[str, SceneProfile] = {
         face_clip_mode="none",
         face_head_frac=0.22,
         face_eye_offset=None,
-        platformer_mode=True,        # FIX: Now anchors to floor like a platformer!
+        platformer_mode=True,        # Unified with platformer: tall-sprite head-at-top vs small-sprite floor rule
         auto_vertical_bias=True,
-        suggested_strength=0.70,
-        suggested_smoothness=0.80,
-        max_zoom_override=1.22,
+        suggested_strength=0.68,
+        suggested_smoothness=0.70,
+        max_zoom_override=1.25,
     ),
 
     SceneType.ACTION_HORIZONTAL: SceneProfile(
@@ -288,16 +288,21 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
     x_variance      = signals.get("x_variance", 0.0)
     y_variance      = signals.get("y_variance", 0.0)
 
-    # 1. Floor stability -> Platformer / Horizontal
+    # 1. Floor stability -> Platformer / Fighting / Horizontal
     if floor_in_lower:
         if floor_var_score <= 0.25:
-            # The more stable the floor, the higher the platformer score
-            scores[SceneType.PLATFORMER] += 3.0 * (1.0 - floor_var_score/0.25)
+            # Stable floor -> platformer / 2D fighting
+            scores[SceneType.PLATFORMER] += 3.0 * (1.0 - floor_var_score / 0.25)
             scores[SceneType.ACTION_HORIZONTAL] += 1.0
+        elif floor_var_score <= 0.45:
+            # Multi-tier vertical platformer (player jumping across upper/lower platforms)
+            scores[SceneType.PLATFORMER] += 1.5
+            scores[SceneType.ACTION_HORIZONTAL] += 1.2
+            scores[SceneType.FIGHTING_2D] += 0.8
         else:
             scores[SceneType.ACTION_HORIZONTAL] += 1.5
             scores[SceneType.FIGHTING_2D] += 1.0
-            scores[SceneType.PLATFORMER] -= 2.0
+            scores[SceneType.PLATFORMER] -= 1.0
 
     # 2. Fill Ratio -> Closeups / Wide shots
     is_massive_subject = fill_ratio >= 0.40
@@ -305,9 +310,19 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
     # "floor" at the bottom of the bounding box is actually just the body boundary.
     has_dialogue_floor = floor_in_lower and not is_massive_subject
 
+    # Small subjects (< 28% of frame height) are never talking close-ups or medium dialogue shots
+    if fill_ratio < 0.28:
+        scores[SceneType.TALKING_CLOSEUP] -= 4.0
+        scores[SceneType.TALKING_MEDIUM] -= 2.5
+
     # Top-Down Isometric scenes never contain large subjects filling the frame
     if fill_ratio >= 0.30:
         scores[SceneType.TOP_DOWN_ISOMETRIC] -= 5.0
+
+    is_grounded_2d_sprite = floor_in_lower and (
+        fill_ratio < 0.50
+        or (fill_ratio < 0.62 and floor_var_score <= 0.35 and x_variance >= 0.005)
+    )
 
     if fill_ratio >= 0.50:
         # Close-up portraits (including 16:9 widescreen crops) have compact/wide
@@ -318,26 +333,29 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
         # Only give TALKING_MEDIUM points if there is NO floor (i.e. it's truly a conversation scene)
         if not has_dialogue_floor:
             scores[SceneType.TALKING_MEDIUM] += 2.0
-        scores[SceneType.PLATFORMER] -= 5.0  # Big subjects are not platformers
-        scores[SceneType.ACTION_HORIZONTAL] -= 5.0
-        scores[SceneType.ACTION_MOVING] -= 5.0
-        scores[SceneType.FIGHTING_2D] -= 3.0
+        if is_grounded_2d_sprite:
+            # Very tall 2D fighters / platformer bosses (50%-62% frame height on Neo-Geo/CPS)
+            scores[SceneType.FIGHTING_2D] += 2.5
+            scores[SceneType.PLATFORMER] += 1.5
+        else:
+            scores[SceneType.PLATFORMER] -= 5.0  # Big subjects filling >=50% screen height are cinema/portraits
+            scores[SceneType.ACTION_HORIZONTAL] -= 5.0
+            scores[SceneType.ACTION_MOVING] -= 5.0
+            scores[SceneType.FIGHTING_2D] -= 3.0
     elif fill_ratio >= 0.25:
         # Only give talking points if there is no floor signal at all
         if not has_dialogue_floor:
             scores[SceneType.TALKING_MEDIUM] += 2.0
             scores[SceneType.FULL_BODY_MEDIUM] += 1.0
         else:
-            # Subject fills medium portion of screen + floor detected = fighting_2d or platformer
-            scores[SceneType.FIGHTING_2D] += 1.5
-        if fill_ratio >= 0.35:
-            scores[SceneType.PLATFORMER] -= 2.0
-            scores[SceneType.ACTION_HORIZONTAL] -= 2.0
-    elif fill_ratio < 0.15:
-        if floor_in_lower and floor_var_score <= 0.25:
-            # Small character but stable floor -> zoomed out platformer
+            # Medium-to-tall 2D sprite standing on playfield floor -> unified platformer / fighting_2d
+            scores[SceneType.FIGHTING_2D] += 2.0
             scores[SceneType.PLATFORMER] += 1.5
-            scores[SceneType.WIDE_SHOT] += 1.0
+    elif fill_ratio < 0.15:
+        if floor_in_lower and floor_var_score <= 0.42:
+            # Small character on single or multi-tier floor -> zoomed out platformer
+            scores[SceneType.PLATFORMER] += 2.2
+            scores[SceneType.WIDE_SHOT] += 0.5
         else:
             # If the camera perfectly tracks a tiny subject, it's a game, not a cinematic wide shot.
             if x_variance < 0.005 and y_variance < 0.005:
@@ -347,22 +365,31 @@ def classify_scene(signals: dict) -> tuple[SceneProfile, list[str]]:
             else:
                 scores[SceneType.WIDE_SHOT] += 3.0
 
-    # 3. Tall Ratio + Aspect -> Full body / Fighting
+    # 3. Tall Ratio + Aspect -> Full body (live-action/anime) vs Tall 2D Sprite (platformer/fighting)
     if tall_ratio >= 0.60 and body_aspect > 1.4:
-        scores[SceneType.FULL_BODY_TALL] += 3.0
-        scores[SceneType.FIGHTING_2D] += 0.5
-        scores[SceneType.PLATFORMER] -= 3.0
+        if is_grounded_2d_sprite:
+            # Tall 2D game sprite on a playfield floor (e.g. Dracula, Earthworm Jim, Ryu, B.O.B.):
+            # keep unified platformer/fighting_2d mode instead of cinema FULL_BODY_TALL!
+            scores[SceneType.FIGHTING_2D] += 2.5
+            scores[SceneType.PLATFORMER] += 2.0
+            scores[SceneType.FULL_BODY_TALL] -= 2.0
+        else:
+            scores[SceneType.FULL_BODY_TALL] += 3.0
+            scores[SceneType.FIGHTING_2D] += 0.5
+            scores[SceneType.PLATFORMER] -= 3.0
         scores[SceneType.MENU_STATIC] -= 2.0
         
     if body_aspect > 1.6:
-        # Very tall bodies are standing humans/anime characters, not platformer sprites or close-ups
-        scores[SceneType.PLATFORMER] -= 3.0
         scores[SceneType.TALKING_CLOSEUP] -= 3.0
-        if tall_ratio >= 0.60:
-            scores[SceneType.FULL_BODY_TALL] += 2.0
-            scores[SceneType.TALKING_MEDIUM] -= 1.0
+        if not is_grounded_2d_sprite:
+            # Very tall bodies filling >=50% height (or without playfield floor) are standing humans/anime
+            scores[SceneType.PLATFORMER] -= 3.0
+            if tall_ratio >= 0.60:
+                scores[SceneType.FULL_BODY_TALL] += 2.0
+                scores[SceneType.TALKING_MEDIUM] -= 1.0
     elif tall_ratio >= 0.35 and body_aspect > 1.2:
         scores[SceneType.FIGHTING_2D] += 1.0
+        scores[SceneType.PLATFORMER] += 0.8
         
     # 3b. Wide Aspect -> Fighting / Action (unless it is a dominant close-up portrait/bust)
     if body_aspect < 0.85:

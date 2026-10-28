@@ -311,13 +311,21 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         if not ok:
             return [], [], [], [], [], [], [], [], [], []
             
+        _scan_plat = bool(
+            getattr(cfg, "platformer_mode", False)
+            or str(getattr(cfg, "scene_type", "") or "").strip() in ("platformer", "fighting_2d")
+        )
         try:
             for _ in range(sample_count + 5):
                 ok, frame = reader.read()
                 if not ok or frame is None: break
                 if _is_dark_frame(frame): continue
                 
-                if det_type == "person" and hasattr(detector, "detect_person"):
+                if _scan_plat:
+                    roi = detector.detect(
+                        frame, det_type, platformer_mode=True, is_batch=cfg.is_batch
+                    )
+                elif det_type == "person" and hasattr(detector, "detect_person"):
                     roi = detector.detect_person(frame, is_batch=cfg.is_batch)
                 else:
                     roi = detector.detect(frame, det_type, is_batch=cfg.is_batch)
@@ -357,12 +365,26 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         (roi_tops, roi_bottoms_feet, roi_bottoms_fp, roi_heights, roi_widths, 
          x_centers, y_centers, fill_ratios, frame_lefts, frame_rights) = _run_scan(best_detector)
 
+    _explicit_scene = str(getattr(cfg, "scene_type", "") or "").strip()
     _auto_scene = getattr(cfg, "auto_scene_type", False)
     if not roi_tops:
-        # No detections: if auto_scene_type is active, assign a safe default profile
-        # rather than leaving scene_profile=None (which shows as 'Unknown').
+        # No detections: honor explicit scene_type first, otherwise assign safe default profile
+        from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType
+        if _explicit_scene and _explicit_scene in SCENE_PROFILES:
+            _fallback_profile = SCENE_PROFILES[_explicit_scene]
+            return {
+                **_EMPTY,
+                "best_detector": best_detector,
+                "auto_vertical_bias": _fallback_profile.auto_vertical_bias,
+                "face_priority": _fallback_profile.face_priority,
+                "reasons": [f"no detections in scan → explicit scene '{_explicit_scene}'"],
+                "scene_profile": _fallback_profile,
+                "suggested_strength": _fallback_profile.suggested_strength,
+                "suggested_smoothness": _fallback_profile.suggested_smoothness,
+                "scoreboard_lines": [],
+                "scene_scores": {},
+            }
         if _auto_scene:
-            from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType
             _fallback_profile = SCENE_PROFILES.get(SceneType.ACTION_MOVING)
             return {**_EMPTY, "best_detector": best_detector,
                     "reasons": ["no detections in scan → fallback to action_moving"],
@@ -420,8 +442,19 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         "y_variance":      y_var,
     }
     
+    _explicit_scene = str(getattr(cfg, "scene_type", "") or "").strip()
     _auto_scene = getattr(cfg, "auto_scene_type", False)
-    if _auto_scene:
+    if _explicit_scene:
+        from src.engine.analysis.scene_types import SCENE_PROFILES
+        if _explicit_scene in SCENE_PROFILES:
+            scene_profile = SCENE_PROFILES[_explicit_scene]
+            scoreboard_lines = [f"Explicit scene_type='{_explicit_scene}' honored"]
+        elif _auto_scene:
+            from src.engine.analysis.scene_types import classify_scene
+            scene_profile, scoreboard_lines, scene_scores = classify_scene(scene_signals)
+        else:
+            scoreboard_lines = []
+    elif _auto_scene:
         from src.engine.analysis.scene_types import classify_scene
         scene_profile, scoreboard_lines, scene_scores = classify_scene(scene_signals)
     else:
@@ -441,8 +474,11 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         auto_top    = scene_profile.face_priority  # narrow to head when face-aware
         auto_bottom = scene_profile.face_priority or (bottom_gap > BOTTOM_GAP_THRESH)
         if scene_profile.platformer_mode:
+            # Never amputate the lower playfield in platformer/fighting_2d modes:
+            # if the player starts on upper platforms during scan frames, cropping bottom_gap
+            # creates an artificial floor ceiling that loses the character when descending!
             auto_top    = False
-            auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
+            auto_bottom = False
         suggested_strength   = scene_profile.suggested_strength
         suggested_smoothness = scene_profile.suggested_smoothness
         reasons.append(f"SCENE={scene_profile.scene_type} → face_clip={scene_profile.face_clip_mode} floor={scene_profile.auto_vertical_bias}")
@@ -460,7 +496,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
     elif is_platformer_cfg or (floor_in_lower and floor_var_score <= FLOOR_VAR_MAX):
         auto_floor  = True
         auto_top    = False
-        auto_bottom = bottom_gap > BOTTOM_GAP_THRESH
+        auto_bottom = False if is_platformer_cfg else (bottom_gap > BOTTOM_GAP_THRESH)
         stability   = "stable" if floor_var_score < 0.10 else "dynamic"
         suggested_strength = 0.65
         suggested_smoothness = 0.85

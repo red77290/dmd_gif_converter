@@ -1,5 +1,12 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.10] - 2026-10-28 (Unified Small-Sprite vs Tall-Sprite Framing & Pixel-Art Scenery Rejection)
+### Added & Improved
+- **Unified Continuous Small-Sprite vs Tall-Sprite Camera Law (`_build_camera_rect`, `TrackingEngine._clip_to_face_roi`, `analyzer.py`, `api.py`)**: Unifies `platformer` and `fighting_2d` under a single continuous sprite-height framing rule controlled by `sprite_height / crop_h` (and explicit `scene_type_hint` override on `DmdClipConfig`):
+  - **Small & Medium Sprites (`h <= 0.84 * crop_h`)**: Preserves calm floor-locked platformer framing (`platformer_floor_ratio = 0.90`, head + feet + floor visible).
+  - **Tall Sprites (`h > 0.84 * crop_h`)**: Focuses on the upper half of the character with head/face anchored near the top (`cy = (y - 0.06 * crop_h) + 0.5 * crop_h`) in both VS Fighting and tall-sprite 2D Platformers, cleanly allowing the floor line and lower legs out of frame below while preserving fast downward platform step-down recovery.
+- **Pixel-Art Scenery Arch & Border Signpost Rejection (`detector.py`, `analysis.py`, `scene_types.py`)**: Enables `platformer_mode` scan heuristics in `_run_scan` for `"platformer"` and `"fighting_2d"` scenes, suppresses wide pixel-art background pareidolia (`bw_norm > 0.40` or `area_norm > 0.22`) unless near-square close-up, adds lateral border signpost suppression (`cx_norm < 0.07` or `> 0.93`, weight `0.35`), and widens `is_grounded_2d_sprite` up to `fill_ratio < 0.62` for oversized Neo-Geo / CPS fighters.
+
 ## [8.0.9] - 2026-10-28 (Zero-Intro Platformer Pipeline Shadowing Hotfix)
 ### Fixed
 - **Zero-Intro Platformer Downward Slew Truncation (`auto_action/pipeline.py`)**: Removed a shadowed conditional local `from src.engine.auto_action.interfaces import CamRect` inside `processor_thread()` (`if intro_frames > 0:`). When `intro_duration == 0.0` (standard headless server / DMD Media Showcase mode), Python scoped `CamRect` as an uninitialized local variable inside `processor_thread()`, raising `UnboundLocalError` on the first downward platformer camera step (`> 4%` crop height) and prematurely terminating output videos after `0.2s–2.2s`. Added end-to-end regression test `test_preprocess_platformer_zero_intro_downward_drop_does_not_truncate`.

@@ -207,7 +207,15 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         else:
             cy = effective_frame_top + effective_frame_h / 2.0
         if floor_y_est is not None and (_platformer or _auto) and not face_priority_mode:
-            cy = _apply_auto_floor(cy, floor_y_est, crop_h)
+            med_h = float(getattr(cfg, "median_subject_height", 0.0) or 0.0)
+            max_fit_h = crop_h * (_FLOOR_RATIO - 0.06)
+            if _platformer and med_h > max_fit_h:
+                # Tall sprite (VS Fighting / large-sprite platformer): hold camera at estimated
+                # head/upper-half height on missed frames instead of plunging onto the feet/floor.
+                est_top = floor_y_est - med_h
+                cy = _clamp((est_top - crop_h * 0.06) + crop_h / 2.0, _cy_min(crop_h), _cy_max(crop_h))
+            else:
+                cy = _apply_auto_floor(cy, floor_y_est, crop_h)
         else:
             cy = _apply_bias(cy, crop_h)
         return CamRect(cx, cy, crop_w, crop_h)
@@ -259,10 +267,13 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                 head_pad = crop_h * 0.06
                 floor_ratio = _clamp(float(getattr(cfg, "platformer_floor_ratio", 0.90)), 0.50, 0.96)
                 foot_pad = crop_h * (1.0 - floor_ratio)
-                if float(h) > crop_h:
-                    cy_upper = float(y) + float(h) * 0.45
-                    max_head_cy = max(float(effective_frame_top), float(y) - crop_h * 0.04) + crop_h / 2.0
-                    cy = min(cy_upper, max_head_cy)
+                max_fit_h = crop_h * max(0.20, floor_ratio - 0.06)
+                if float(h) > max_fit_h:
+                    # Unified Tall-Sprite Rule (VS Fighting & large-sprite platformers):
+                    # When the sprite cannot fit between head_pad and the floor line, prioritize
+                    # the upper half of the character with its head/face anchored near the top
+                    # of the DMD strip, allowing the floor line and lower legs to go below frame.
+                    cy = (float(y) - head_pad) + crop_h / 2.0
                 elif float(y) < cam_top_floor + head_pad:
                     cy = (float(y) - head_pad) + crop_h / 2.0
                 elif float(y + h) + foot_pad > cam_bottom_floor + 0.5:

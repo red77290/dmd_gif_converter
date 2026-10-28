@@ -33,7 +33,7 @@ from src.engine.conversion.quality import evaluate_gif_quality
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.9"
+__version__ = "8.0.10"
 
 DMDS_MAGIC = b"DMDS"
 DMDS_VERSION = 1
@@ -57,6 +57,7 @@ class DmdClipConfig:
     use_smart_color_boost: bool = True
     scroll_enabled: bool = False
     scroll_direction: str = "auto"
+    scene_type: str = ""
     brightness: float = -0.02
     contrast: float = 1.45
     saturation: float = 1.85
@@ -420,6 +421,7 @@ class DmdMediaProcessor:
             "auto_action_enabled": config.use_auto_action,
             "action_smart_auto_crop": config.use_auto_action,
             "action_auto_detector_fallback": True,
+            **({"action_scene_type": config.scene_type} if config.scene_type else {}),
             "auto_color_enabled": config.use_smart_color_boost,
             "brightness": config.brightness,
             "contrast": config.contrast,

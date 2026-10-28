@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v8.0.9)
+# DMD GIF Converter — Technical Architecture (v8.0.10)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -1038,13 +1038,13 @@ To prevent redundant YOLO execution, the UI's `PreviewPanel` strictly chains the
 
 ---
 
-## 13. Framing, Panorama & Platformer Invariants (v8.0.3–v8.0.9)
+## 13. Framing, Panorama & Platformer Invariants (v8.0.3–v8.0.10)
 
 - **Orientation-Aware Panorama Axis (`resolve_panorama_scroll_axis`)**: Under `scroll_direction="auto"`, TATE panels (`target_height > target_width`) always scroll horizontally (left-to-right), YOKO panels (`target_width > target_height`) always scroll vertically (top-to-bottom), and square panels adapt to `src_w > src_h`, using uniform 1:1 Lanczos zoom-to-cover scaling with zero black bars and pure-black RGBA pre-compositing.
 - **Close-Up Eye-to-Mouth Calibration (`closeup_eye_mouth_fractions`)**: Wide/square YOLOv8 `person` close-ups (`aspect <= 1.0`) anchor onto `[0.23..0.61]*rh` (`0.42*rh` midpoint) with smooth upward scaling across bust shots (`1.0 < aspect <= 1.4`) so 4:1 and 2:1 DMD strips frame both eyes and mouth.
 - **Stance-Aware Bidirectional Floor Tracking & Fast Downward Drop Recovery (`_FloorEstimator` & `platformer_floor_ratio = 0.90`)**: Anchors the floor at `90%` strip height (~3 px ground strip on 32 px DMDs), converges briskly on lower-platform drops (`_ALPHA_DROP = 0.62`, `_ALPHA_DROP_CONFIRMED = 0.80` with `roi_history` upper-platform flush and asymmetric downward slew), holds rock-steady during jump airtime (`_ALPHA_RELEASE_JUMP = 0.01`), re-anchors upward onto confirmed higher platforms (`_ALPHA_RELEASE_STANCE = 0.28`, `>= 6` fresh samples with spread `<= 4.5%` frame height), ignores cached subsampled frames (`context.fresh_detection`), snaps immediately on first real detection, and rejects isolated 1-frame bottom-border spikes (`rb >= 0.96 * frame_h`).
-- **Outer-Boundary Headroom/Footroom Guard, Horizontal Subject Continuity & Slab Stripping**: `_build_camera_rect` keeps `cy = cy_floor` locked unless a non-explosion sprite crosses outside the floor-anchored window (preserving `1.0 - platformer_floor_ratio` footroom during drops), and `_FrameDetector` combines wide horizontal slab stripping (`>= 38%` frame width via `cv2.MORPH_OPEN`), asymmetric playfield-aware floor affinity (`0.55 + 7.5 * exp(-dist * 4.0)` for playfield drops vs `0.08 + 7.5 * exp(-dist * 7.2)` upward), and `expected_cx` horizontal subject continuity (`1.0 + 0.90 * exp(-dx_norm * 5.0)`).
+- **Unified Small-Sprite vs Tall-Sprite Framing & Scenery Rejection (`_build_camera_rect`, `_FrameDetector`)**: Unifies `platformer` and `fighting_2d` under a single continuous geometric law: small/medium sprites (`h <= 0.84 * crop_h`) stay floor-locked (`cy = cy_floor`), while tall sprites (`h > 0.84 * crop_h`) anchor the upper half and head/face near the top (`cy = (y - 0.06 * crop_h) + 0.5 * crop_h`), letting the floor line leave the frame below. `_FrameDetector` strips wide horizontal slabs (`>= 38%` frame width via `cv2.MORPH_OPEN`), suppresses bulky pixel-art scenery (`bw_norm > 0.40` or `area_norm > 0.22`) and lateral border signposts (`cx_norm < 0.07` or `> 0.93`), and enforces asymmetric floor affinity plus `expected_cx` horizontal continuity.
 
 ---
 
-*Last updated: v8.0.9 — October 2026*
+*Last updated: v8.0.10 — October 2026*
