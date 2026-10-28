@@ -183,19 +183,28 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
 
                 cam_now = tracker.process_frame(frame, cam_prev, src_idx, analyzer.out_w, analyzer.out_h)
                 
-                # Snap camera immediately to target only on the very first frame when no intro pan is used
-                snap_camera = (src_idx == 0 and intro_frames == 0)
+                # Snap camera immediately on frame 0 or on the first real sprite lock when no intro pan is used
+                snap_camera = (intro_frames == 0) and (
+                    src_idx == 0 or bool(getattr(tracker, "just_locked_first_detection", False))
+                )
 
                 if snap_camera:
                     cam = cam_now
                 elif (
                     bool(getattr(cfg, "platformer_mode", False))
                     and cam_prev is not None
-                    and (cam_now[1] - cam_prev[1]) > cam_now[3] * 0.04
+                    and (
+                        (cam_now[1] - cam_prev[1]) > cam_now[3] * 0.04
+                        or (
+                            (cam_prev[1] - cam_now[1]) > cam_now[3] * 0.04
+                            and tracker.last_roi is not None
+                            and float(tracker.last_roi[1]) < (cam_prev[1] - cam_prev[3] / 2.0) + cam_now[3] * 0.08
+                        )
+                    )
                 ):
                     smoothed_xy = _smooth(cam_prev, cam_now, dynamic_smoothness)
-                    smoothed_down = _smooth(cam_prev, cam_now, min(dynamic_smoothness, 0.30))
-                    cam = CamRect(smoothed_xy[0], smoothed_down[1], smoothed_xy[2], smoothed_xy[3])
+                    smoothed_fast_y = _smooth(cam_prev, cam_now, min(dynamic_smoothness, 0.30))
+                    cam = CamRect(smoothed_xy[0], smoothed_fast_y[1], smoothed_xy[2], smoothed_xy[3])
                 else:
                     cam = _smooth(cam_prev, cam_now, dynamic_smoothness)
                 cam_prev = cam

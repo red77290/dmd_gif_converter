@@ -288,18 +288,18 @@ class _FrameDetector(AbstractDetector):
             bottom_slab = (bottomness >= 0.98) & (bw_norm > 0.24) & (aspect_wh > 1.8)
             mask = mask & ~wide_band & ~bulky_scenery & ~bottom_slab
 
-            # Playfield-balanced vertical weighting: favor 0.50..0.92 (covering thick ground)
-            # and upper platforms (0.30..0.50) without favoring 0.99 bottom-border tile noise.
+            # Playfield-balanced vertical weighting: favor 0.45..0.88 (covering normal & thick ground)
+            # and upper platforms (0.28..0.45) without boosting deep bottom-slab tile noise (>0.88).
             playfield_weight = np.where(
-                (bottomness >= 0.50) & (bottomness <= 0.92),
+                (bottomness >= 0.45) & (bottomness <= 0.88),
                 1.25,
                 np.where(
-                    (bottomness >= 0.30) & (bottomness < 0.50),
-                    0.75 + 2.5 * (bottomness - 0.30),
+                    (bottomness >= 0.28) & (bottomness < 0.45),
+                    0.75 + 2.9 * (bottomness - 0.28),
                     np.where(
-                        (bottomness > 0.92) & (bottomness <= 0.95),
-                        1.05,
-                        np.where(bottomness > 0.95, 0.55, 0.30),
+                        (bottomness > 0.88) & (bottomness <= 0.93),
+                        1.00,
+                        np.where(bottomness > 0.93, 0.50, 0.30),
                     ),
                 ),
             )
@@ -336,7 +336,11 @@ class _FrameDetector(AbstractDetector):
                 # noise never steal focus, but gentler downward decay inside the playfield
                 # (`bottomness <= 0.94`) so dropping from an upper platform onto lower ground
                 # immediately re-locks onto the player.
-                is_playfield_drop = (boxes_bottom > expected_floor_model) & (bottomness <= 0.94)
+                is_playfield_drop = (
+                    (boxes_bottom > expected_floor_model)
+                    & (bottomness <= 0.93)
+                    & (aspect_wh <= 1.35)
+                )
                 is_border_drop = (boxes_bottom > expected_floor_model) & (bottomness > 0.94)
                 floor_weight = np.where(
                     is_playfield_drop,

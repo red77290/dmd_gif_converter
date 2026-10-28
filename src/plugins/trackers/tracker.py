@@ -76,6 +76,11 @@ class SceneChangeStage(ITrackerStage):
             cut_threshold = min(0.35, 1.0 - engine.cfg.scene_change_threshold)
             if sim < cut_threshold:
                 engine.roi_history.clear()
+                engine.standing_heights.clear()
+                engine.standing_subject_h = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
+                engine._prev_valid_top = None
+                engine._locked_first_detection = False
+                engine.just_locked_first_detection = False
                 if engine.floor_est is not None:
                     engine.floor_est = _FloorEstimator(engine.cam_frame_h)
                 engine.prev_roi_cx = None
@@ -211,15 +216,38 @@ class FloorEstimationStage(ITrackerStage):
                 engine._platformer = getattr(engine.cfg, "platformer_mode", False)
                 bottom_val = float(ry + rh)
                 if engine._platformer:
-                    # Update floor from ground-plausible character boxes (including tall VS fighting
-                    # sprites up to 78% frame height, while ignoring wide full-screen explosions or high HUD objects)
+                    # Reject squat horizontal tiles wholly below the established floor surface
+                    # (prevents deep-ground brick pareidolia from pulling the floor underground)
+                    is_underground_tile = (
+                        engine.floor_est.floor_y is not None
+                        and getattr(engine.floor_est, "_has_detection", False)
+                        and float(ry) >= float(engine.floor_est.floor_y) - 2.0
+                        and float(rw) > float(rh) * 1.15
+                    )
                     min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.30
                     is_wide_explosion = (
                         float(rw) > float(engine.effective_frame_w) * 0.60
                         and float(rh) > float(engine.effective_frame_h) * 0.55
                     )
-                    if not is_wide_explosion and float(rh) <= float(engine.effective_frame_h) * 0.78 and bottom_val >= min_valid_bottom:
+                    if is_underground_tile:
+                        context.raw_roi = None
+                        context.face_roi = None
+                    elif not is_wide_explosion and float(rh) <= float(engine.effective_frame_h) * 0.78 and bottom_val >= min_valid_bottom:
+                        # Clamp single-frame downward bbox bloat into deep ground shadows/tiles
+                        # when the character's head stayed steady on the same platform.
+                        if len(engine.standing_heights) >= 3 and engine._prev_valid_top is not None:
+                            med_char_h = float(np.median(engine.standing_heights))
+                            if float(rh) > med_char_h * 1.28 and abs(float(ry) - engine._prev_valid_top) <= med_char_h * 0.25:
+                                clamped_h = max(8, int(round(med_char_h)))
+                                context.raw_roi = BoundingBox(rx, ry, rw, clamped_h)
+                                context.face_roi = engine._clip_to_face_roi(context.raw_roi)
+                                rh = clamped_h
+                                bottom_val = float(ry + rh)
                         roi_bottom = bottom_val
+                        engine.standing_heights.append(float(rh))
+                        cfg_med = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
+                        engine.standing_subject_h = max(cfg_med, float(np.percentile(engine.standing_heights, 75)))
+                        engine._prev_valid_top = float(ry)
                 elif not engine.face_priority_mode:
                     # Non-platformer ground estimation: use actual feet bottom (never ry + 0.25*H,
                     # which falsely treated a close-up character's forehead as their shoes),
@@ -241,12 +269,18 @@ class HistorySynthesisStage(ITrackerStage):
                     prev_hr = engine.roi_history[-1][1]
                     prev_bottom = float(prev_hr[1] + prev_hr[3])
                     new_bottom = float(context.raw_roi[1] + context.raw_roi[3])
-                    # Flush stale upper-platform history on genuine downward drops so
-                    # synthesized ROI immediately reflects the lower platform landing.
-                    if (
+                    # Flush stale platform history on genuine downward drops OR confirmed
+                    # upward platform climbs so synthesized ROI tracks the new platform cleanly.
+                    is_downward_drop = (
                         new_bottom - prev_bottom > float(engine.effective_frame_h) * 0.08
                         and new_bottom < float(engine.effective_frame_h) * 0.96
-                    ):
+                    )
+                    is_upward_climb = (
+                        engine.floor_est is not None
+                        and getattr(engine.floor_est, "_reanchoring_up", False)
+                        and prev_bottom - new_bottom > float(engine.effective_frame_h) * 0.06
+                    )
+                    if is_downward_drop or is_upward_climb:
                         engine.roi_history.clear()
                 engine.roi_history.append((1.0, context.raw_roi))
                 while len(engine.roi_history) > engine.roi_history_max_len:
@@ -335,6 +369,11 @@ class DetectorFallbackStage(ITrackerStage):
 class CameraBuilderStage(ITrackerStage):
     """Builds the raw proposed Camera rectangle before lissage, with Tripod Deadzone & Velocity Clamping."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
+        engine.just_locked_first_detection = False
+        if context.face_roi is not None and not engine._locked_first_detection:
+            engine._locked_first_detection = True
+            engine.just_locked_first_detection = True
+
         raw_cam = _build_camera_rect(
             engine.frame_w, engine.cam_frame_h, context.face_roi, engine.cfg,
             floor_y_est=context.floor_y_est, frame_top=engine.cam_frame_top,
@@ -343,24 +382,38 @@ class CameraBuilderStage(ITrackerStage):
             effective_frame_w=engine.effective_frame_w,
             effective_frame_top=float(engine.effective_frame_top),
             effective_frame_h=engine.effective_frame_h,
-            locked_crop_size=engine.locked_crop_size
+            locked_crop_size=engine.locked_crop_size,
+            standing_height=engine.standing_subject_h,
         )
-        if context.cam_prev is not None and engine.frames_since_scene_change > 1 and float(getattr(engine.cfg, "smoothness", 0.0)) > 0.0:
+        if (
+            context.cam_prev is not None
+            and engine.frames_since_scene_change > 1
+            and not engine.just_locked_first_detection
+            and float(getattr(engine.cfg, "smoothness", 0.0)) > 0.0
+        ):
             prev_cx, prev_cy = float(context.cam_prev[0]), float(context.cam_prev[1])
             prop_cx, prop_cy, cw, ch = float(raw_cam[0]), float(raw_cam[1]), float(raw_cam[2]), float(raw_cam[3])
             dx = prop_cx - prev_cx
             dy = prop_cy - prev_cy
             # Tripod deadzone hysteresis: wider upward in platformer mode so sprite walk-cycle
-            # wobble and normal hops never cause bobbing, but responsive downward when dropping
-            # onto a lower platform.
+            # wobble and normal hops never cause bobbing, but responsive both when dropping onto
+            # a lower platform and when rescuing a sprite head crowding the top border.
             is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
             med_h = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
             roi_h = float(context.face_roi[3]) if context.face_roi is not None else med_h
-            is_tall_sprite = is_platformer and max(med_h, roi_h) > ch * 0.84
+            is_tall_sprite = is_platformer and max(med_h, engine.standing_subject_h, roi_h) > ch * 0.79
+            prev_top = prev_cy - ch / 2.0
+            head_crowded = (
+                is_platformer
+                and context.face_roi is not None
+                and float(context.face_roi[1]) < prev_top + ch * 0.06
+            )
             dead_x = cw * (0.065 if is_platformer else 0.04)
             if is_platformer:
                 if dy > 0.0:
                     dead_y = ch * 0.035
+                elif head_crowded:
+                    dead_y = ch * 0.02
                 else:
                     dead_y = ch * (0.05 if is_tall_sprite else 0.085)
             else:
@@ -370,7 +423,7 @@ class CameraBuilderStage(ITrackerStage):
             # Maximum pan speed per frame before outer smoothing
             max_step_x = max(4.0, cw * (0.11 if is_platformer else 0.14))
             if is_platformer:
-                if dy > 0.0:
+                if dy > 0.0 or head_crowded:
                     max_step_y = max(8.0, ch * 0.34)
                 else:
                     max_step_y = max(5.0, ch * 0.22) if is_tall_sprite else max(2.5, ch * 0.08)
@@ -405,8 +458,14 @@ class ReadabilityScoreStage(ITrackerStage):
             read_prev_score = engine.readability_engine.evaluate(context.frame, roi=roi_prev).overall / 100.0
             read_prop_score = engine.readability_engine.evaluate(context.frame, roi=roi_prop).overall / 100.0
 
-            if read_prop_score < read_prev_score * 0.72:
-                # Reject severely degraded framing proposals
+            is_platformer_sprite = (
+                bool(getattr(engine.cfg, "platformer_mode", False))
+                and context.face_roi is not None
+            )
+            if not is_platformer_sprite and read_prop_score < read_prev_score * 0.72:
+                # Reject severely degraded framing proposals (never in platformer mode when
+                # tracking a detected sprite, where textured deep ground bricks otherwise
+                # outscore clean sky and freeze the camera below the character's head).
                 context.cam_now = context.cam_prev
 
             if getattr(engine.cfg, 'auto_tuning_dataset_dir', None) is not None:
@@ -532,6 +591,11 @@ class TrackingEngine(ITracker):
         self.roi_history: Deque[Tuple[float, Tuple[int, int, int, int]]] = collections.deque()
         self.roi_history_max_len: int = max(1, int(self.fps * max(0.0, self.cfg.roi_history_window_s)))
         self.roi_history_enabled: bool = self.cfg.roi_history_window_s > 0.0
+        self.standing_heights: Deque[float] = collections.deque(maxlen=30)
+        self.standing_subject_h: float = float(getattr(self.cfg, "median_subject_height", 0.0) or 0.0)
+        self._prev_valid_top: Optional[float] = None
+        self._locked_first_detection: bool = False
+        self.just_locked_first_detection: bool = False
         
         self.prev_roi_cx: Optional[float] = None
         self.prev_roi_cy: Optional[float] = None

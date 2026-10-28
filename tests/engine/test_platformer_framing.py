@@ -488,17 +488,18 @@ class TestCameraStabilityAndAntiIndecision:
 
 class TestUnifiedSmallVsTallSpriteFraming:
     """
-    Regression suite for v8.0.10 unified 2D Platformer & VS Fighting camera model:
-    - Small sprites (h <= 0.84 * crop_h) lock onto the floor line at 90% strip height.
-    - Tall sprites (h > 0.84 * crop_h, in both VS Fighting and tall-sprite Platformers)
-      anchor the character's head/face near the top of the DMD strip and allow the floor
-      line and lower legs out of frame below, with C0 continuity at the threshold.
+    Regression suite for v8.0.11 unified 2D Platformer & VS Fighting camera model:
+    - Small sprites (h <= 0.79 * crop_h) lock onto the floor line at 90% strip height (~3.2 px ground).
+    - Tall sprites (h > 0.79 * crop_h, in both VS Fighting and tall-sprite Platformers)
+      raise an imaginary floor line up to the knees/thighs until the face fits with ~3.5 DMD px
+      headroom (11% crop_h), keeping that imaginary floor locked across crouches, jumps, and
+      landings until a platform change occurs, with C0 continuity at the threshold.
     """
 
     def test_tall_sprite_focuses_upper_half_with_head_at_top_and_floor_below_frame(self):
         fw, fh = 304, 224
         cfg = _platformer_cfg(target_width=128, target_height=32)
-        # crop_h = 76.0, max_fit_h = 76.0 * 0.84 = 63.84
+        # crop_h = 76.0, max_fit_h = 76.0 * (0.90 - 0.11) = 60.04
         for roi, floor_y in [
             ((110, 92, 52, 98), 190.0),  # VS Fighting tall sprite (h=98)
             ((124, 96, 38, 84), 180.0),  # Tall-sprite platformer e.g. Dracula (h=84)
@@ -508,11 +509,11 @@ class TestUnifiedSmallVsTallSpriteFraming:
             )
             cam_top = cy - ch / 2.0
             cam_bottom = cy + ch / 2.0
-            # Head anchored near top with 6% crop_h headroom pad
-            assert cam_top == pytest.approx(roi[1] - ch * 0.06, abs=0.25)
+            # Head anchored with comfortable ~3.5 DMD px (11% crop_h) headroom pad (never glued to row 0)
+            assert cam_top == pytest.approx(roi[1] - ch * 0.11, abs=0.25)
             # Upper half of the character (head + torso) 100% inside the DMD strip
             assert cam_bottom >= roi[1] + 0.50 * roi[3]
-            # Floor line / lower ankles deliberately allowed out of frame below
+            # Real floor line / lower ankles deliberately below frame (imaginary floor at knees)
             assert cam_bottom < roi[1] + roi[3]
 
     def test_continuous_transition_at_max_fit_height_zero_vertical_jump(self):
@@ -520,7 +521,7 @@ class TestUnifiedSmallVsTallSpriteFraming:
         cfg = _platformer_cfg(target_width=128, target_height=32)
         ch = 76.0
         floor_y = 180.0
-        max_fit_h = ch * (0.90 - 0.06)  # 63.84
+        max_fit_h = ch * (0.90 - 0.11)  # 60.04
 
         small_just_below = (120, floor_y - (max_fit_h - 0.05), 30, max_fit_h - 0.05)
         tall_just_above = (120, floor_y - (max_fit_h + 0.05), 30, max_fit_h + 0.05)
@@ -539,8 +540,139 @@ class TestUnifiedSmallVsTallSpriteFraming:
         _, cy_miss, _, ch = _build_camera_rect(
             fw, fh, None, cfg, floor_y_est=190.0, face_priority_mode=False
         )
-        expected_head_top = 190.0 - 96.0 - ch * 0.06
+        expected_head_top = 190.0 - 96.0 - ch * 0.11
         assert (cy_miss - ch / 2.0) == pytest.approx(expected_head_top, abs=0.25)
+
+    def test_imaginary_floor_line_stays_locked_on_crouch_follows_jump_and_reanchors_on_new_platform(self):
+        """
+        Verify the full Imaginary Floor Line lifecycle on a tall platformer/fighter sprite:
+        1. Standing (h=92, feet=180): imaginary floor locks at knees (~148.0), ~3.5 DMD px headroom.
+        2. Crouching (h=56, feet=180, head=124): camera stays 100% locked on the imaginary floor
+           instead of plunging down with the crouched head!
+        3. High Jump (h=92, head=42, feet=134) & Return (feet=180): camera lifts smoothly so head is
+           never clipped at apex, then returns to the exact imaginary floor line on landing.
+        4. Platform Change (climbs onto upper platform at feet=120): imaginary floor re-anchors onto
+           the character's knees on the new platform (~88.0).
+        """
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=1,
+            smoothness=0.0,
+            scene_change_threshold=0.0,
+            roi_history_window_s=0.0,
+        )
+        engine = TrackingEngine(
+            fps=25.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+        blank = np.full((fh, fw, 3), 48, dtype=np.uint8)
+        cam = engine.cam_full_view
+
+        # 1. Standing on lower platform (y=88..180, h=92)
+        for i in range(6):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(120, 88, 40, 92)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+        cy_stand = cam[1]
+        ch = cam[3]
+        assert (cy_stand - ch / 2.0) == pytest.approx(88.0 - ch * 0.11, abs=0.5)
+
+        # 2. Crouch on the same platform (y=124..180, h=56): camera stays locked on imaginary floor!
+        for i in range(6, 9):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(120, 124, 42, 56)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+        assert cam[1] == pytest.approx(cy_stand, abs=0.5)
+
+        # 3. High jump (y=42..134, h=92) -> head protected, then return to feet=180 -> returns to cy_stand!
+        engine.detector.detect = lambda *a, **kw: BoundingBox(124, 42, 40, 92)
+        cam_jump = engine.process_frame(blank, cam, 9, 128, 32)
+        assert (cam_jump[1] - ch / 2.0) <= 42.0 - ch * 0.10
+
+        for i in range(10, 14):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(124, 88, 40, 92)
+            cam = engine.process_frame(blank, cam_jump if i == 10 else cam, i, 128, 32)
+        assert cam[1] == pytest.approx(cy_stand, abs=1.5)
+
+        # 4. Climb onto upper platform (y=28..120, h=92) -> re-anchors imaginary floor to knees on new platform!
+        for i in range(14, 30):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(140, 28, 40, 92)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+        assert (cam[1] - ch / 2.0) == pytest.approx(28.0 - ch * 0.11, abs=1.5)
+
+    def test_deep_ground_bloat_and_textured_bricks_never_glue_or_clip_player_head(self):
+        """
+        Verify deep-ground protections:
+        - Late first detection after frame-0 miss snaps immediately instead of crawling up from bottom.
+        - Single-frame bbox downward bloat into deep ground shadow/bricks is clamped at standing height.
+        - Textured high-contrast bricks in deep ground never cause ReadabilityScoreStage to freeze
+          the camera below a sprite backed by flat dark sky.
+        """
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=1,
+            smoothness=0.80,
+            scene_change_threshold=0.0,
+            dmd_readability_score_enabled=True,
+        )
+        engine = TrackingEngine(
+            fps=25.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+
+        # Build synthetic frame with flat sky at top (y=0..135) and busy checkerboard bricks (y=135..224)
+        frame = np.zeros((fh, fw, 3), dtype=np.uint8)
+        yy, xx = np.indices((fh - 135, fw))
+        checker = (((xx // 4) + (yy // 4)) % 2 * 220).astype(np.uint8)
+        frame[135:, :, 0] = checker
+        frame[135:, :, 1] = checker // 2
+        frame[135:, :, 2] = 180
+
+        cam = engine.cam_full_view
+        # Frames 0..1: missed detections (cam starts deep in the bricks at ~0.80*fh)
+        engine.detector.detect = lambda *a, **kw: None
+        cam = engine.process_frame(frame, cam, 0, 128, 32)
+        cam = engine.process_frame(frame, cam, 1, 128, 32)
+
+        # Frames 2..5: player detected standing on top of deep ground (y=99..135, h=36)
+        for i in range(2, 6):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(130, 99, 24, 36)
+            cam = engine.process_frame(frame, cam, i, 128, 32)
+            assert engine.just_locked_first_detection == (i == 2)
+
+        # Frame 6: single-frame bbox bloats deep into ground bricks (y=100..192, h=92!) while head stays at ~100
+        engine.detector.detect = lambda *a, **kw: BoundingBox(130, 100, 24, 92)
+        cam = engine.process_frame(frame, cam, 6, 128, 32)
+
+        cam_top = cam[1] - cam[3] / 2.0
+        cam_bottom = cam[1] + cam[3] / 2.0
+        ground_dmd_px = (cam_bottom - 135.0) * (32.0 / cam[3])
+        # Floor stayed locked near y=135 (~3.2 DMD px of ground), head has generous sky headroom!
+        assert engine.floor_est.floor_y == pytest.approx(135.5, abs=2.0)
+        assert 2.0 <= ground_dmd_px <= 4.5
+        assert cam_top < 99.0 - 15.0
 
     def test_fighting_2d_and_platformer_share_unified_profile_and_classifier_avoids_cinema_traps(self):
         from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType, classify_scene

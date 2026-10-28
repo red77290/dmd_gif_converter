@@ -1,5 +1,10 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.11] - 2026-10-28 (Priorité au Sprite sur Sol Profond & Loi de la Ligne de Sol Imaginaire)
+### Corrigé & Amélioré
+- **Loi de la Ligne de Sol Imaginaire pour Grands Sprites (`camera.py`, `tracker.py`)** : Remplace le suivi de tête image-par-image des grands sprites (`standing_h > 0.79 * crop_h`, Platformer & VS Fighting) par une **ligne de sol imaginaire verrouillée** remontée au niveau des genoux/cuisses (`active_floor_y = floor_y - (standing_h - max_fit_h)`) jusqu'à cadrer le visage avec `_PLATFORMER_HEAD_PAD_RATIO = 0.11` (~3,5 px DMD d'air au-dessus de la tête) et 3 à 4 px de sol maximum (`platformer_floor_ratio = 0.90`). Cette ligne de sol imaginaire reste immobile lors des accroupissements/attaques, accompagne les grands sauts sans couper la tête, revient exactement au point de référence à la réception, et se ré-ancre sur les genoux lors d'un changement de plateforme.
+- **Priorité au Sprite face aux Sols Profonds (`FloorEstimationStage`, `ReadabilityScoreStage`, `CameraBuilderStage`, `pipeline.py`, `detector.py`)** : Plafonne les dilatations verticales parasites de boîtes englobantes dans le sol profond à `standing_h`, rejette les briques/motifs horizontaux détectés sous la surface du sol, verrouille instantanément la première vraie détection même tardive sans remontée lente depuis `0.80 * frame_h`, réserve `18 %` de marge haute dans le zoom platformer, accélère le dégagement vertical anti-coupe de tête et empêche `ReadabilityScoreStage` de figer la caméra dans les briques texturées du sol au détriment d'un personnage sur fond de ciel uni.
+
 ## [V8.0.10] - 2026-10-28 (Loi Unifiée Petits vs Grands Sprites & Rejet des Décors Pixel-Art)
 ### Ajouté & Amélioré
 - **Loi Continue Unifiée Petits Sprites vs Grands Sprites (`_build_camera_rect`, `TrackingEngine._clip_to_face_roi`, `analyzer.py`, `api.py`)** : Unifie les scènes `platformer` et `fighting_2d` autour d'une règle géométrique unique pilotée par `sprite_height / crop_h` (avec support de `scene_type_hint` explicite dans `DmdClipConfig`) :

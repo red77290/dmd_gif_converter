@@ -1,5 +1,10 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.11] - 2026-10-28 (Sprite-Priority Deep-Ground Protection & Imaginary Floor Line Law)
+### Fixed & Improved
+- **Imaginary Floor Line Law for Tall Sprites (`camera.py`, `tracker.py`)**: Replaces per-frame head-top tracking on tall platformer & VS Fighting sprites (`standing_h > 0.79 * crop_h`) with a locked **imaginary floor line** raised up to the knees/thighs (`active_floor_y = floor_y - (standing_h - max_fit_h)`) until the character's face fits with `_PLATFORMER_HEAD_PAD_RATIO = 0.11` (~3.5 DMD px headroom) and strictly 3–4 DMD px below the active floor line (`platformer_floor_ratio = 0.90`). The imaginary floor stays steady across crouches/attacks, lifts only when high jumps cross the headroom guard, returns cleanly on landing, and re-anchors automatically onto the knees upon platform climbs or drops.
+- **Sprite Priority Over Deep Ground Slabs (`FloorEstimationStage`, `ReadabilityScoreStage`, `CameraBuilderStage`, `pipeline.py`, `detector.py`)**: Clamps single-frame downward bbox bloat into deep ground shadows/tiles at `standing_h`, rejects squat underground brick pareidolia below the established floor, snaps immediately on late first sprite detections instead of crawling up from `0.80 * frame_h`, reserves `18%` headroom in shot-locked platformer zoom, accelerates upward anti-clip rescue when a sprite crowds the top border, and prevents `ReadabilityScoreStage` from freezing the camera inside high-contrast ground bricks when tracking a sprite backed by clean sky.
+
 ## [8.0.10] - 2026-10-28 (Unified Small-Sprite vs Tall-Sprite Framing & Pixel-Art Scenery Rejection)
 ### Added & Improved
 - **Unified Continuous Small-Sprite vs Tall-Sprite Camera Law (`_build_camera_rect`, `TrackingEngine._clip_to_face_roi`, `analyzer.py`, `api.py`)**: Unifies `platformer` and `fighting_2d` under a single continuous sprite-height framing rule controlled by `sprite_height / crop_h` (and explicit `scene_type_hint` override on `DmdClipConfig`):

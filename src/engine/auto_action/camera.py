@@ -110,7 +110,8 @@ def _compute_detail_preserving_crop_dimensions(
 
     ideal_h = float(median_h) * (1.0 + padding)
     if _auto or _platformer:
-        required_h = float(median_h) / max(0.1, _floor_ratio - 0.05)
+        head_reserve = 0.18 if _platformer else 0.05
+        required_h = float(median_h) / max(0.20, _floor_ratio - head_reserve)
         ideal_h = max(ideal_h, required_h)
     ideal_w = ideal_h * target_ratio
 
@@ -139,6 +140,11 @@ def _compute_detail_preserving_crop_dimensions(
     return crop_w, crop_h
 
 
+# Top headroom cushion in platformer/fighting_2d mode (~3.5 px on a 32 px DMD) so
+# sprites never glue to row 0 or suffer head clipping, while ground strip stays 3-4 px.
+_PLATFORMER_HEAD_PAD_RATIO: float = 0.11
+
+
 def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        floor_y_est: Optional[float] = None,
                        frame_top: float = 0.0,
@@ -147,7 +153,8 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                        effective_frame_w: Optional[int] = None,
                        effective_frame_top: float = 0.0,
                        effective_frame_h: Optional[int] = None,
-                       locked_crop_size: Optional[Tuple[float, float]] = None):
+                       locked_crop_size: Optional[Tuple[float, float]] = None,
+                       standing_height: Optional[float] = None):
     if effective_frame_top == 0.0 and frame_top != 0.0:
         effective_frame_top = frame_top
     if effective_frame_w is None:
@@ -199,6 +206,11 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         crop_h = max_h
 
 
+    floor_ratio_plat = _clamp(float(getattr(cfg, "platformer_floor_ratio", 0.90)), 0.50, 0.96)
+    max_fit_h_plat = crop_h * max(0.20, floor_ratio_plat - _PLATFORMER_HEAD_PAD_RATIO)
+    cfg_med_h = float(getattr(cfg, "median_subject_height", 0.0) or 0.0)
+    base_stand_h = max(cfg_med_h, float(standing_height or 0.0))
+
     if roi is None:
         cx = effective_frame_left + effective_frame_w / 2.0
         scene_type_none = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
@@ -207,15 +219,9 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         else:
             cy = effective_frame_top + effective_frame_h / 2.0
         if floor_y_est is not None and (_platformer or _auto) and not face_priority_mode:
-            med_h = float(getattr(cfg, "median_subject_height", 0.0) or 0.0)
-            max_fit_h = crop_h * (_FLOOR_RATIO - 0.06)
-            if _platformer and med_h > max_fit_h:
-                # Tall sprite (VS Fighting / large-sprite platformer): hold camera at estimated
-                # head/upper-half height on missed frames instead of plunging onto the feet/floor.
-                est_top = floor_y_est - med_h
-                cy = _clamp((est_top - crop_h * 0.06) + crop_h / 2.0, _cy_min(crop_h), _cy_max(crop_h))
-            else:
-                cy = _apply_auto_floor(cy, floor_y_est, crop_h)
+            imaginary_raise = max(0.0, base_stand_h - max_fit_h_plat) if _platformer else 0.0
+            active_floor_y = floor_y_est - imaginary_raise
+            cy = _apply_auto_floor(cy, active_floor_y, crop_h)
         else:
             cy = _apply_bias(cy, crop_h)
         return CamRect(cx, cy, crop_w, crop_h)
@@ -250,42 +256,44 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
         cy = y + (eye_off + band_frac / 2.0) * h
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
-        cy_floor = _apply_auto_floor(cy, fy, crop_h)
         if _platformer:
-            cy = cy_floor
-            # Only intervene on `cy_floor` as an outer anti-clipping safety boundary
-            # when a non-explosion sprite genuinely crosses outside the floor-anchored window
-            # (normal standing, walking, and jumps within the window stay 100% locked on `cy_floor`).
             is_scene_explosion = (
                 floor_y_est is not None
                 and float(w) > float(effective_frame_w) * 0.65
                 and float(h) > float(effective_frame_h) * 0.58
             )
+            stand_h = max(base_stand_h, float(h)) if not is_scene_explosion else base_stand_h
+            # Imaginary Floor Line Rule:
+            # - Small/normal sprites (stand_h <= max_fit_h_plat): imaginary_raise = 0, showing
+            #   strictly 3-4 DMD pixels of ground (1.0 - platformer_floor_ratio) with full sprite priority.
+            # - Tall sprites (stand_h > max_fit_h_plat): raise an imaginary floor line up to the
+            #   knees/thighs (fy - imaginary_raise) until the face fits with ~3.5 DMD px headroom.
+            #   This imaginary floor becomes the locked reference across crouches, jumps, and landings
+            #   until the character changes platform (which updates fy via _FloorEstimator).
+            imaginary_raise = max(0.0, stand_h - max_fit_h_plat)
+            active_floor_y = fy - imaginary_raise
+            cy_floor = _apply_auto_floor(cy, active_floor_y, crop_h)
+            cy = cy_floor
             if not is_scene_explosion:
                 cam_top_floor = cy_floor - crop_h / 2.0
                 cam_bottom_floor = cy_floor + crop_h / 2.0
-                head_pad = crop_h * 0.06
-                floor_ratio = _clamp(float(getattr(cfg, "platformer_floor_ratio", 0.90)), 0.50, 0.96)
-                foot_pad = crop_h * (1.0 - floor_ratio)
-                max_fit_h = crop_h * max(0.20, floor_ratio - 0.06)
-                if float(h) > max_fit_h:
-                    # Unified Tall-Sprite Rule (VS Fighting & large-sprite platformers):
-                    # When the sprite cannot fit between head_pad and the floor line, prioritize
-                    # the upper half of the character with its head/face anchored near the top
-                    # of the DMD strip, allowing the floor line and lower legs to go below frame.
+                head_pad = crop_h * _PLATFORMER_HEAD_PAD_RATIO
+                foot_pad = crop_h * (1.0 - floor_ratio_plat)
+                effective_contact_y = float(y + h) - imaginary_raise
+                if float(y) < cam_top_floor + head_pad:
                     cy = (float(y) - head_pad) + crop_h / 2.0
-                elif float(y) < cam_top_floor + head_pad:
-                    cy = (float(y) - head_pad) + crop_h / 2.0
-                elif float(y + h) + foot_pad > cam_bottom_floor + 0.5:
-                    cy = (float(y + h) + foot_pad) - crop_h / 2.0
-        elif (cy_floor - crop_h / 2.0) > ideal_top:
-            scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
-            if scene_type in ("platformer", "fighting_2d", "action_horizontal"):
-                cy = cy_floor
-            else:
-                cy = ideal_top + crop_h / 2.0
+                elif effective_contact_y + foot_pad > cam_bottom_floor + 0.5:
+                    cy = (effective_contact_y + foot_pad) - crop_h / 2.0
         else:
-            cy = cy_floor
+            cy_floor = _apply_auto_floor(cy, fy, crop_h)
+            if (cy_floor - crop_h / 2.0) > ideal_top:
+                scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
+                if scene_type in ("platformer", "fighting_2d", "action_horizontal"):
+                    cy = cy_floor
+                else:
+                    cy = ideal_top + crop_h / 2.0
+            else:
+                cy = cy_floor
     else:
         cy = _apply_bias(cy, crop_h)
 
