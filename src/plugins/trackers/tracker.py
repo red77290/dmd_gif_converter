@@ -58,6 +58,7 @@ class FrameTrackingContext:
     floor_y_est: Optional[float] = None
     cam_now_proposed: Optional[CamRect] = None
     cam_now: Optional[CamRect] = None
+    fresh_detection: bool = True
 
 
 class ITrackerStage(ABC):
@@ -79,6 +80,8 @@ class SceneChangeStage(ITrackerStage):
                     engine.floor_est = _FloorEstimator(engine.cam_frame_h)
                 engine.prev_roi_cx = None
                 engine.prev_roi_cy = None
+                engine._last_valid_roi_cx = None
+                engine._last_yolo_roi = None
                 engine.frames_since_scene_change = 0
                 
                 # Reset dynamic detector on cut
@@ -93,6 +96,7 @@ class DetectionStage(ITrackerStage):
     """Invokes the detector model to retrieve raw ROI."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         expected_floor_y = engine.floor_est.floor_y if engine.floor_est is not None else None
+        expected_cx = getattr(engine, "_last_valid_roi_cx", None)
         
         if getattr(engine.cfg, 'auto_fast_tracking', False):
             # Target roughly 5 frames per second for YOLO processing
@@ -106,8 +110,12 @@ class DetectionStage(ITrackerStage):
         )
 
         if not run_detector:
+            context.fresh_detection = False
             context.raw_roi = getattr(engine, "_last_yolo_roi", None)
             return
+
+        context.fresh_detection = True
+        extra_kw = {"expected_cx": expected_cx} if isinstance(engine.detector, _FrameDetector) else {}
 
         if engine.face_priority_mode:
             context.raw_roi = engine.detector.detect(
@@ -116,7 +124,8 @@ class DetectionStage(ITrackerStage):
                 min_conf=engine.cfg.roi_confidence_min,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
-                expected_floor_y=expected_floor_y
+                expected_floor_y=expected_floor_y,
+                **extra_kw,
             )
         else:
             detect_frame = context.frame[engine.effective_frame_top:engine.effective_frame_h, :]
@@ -126,7 +135,8 @@ class DetectionStage(ITrackerStage):
                 min_conf=engine.cfg.roi_confidence_min,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
-                expected_floor_y=expected_floor_y - engine.effective_frame_top if expected_floor_y is not None else None
+                expected_floor_y=expected_floor_y - engine.effective_frame_top if expected_floor_y is not None else None,
+                **extra_kw,
             )
             if context.raw_roi is not None and engine.effective_frame_top > 0:
                 rx, ry, rw, rh = context.raw_roi
@@ -184,6 +194,17 @@ class FloorEstimationStage(ITrackerStage):
     """Estimates floor level for platformer and ground-tracked modes."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.floor_est is not None:
+            # Never feed cached subsampled ROIs into _FloorEstimator: repeating a single
+            # frozen mid-air jump sample across N subsampled frames would forge zero
+            # foot-variance and trigger a false upper-platform stance jump.
+            if not context.fresh_detection:
+                context.floor_y_est = (
+                    engine.floor_est.floor_y
+                    if engine.floor_est.floor_y is not None
+                    else engine.floor_est.update(None)
+                )
+                return
+
             roi_bottom = None
             if context.raw_roi is not None:
                 rx, ry, rw, rh = context.raw_roi
@@ -207,7 +228,7 @@ class HistorySynthesisStage(ITrackerStage):
     """Smooths ROI over time using a deque history buffer."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.roi_history_enabled:
-            if context.raw_roi is not None:
+            if context.fresh_detection and context.raw_roi is not None:
                 engine.roi_history.append((1.0, context.raw_roi))
                 while len(engine.roi_history) > engine.roi_history_max_len:
                     engine.roi_history.popleft()
@@ -308,14 +329,16 @@ class CameraBuilderStage(ITrackerStage):
             prop_cx, prop_cy, cw, ch = float(raw_cam[0]), float(raw_cam[1]), float(raw_cam[2]), float(raw_cam[3])
             dx = prop_cx - prev_cx
             dy = prop_cy - prev_cy
-            # Tripod deadzone hysteresis: camera stays rock-steady for minor micro-movements
-            dead_x = cw * 0.04
-            dead_y = ch * 0.04
+            # Tripod deadzone hysteresis: wider in platformer mode so sprite walk-cycle
+            # bounding-box wobble and normal hops never cause camera indecision.
+            is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
+            dead_x = cw * (0.065 if is_platformer else 0.04)
+            dead_y = ch * (0.085 if is_platformer else 0.04)
             target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
             target_cy = prev_cy if abs(dy) <= dead_y else prev_cy + math.copysign(abs(dy) - dead_y, dy)
             # Maximum pan speed per frame before outer smoothing
-            max_step_x = max(4.0, cw * 0.14)
-            max_step_y = max(3.5, ch * 0.14)
+            max_step_x = max(4.0, cw * (0.11 if is_platformer else 0.14))
+            max_step_y = max(2.5 if is_platformer else 3.5, ch * (0.08 if is_platformer else 0.14))
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
             clamped_cy = prev_cy + _clamp(target_cy - prev_cy, -max_step_y, max_step_y)
             raw_cam = CamRect(clamped_cx, clamped_cy, cw, ch)
@@ -400,6 +423,10 @@ class LookAheadStage(ITrackerStage):
             
         engine.prev_roi_cx = curr_roi_cx
         engine.prev_roi_cy = curr_roi_cy
+        if curr_roi_cx is not None:
+            engine._last_valid_roi_cx = curr_roi_cx
+        elif engine.roi_persistence_frames == 0:
+            engine._last_valid_roi_cx = None
         
         engine._last_roi = context.raw_roi
 
@@ -471,6 +498,7 @@ class TrackingEngine(ITracker):
         
         self.prev_roi_cx: Optional[float] = None
         self.prev_roi_cy: Optional[float] = None
+        self._last_valid_roi_cx: Optional[float] = None
         self.scroll_vx: float = 0.0
         self.scroll_vy: float = 0.0
         self.scroll_memory_frames: int = 0

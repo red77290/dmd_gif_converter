@@ -1,6 +1,6 @@
-# 📦 Headless Python Library & Binary Stream Reference (`v8.0.4`)
+# 📦 Headless Python Library & Binary Stream Reference (`v8.0.5`)
 
-`dmd_gif_converter` is packaged as a standard **PEP 621 Python library** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.4"`) with strict separation between its **Headless Core Engine** (zero X11 / Tkinter dependency, ready for Docker and server backends) and its optional **Desktop GUI (`[ui]`)**.
+`dmd_gif_converter` is packaged as a standard **PEP 621 Python library** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.5"`) with strict separation between its **Headless Core Engine** (zero X11 / Tkinter dependency, ready for Docker and server backends) and its optional **Desktop GUI (`[ui]`)**.
 
 ---
 
@@ -106,7 +106,7 @@ pan_assets = processor.process_image_panorama(
 )
 ```
 
-### Orientation-Aware Panorama & Framing Guarantees (`v8.0.3`–`v8.0.4`)
+### Orientation-Aware Panorama & Framing Guarantees (`v8.0.3`–`v8.0.5`)
 
 - **`resolve_panorama_scroll_axis(src_w, src_h, target_width, target_height, scroll_direction="auto") -> str`**:
   - **TATE (`target_height > target_width`)**: Always returns `"horizontal"` (left-to-right pan), centering vertically when zoomed.

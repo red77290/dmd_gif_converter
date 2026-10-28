@@ -1,5 +1,12 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.5] - 2026-10-28 (Platformer Camera Stability & Anti-Indecision Hardening)
+### Fixed & Improved
+- **Fresh-Sample-Only Floor & History Updates (`FloorEstimationStage`, `HistorySynthesisStage`)**: Prevented cached subsampled YOLO/motion detections (`subsample_frames > 1` or `auto_fast_tracking`) from feeding duplicate mid-air jump samples into `_FloorEstimator` and `roi_history`, eliminating false zero-spread upper-platform stance triggers during normal jumps.
+- **Calm Floor-Locked Platformer Framing (`_build_camera_rect`)**: Restored baseline `_auto` vertical framing for non-platformer scenes and locked `platformer_mode` vertical centering (`cy = cy_floor`) for all standing, walking, and jumping sprites inside the floor-anchored DMD window, intervening only when a non-explosion sprite genuinely crosses the outer window boundary.
+- **Horizontal Subject Continuity & Strong Floor Preference (`_FrameDetector`)**: Added `expected_cx` horizontal continuity weighting (`1.0 + 0.90 * exp(-dx_norm * 5.0)`) and strengthened active-floor affinity (`0.05 + 8.0 * exp(-dist_to_floor * 7.5)`) across YOLOv8 and motion detectors to prevent left/right target ping-pong between the player and secondary enemies or partners.
+- **Tighter Stance Window & Wider Platformer Tripod Deadzone (`_FloorEstimator`, `CameraBuilderStage`)**: Required `>= 6` fresh samples with tight foot spread (`<= 4.5%` frame height, `_ALPHA_RELEASE_JUMP = 0.01`, `_ALPHA_ATTACK = 0.24`) before upward platform re-anchoring, and widened platformer tripod hysteresis (`dead_x = 6.5%`, `dead_y = 8.5%`).
+
 ## [8.0.4] - 2026-10-28 (Platformer Stance-Aware Floor Tracking & Headroom Protection)
 ### Fixed & Improved
 - **Stance-Aware Bidirectional Floor Estimator (`_FloorEstimator`)**: Upgraded ground tracking from a strictly downward asymmetric EMA to a stance-aware bidirectional estimator (`_ALPHA_ATTACK = 0.25`, `_ALPHA_RELEASE_JUMP = 0.04`, `_ALPHA_RELEASE_STANCE = 0.28`). Re-anchors upward onto confirmed elevated platforms (5-sample spread `<= 9%` frame height or 9 consecutive elevated samples), snaps immediately on the first real detection after initial `None` frames, and rejects isolated single-frame bottom-border scroll spikes (`rb >= 0.96 * frame_h`).

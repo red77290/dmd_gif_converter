@@ -113,6 +113,7 @@ class AbstractDetector(IDetector):
         platformer_mode: bool = False,
         expected_floor_y: Optional[float] = None,
         is_batch: bool = False,
+        expected_cx: Optional[float] = None,
     ) -> Optional[BoundingBox]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
@@ -121,23 +122,33 @@ class AbstractDetector(IDetector):
         if mode == "center":
             return None
 
+        person_kw = dict(
+            multi_fusion=multi_fusion,
+            min_conf=min_conf,
+            roi_persistence_score=roi_persistence_score,
+            platformer_mode=platformer_mode,
+            expected_floor_y=expected_floor_y,
+            is_batch=is_batch,
+        )
+        motion_kw = dict(
+            platformer_mode=platformer_mode,
+            expected_floor_y=expected_floor_y,
+        )
+        if expected_cx is not None and isinstance(self, _FrameDetector):
+            person_kw["expected_cx"] = expected_cx
+            motion_kw["expected_cx"] = expected_cx
+
         if mode == "person":
-            p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
-                                   roi_persistence_score=roi_persistence_score,
-                                   platformer_mode=platformer_mode, expected_floor_y=expected_floor_y, is_batch=is_batch)
-            return p if p is not None else self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+            p = self.detect_person(frame, **person_kw)
+            return p if p is not None else self.detect_motion(frame, **motion_kw)
 
         if mode == "motion":
-            m = self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
-            return m if m is not None else self.detect_person(
-                frame, multi_fusion=multi_fusion, min_conf=min_conf,
-                roi_persistence_score=roi_persistence_score, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y, is_batch=is_batch)
+            m = self.detect_motion(frame, **motion_kw)
+            return m if m is not None else self.detect_person(frame, **person_kw)
 
         # hybrid: merge both
-        p = self.detect_person(frame, multi_fusion=multi_fusion, min_conf=min_conf,
-                                roi_persistence_score=roi_persistence_score,
-                                platformer_mode=platformer_mode, expected_floor_y=expected_floor_y, is_batch=is_batch)
-        m = self.detect_motion(frame, platformer_mode=platformer_mode, expected_floor_y=expected_floor_y)
+        p = self.detect_person(frame, **person_kw)
+        m = self.detect_motion(frame, **motion_kw)
         if p and m:
             x1 = min(p[0], m[0])
             y1 = min(p[1], m[1])
@@ -236,7 +247,8 @@ class _FrameDetector(AbstractDetector):
 
     def _detect_yolo(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
                      roi_persistence_score: float = 1.0, platformer_mode: bool = False,
-                     expected_floor_y: Optional[float] = None, is_batch: bool = False) -> Optional[BoundingBox]:
+                     expected_floor_y: Optional[float] = None, is_batch: bool = False,
+                     expected_cx: Optional[float] = None) -> Optional[BoundingBox]:
         session = self._get_active_session(is_batch)
         if session is None:
             return None
@@ -287,6 +299,16 @@ class _FrameDetector(AbstractDetector):
                 ),
             )
 
+            # Horizontal subject continuity: prevent argmax ping-pong between player
+            # and secondary enemies/partners on opposite sides of the playfield.
+            if expected_cx is not None:
+                cx_model = float(expected_cx) * (self._model_w / max(1.0, float(w)))
+                dx_norm = np.abs(boxes_raw[:, 0] - cx_model) / float(self._model_w)
+                horiz_weight = 1.0 + 0.90 * np.exp(-dx_norm * 5.0)
+            else:
+                cx_norm = boxes_raw[:, 0] / float(self._model_w)
+                horiz_weight = 1.0 + 0.25 * np.maximum(0.0, 0.5 - np.abs(cx_norm - 0.5))
+
             if expected_floor_y is not None:
                 sy_model = self._model_h / float(h)
                 expected_floor_model = expected_floor_y * sy_model
@@ -300,10 +322,13 @@ class _FrameDetector(AbstractDetector):
                 ceiling_block = is_above_floor & is_far_from_floor
                 mask = mask & ~ceiling_block
 
-                floor_weight = 0.15 + np.exp(-dist_to_floor * 4.0)
-                platformer_scores = person_scores * mask * playfield_weight * floor_weight
+                # Strong exponential preference for the active platform floor while remaining
+                # non-zero (> 0.05) so upper-platform climbs are still tracked when no lower
+                # floor sprite competes.
+                floor_weight = 0.05 + 8.0 * np.exp(-dist_to_floor * 7.5)
+                platformer_scores = person_scores * mask * playfield_weight * horiz_weight * floor_weight
             else:
-                platformer_scores = person_scores * mask * playfield_weight
+                platformer_scores = person_scores * mask * playfield_weight * horiz_weight
 
             if not np.any(mask):
                 return None
@@ -389,7 +414,8 @@ class _FrameDetector(AbstractDetector):
                       roi_persistence_score: float = 1.0,
                       platformer_mode: bool = False,
                       expected_floor_y: Optional[float] = None,
-                      is_batch: bool = False) -> Optional[BoundingBox]:
+                      is_batch: bool = False,
+                      expected_cx: Optional[float] = None) -> Optional[BoundingBox]:
         if self._get_active_session(is_batch) is None:
             return None
         if multi_fusion:
@@ -401,10 +427,12 @@ class _FrameDetector(AbstractDetector):
                                   roi_persistence_score=roi_persistence_score,
                                   platformer_mode=platformer_mode,
                                   expected_floor_y=expected_floor_y,
-                                  is_batch=is_batch)
+                                  is_batch=is_batch,
+                                  expected_cx=expected_cx)
 
     def detect_motion(self, frame: np.ndarray, platformer_mode: bool = False,
-                      expected_floor_y: Optional[float] = None) -> Optional[BoundingBox]:
+                      expected_floor_y: Optional[float] = None,
+                      expected_cx: Optional[float] = None) -> Optional[BoundingBox]:
         cv2 = self.cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -489,10 +517,16 @@ class _FrameDetector(AbstractDetector):
                 else:
                     playfield_weight = 0.30
 
-                base_score = eff_area * shape_weight * playfield_weight
+                if expected_cx is not None:
+                    dx_norm = abs((float(x) + float(w) * 0.5) - float(expected_cx)) / max(1.0, float(frame_w))
+                    horiz_weight = 1.0 + 0.90 * math.exp(-dx_norm * 5.0)
+                else:
+                    horiz_weight = 1.0
+
+                base_score = eff_area * shape_weight * playfield_weight * horiz_weight
                 if expected_floor_y is not None:
                     dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
-                    return base_score * (0.15 + math.exp(-dist_to_floor * 4.0))
+                    return base_score * (0.05 + 8.0 * math.exp(-dist_to_floor * 7.5))
                 return base_score
             return area
 

@@ -66,7 +66,7 @@ All UI components are modular and contained in `src/ui/panels/` or `src/ui/setti
 
 ---
 
-## 🎯 Camera, Panorama & Tracker Invariants (v8.0.4)
+## 🎯 Camera, Panorama & Tracker Invariants (v8.0.5)
 
 When modifying conversion geometry (`core.py`), camera framing (`camera.py`), floor estimation (`analysis.py`), or sprite detection (`detector.py`), preserve the following deterministic invariants:
 
@@ -82,20 +82,20 @@ When modifying conversion geometry (`core.py`), camera framing (`camera.py`), fl
    - Defined in `src/engine/auto_action/camera.py` and consumed by both `camera.py` (`_build_camera_rect`) and `src/plugins/trackers/tracker.py` (`TrackingEngine._clip_to_face_roi`).
    - YOLOv8 `person` close-up boxes (`aspect = rh / rw <= 1.4`) span from crown/hair down to neck/upper shoulders. `closeup_eye_mouth_fractions(aspect)` returns `(0.23, 0.38)` (`[0.23..0.61]*rh`, midpoint `0.42*rh`) for `aspect <= 1.0`, and scales smoothly upward via `1.0 / (1.0 + 0.50 * max(0.0, aspect - 1.0))` across bust shots (`1.0 < aspect <= 1.4`) so 4:1 and 2:1 DMD strips capture both eyes and mouth without drifting up into the forehead or down onto the chin.
 
-3. **Stance-Aware Bidirectional Floor Tracking (`_FloorEstimator`)**:
-   - Defined in `src/engine/analysis/analysis.py`. Replaces one-way downward-only locking with three response regimes:
-     - `_ALPHA_ATTACK = 0.25`: Smooth convergence when landing lower or dropping to a lower platform (`rb >= floor_y`).
-     - `_ALPHA_RELEASE_JUMP = 0.04`: Gentle hold during transient jump arcs so the ground stays anchored.
-     - `_ALPHA_RELEASE_STANCE = 0.28`: Upward re-anchoring onto a confirmed higher platform once 5-sample spread `<= 0.09 * frame_h` while elevated (or `>= 9` consecutive elevated frames).
+3. **Stance-Aware Bidirectional Floor Tracking (`_FloorEstimator` & Fresh-Sample Gate)**:
+   - Defined in `src/engine/analysis/analysis.py`. Replaces one-way downward-only locking with three response regimes fed **exclusively** on fresh detector frames (`context.fresh_detection = True` in `FloorEstimationStage`):
+     - `_ALPHA_ATTACK = 0.24`: Smooth convergence when landing lower or dropping to a lower platform (`rb >= floor_y`).
+     - `_ALPHA_RELEASE_JUMP = 0.01`: Rock-steady hold during transient jump arcs (`< 1 px` drift).
+     - `_ALPHA_RELEASE_STANCE = 0.28`: Upward re-anchoring onto a confirmed higher platform once `>= 6` fresh samples have foot spread `<= 0.045 * frame_h` while elevated (or `>= 12` consecutive elevated fresh samples).
    - Tracks `_has_detection` explicitly so the very first real ROI snaps `_floor_y = rb` immediately even if preceded by `None` frames, and rejects isolated 1-frame downward spikes at the extreme bottom border (`rb >= 0.96 * frame_h` and `rb > floor_y + 0.12 * frame_h`) unless corroborated by `>= 2` consecutive samples.
 
-4. **Character Headroom & Footroom Envelope (`_build_camera_rect` & `platformer_floor_ratio = 0.90`)**:
+4. **Outer-Boundary Headroom/Footroom Guard (`_build_camera_rect` & `platformer_floor_ratio = 0.90`)**:
    - Default `platformer_floor_ratio` is `0.90` (~3 px ground strip on a 32 px DMD) so thick ground slabs do not starve vertical headroom.
-   - In `src/engine/auto_action/camera.py`, after applying `_apply_auto_floor`, `_build_camera_rect` enforces a strict visibility envelope (`head_margin` above `y` and `foot_margin` below `y + h`) whenever `h + head_margin + foot_margin <= crop_h` (falling back to upper-body framing `y + 0.45 * h` capped by head protection when a sprite exceeds `crop_h`), while ignoring full-screen background explosion/flash boxes (`w > 0.65 * eff_w` and `h > 0.58 * eff_h`).
+   - In `src/engine/auto_action/camera.py`, `platformer_mode` keeps `cy = cy_floor` 100% locked for all normal movement and jumps within the floor-anchored window, intervening only when a non-explosion sprite crosses outside `[cam_top_floor + 0.06 * crop_h, cam_bottom_floor]` (or exceeds `crop_h`).
 
-5. **Morphological Ground-Band Stripping & Playfield Scoring (`_FrameDetector`)**:
-   - In `src/plugins/detectors/detector.py`, platformer motion detection rejects global camera flashes (`> 70%` active mask) and applies morphological opening (`cv2.MORPH_OPEN` with width `max(16, int(frame_w * 0.38))`) to strip wide horizontal scrolling ground/HUD slabs before contour extraction, cleanly separating compact player sprites standing on thick ground.
-   - Both YOLOv8 and motion platformer scorers reject wide horizontal bands (`w/frame_w > 0.40` with `w/h > 2.4`) and bottom-border slabs (`bottom >= 0.98`), and score candidates using sprite-plausible aspect weighting combined with balanced playfield vertical weighting (`1.25` across `0.50..0.92`, `0.75..1.25` ramp across upper platforms `0.30..0.50`, `0.55` penalty for `> 0.95` border tile noise).
+5. **Morphological Ground-Band Stripping, Active-Floor Affinity & Horizontal Subject Continuity (`_FrameDetector`)**:
+   - In `src/plugins/detectors/detector.py`, platformer motion detection rejects global camera flashes (`> 70%` active mask) and applies morphological opening (`cv2.MORPH_OPEN` with width `max(16, int(frame_w * 0.38))`) to strip wide horizontal scrolling ground/HUD slabs before contour extraction.
+   - Both YOLOv8 and motion platformer scorers combine sprite-plausible aspect/playfield weighting with strong active-floor affinity (`0.05 + 8.0 * exp(-dist_to_floor * 7.5)`) and horizontal subject continuity (`expected_cx`, `1.0 + 0.90 * exp(-dx_norm * 5.0)`) so secondary enemies or partners never trigger horizontal/vertical target ping-pong.
 
 ---
 

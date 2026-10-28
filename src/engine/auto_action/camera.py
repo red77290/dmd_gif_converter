@@ -243,30 +243,36 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     elif _auto or _platformer:
         fy = floor_y_est if floor_y_est is not None else float(y + h)
         cy_floor = _apply_auto_floor(cy, fy, crop_h)
-        cy = cy_floor
-
-        # Ignore scene-wide background explosion / full-frame flash boxes in platformer mode
-        is_scene_explosion = (
-            _platformer
-            and floor_y_est is not None
-            and float(w) > float(effective_frame_w) * 0.65
-            and float(h) > float(effective_frame_h) * 0.58
-        )
-        if not is_scene_explosion:
-            head_margin = min(crop_h * 0.12, max(crop_h * 0.06, float(h) * 0.08))
-            foot_margin = min(crop_h * 0.10, max(2.0, crop_h * (1.0 - _FLOOR_RATIO)))
-            if float(h) + head_margin + foot_margin <= crop_h:
-                max_allowed_cy = (float(y) - head_margin) + crop_h / 2.0
-                min_allowed_cy = (float(y + h) + foot_margin * 0.5) - crop_h / 2.0
-                if cy > max_allowed_cy:
-                    cy = max_allowed_cy
-                elif cy < min_allowed_cy:
-                    cy = min_allowed_cy
+        if _platformer:
+            cy = cy_floor
+            # Only intervene on `cy_floor` as an outer anti-clipping safety boundary
+            # when a non-explosion sprite genuinely crosses outside the floor-anchored window
+            # (normal standing, walking, and jumps within the window stay 100% locked on `cy_floor`).
+            is_scene_explosion = (
+                floor_y_est is not None
+                and float(w) > float(effective_frame_w) * 0.65
+                and float(h) > float(effective_frame_h) * 0.58
+            )
+            if not is_scene_explosion:
+                cam_top_floor = cy_floor - crop_h / 2.0
+                cam_bottom_floor = cy_floor + crop_h / 2.0
+                head_pad = crop_h * 0.06
+                if float(h) > crop_h:
+                    cy_upper = float(y) + float(h) * 0.45
+                    max_head_cy = max(float(effective_frame_top), float(y) - crop_h * 0.04) + crop_h / 2.0
+                    cy = min(cy_upper, max_head_cy)
+                elif float(y) < cam_top_floor + head_pad:
+                    cy = (float(y) - head_pad) + crop_h / 2.0
+                elif float(y + h) > cam_bottom_floor:
+                    cy = float(y + h) - crop_h / 2.0
+        elif (cy_floor - crop_h / 2.0) > ideal_top:
+            scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
+            if scene_type in ("platformer", "fighting_2d", "action_horizontal"):
+                cy = cy_floor
             else:
-                # Sprite taller than crop_h: anchor on upper-body/head-to-torso without cutting off the head
-                cy_upper = float(y) + float(h) * 0.45
-                max_head_cy = max(float(effective_frame_top), float(y) - crop_h * 0.04) + crop_h / 2.0
-                cy = min(cy_upper, max_head_cy)
+                cy = ideal_top + crop_h / 2.0
+        else:
+            cy = cy_floor
     else:
         cy = _apply_bias(cy, crop_h)
 

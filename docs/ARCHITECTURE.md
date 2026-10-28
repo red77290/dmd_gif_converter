@@ -1,4 +1,4 @@
-# DMD GIF Converter — Technical Architecture (v8.0.4)
+# DMD GIF Converter — Technical Architecture (v8.0.5)
 
 > **Target audience:** Contributors, maintainers, and developers who need to understand how the codebase is structured, how data flows through the system, and where to add or change functionality.
 
@@ -28,7 +28,7 @@
 10. [Testing Strategy](#10-testing-strategy)
 11. [Extension Guide](#11-extension-guide)
 12. [Concurrency & Performance Engineering](#12-concurrency--performance-engineering-v800)
-13. [Framing, Panorama & Platformer Invariants (v8.0.3–v8.0.4)](#13-framing-panorama--platformer-invariants-v803v804)
+13. [Framing, Panorama & Platformer Invariants (v8.0.3–v8.0.5)](#13-framing-panorama--platformer-invariants-v803v805)
 
 ---
 
@@ -1038,13 +1038,13 @@ To prevent redundant YOLO execution, the UI's `PreviewPanel` strictly chains the
 
 ---
 
-## 13. Framing, Panorama & Platformer Invariants (v8.0.3–v8.0.4)
+## 13. Framing, Panorama & Platformer Invariants (v8.0.3–v8.0.5)
 
 - **Orientation-Aware Panorama Axis (`resolve_panorama_scroll_axis`)**: Under `scroll_direction="auto"`, TATE panels (`target_height > target_width`) always scroll horizontally (left-to-right), YOKO panels (`target_width > target_height`) always scroll vertically (top-to-bottom), and square panels adapt to `src_w > src_h`, using uniform 1:1 Lanczos zoom-to-cover scaling with zero black bars and pure-black RGBA pre-compositing.
 - **Close-Up Eye-to-Mouth Calibration (`closeup_eye_mouth_fractions`)**: Wide/square YOLOv8 `person` close-ups (`aspect <= 1.0`) anchor onto `[0.23..0.61]*rh` (`0.42*rh` midpoint) with smooth upward scaling across bust shots (`1.0 < aspect <= 1.4`) so 4:1 and 2:1 DMD strips frame both eyes and mouth.
-- **Stance-Aware Bidirectional Floor Tracking (`_FloorEstimator` & `platformer_floor_ratio = 0.90`)**: Anchors the floor at `90%` strip height (~3 px ground strip on 32 px DMDs), converges smoothly on landings (`_ALPHA_ATTACK = 0.25`), resists jump airtime (`_ALPHA_RELEASE_JUMP = 0.04`), re-anchors upward onto confirmed higher platforms (`_ALPHA_RELEASE_STANCE = 0.28`), snaps immediately on first real detection, and rejects isolated 1-frame bottom-border spikes (`rb >= 0.96 * frame_h`).
-- **Headroom/Footroom Envelope & Morphological Slab Stripping**: `_build_camera_rect` clamps `cy` inside subject headroom/footroom bounds while ignoring scene-wide explosion boxes, and `_FrameDetector` strips wide horizontal ground/HUD scroll bands (`>= 38%` frame width via `cv2.MORPH_OPEN`) with balanced playfield vertical scoring (`0.50..0.92` and `0.30..0.50`).
+- **Stance-Aware Bidirectional Floor Tracking (`_FloorEstimator` & `platformer_floor_ratio = 0.90`)**: Anchors the floor at `90%` strip height (~3 px ground strip on 32 px DMDs), converges smoothly on landings (`_ALPHA_ATTACK = 0.24`), holds rock-steady during jump airtime (`_ALPHA_RELEASE_JUMP = 0.01`), re-anchors upward onto confirmed higher platforms (`_ALPHA_RELEASE_STANCE = 0.28`, `>= 6` fresh samples with spread `<= 4.5%` frame height), ignores cached subsampled frames (`context.fresh_detection`), snaps immediately on first real detection, and rejects isolated 1-frame bottom-border spikes (`rb >= 0.96 * frame_h`).
+- **Outer-Boundary Headroom/Footroom Guard, Horizontal Subject Continuity & Slab Stripping**: `_build_camera_rect` keeps `cy = cy_floor` locked unless a non-explosion sprite crosses outside the floor-anchored window, and `_FrameDetector` combines wide horizontal slab stripping (`>= 38%` frame width via `cv2.MORPH_OPEN`), active-floor exponential affinity (`0.05 + 8.0 * exp(-dist_to_floor * 7.5)`), and `expected_cx` horizontal subject continuity (`1.0 + 0.90 * exp(-dx_norm * 5.0)`).
 
 ---
 
-*Last updated: v8.0.4 — October 2026*
+*Last updated: v8.0.5 — October 2026*

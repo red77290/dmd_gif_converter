@@ -152,12 +152,11 @@ class TestBidirectionalFloorEstimator:
             fe.update(185.0)
         assert fe.floor_y == pytest.approx(185.0, abs=0.5)
 
-        # Climb onto upper platform at y_bottom = 105 and hold for 8 frames
+        # Climb onto upper platform at y_bottom = 105 and hold for 8 fresh samples
+        # (first 5 samples confirm deliberate stance vs jump apex; samples 6..8 re-anchor smoothly)
         for _ in range(8):
             fe.update(105.0)
-        # After 8 frames, floor estimate must have climbed the vast majority of the way
-        # (vs old _ALPHA_RELEASE=0.02 which stayed stuck at ~173!)
-        assert fe.floor_y < 126.0
+        assert fe.floor_y < 138.0
 
         # Settling a few more frames converges tightly onto ~105
         for _ in range(8):
@@ -308,4 +307,110 @@ class TestAntiThickGroundScrollDetector:
         assert rw < 60
         assert 115 <= ry <= 132
         assert 150 <= (ry + rh) <= 165
+
+
+class TestCameraStabilityAndAntiIndecision:
+    """Regression suite for v8.0.5 camera stability (no jump bobbing, no subsample stance, no ping-pong)."""
+
+    def test_normal_jump_within_floor_window_produces_zero_vertical_shift(self):
+        """Standing vs normal hop inside the floor-anchored crop window must keep exact same cy."""
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(target_width=128, target_height=32)
+        standing_roi = (120, 109, 24, 36)  # feet at 145
+        hop_roi = (128, 86, 24, 36)        # hop 23px upward, head=86 well inside window top ~76.6
+
+        _, cy_stand, _, _ = _build_camera_rect(
+            fw, fh, standing_roi, cfg, floor_y_est=145.0, face_priority_mode=False
+        )
+        _, cy_hop, _, _ = _build_camera_rect(
+            fw, fh, hop_roi, cfg, floor_y_est=145.0, face_priority_mode=False
+        )
+        assert cy_hop == pytest.approx(cy_stand, abs=1e-6)
+
+    def test_subsampled_frozen_midair_roi_never_triggers_false_upper_platform_stance(self):
+        """
+        With subsample_frames=5, a single mid-air YOLO detection is cached for 4 subsampled
+        frames. FloorEstimationStage must NOT feed cached duplicates into _FloorEstimator.
+        """
+        from src.plugins.trackers.tracker import TrackingEngine
+        from src.engine.auto_action.interfaces import BoundingBox
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=5,
+            auto_fast_tracking=False,
+            smoothness=0.8,
+            scene_change_threshold=0.0,
+        )
+        engine = TrackingEngine(
+            fps=25.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+
+        # Sequence of fresh detections (evaluated at frames 1, 5, 10):
+        # Frame 1: standing at y_bottom=175 -> snaps floor to 175 (window y=106.6..182.6)
+        # Frame 5: mid-air jump apex at y=112..148 (27px jump inside window, cached across 5 frames!)
+        # Frame 10: landed back at y_bottom=175
+        fresh_rois = [
+            BoundingBox(120, 139, 24, 36),  # frame 1: standing bottom = 175
+            BoundingBox(126, 112, 24, 36),  # frame 5: mid-air apex bottom = 148
+            BoundingBox(132, 139, 24, 36),  # frame 10: landed bottom = 175
+        ]
+        call_idx = {"i": 0}
+
+        def fake_detect(*args, **kwargs):
+            idx = min(call_idx["i"], len(fresh_rois) - 1)
+            call_idx["i"] += 1
+            return fresh_rois[idx]
+
+        engine.detector.detect = fake_detect
+        blank = np.full((fh, fw, 3), 64, dtype=np.uint8)
+        cam = engine.cam_full_view
+        cy_trace = []
+        for f_idx in range(12):
+            cam = engine.process_frame(blank, cam, f_idx, 128, 32)
+            cy_trace.append(cam[1])
+
+        # Floor must stay rock-steady near 175 throughout the subsampled mid-air apex (< 2px drift)
+        assert engine.floor_est.floor_y == pytest.approx(175.0, abs=2.0)
+        # Camera cy after initial frame-1 lock must have near-zero vertical oscillation
+        assert max(cy_trace[1:]) - min(cy_trace[1:]) < 2.0
+
+    def test_horizontal_continuity_locks_onto_hero_over_distant_enemy(self):
+        """expected_cx prevents YOLO argmax from ping-ponging between hero (left) and enemy (right)."""
+        det = _FrameDetector()
+        det._model_w = 640
+        det._model_h = 640
+
+        # Box 0: Enemy on right side (x≈240 -> cx_model=505, y_bottom≈145 -> 414, conf=0.72)
+        # Box 1: Hero on left side (x≈85 -> cx_model=179, y_bottom≈145 -> 414, conf=0.60)
+        pred = np.zeros((1, 5, 2), dtype=np.float32)
+        pred[0, :, 0] = [505.0, 363.0, 50.0, 102.0, 0.72]
+        pred[0, :, 1] = [179.0, 363.0, 50.0, 102.0, 0.60]
+
+        mock_session = MagicMock()
+        mock_input = MagicMock()
+        mock_input.name = "images"
+        mock_session.get_inputs.return_value = [mock_input]
+        mock_session.run.return_value = [pred]
+        det._onnx_session_fast = mock_session
+
+        frame = np.zeros((224, 304, 3), dtype=np.uint8)
+        roi = det._detect_yolo(
+            frame, platformer_mode=True, expected_floor_y=145.0, expected_cx=85.0
+        )
+        assert roi is not None
+        rx, _, rw, _ = roi
+        hero_cx = rx + rw / 2.0
+        assert 70.0 <= hero_cx <= 100.0
+
 

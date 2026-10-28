@@ -1,6 +1,6 @@
-# 📦 Référence de la Librairie Python Headless & Flux Binaire (`v8.0.4`)
+# 📦 Référence de la Librairie Python Headless & Flux Binaire (`v8.0.5`)
 
-`dmd_gif_converter` est packagé comme une **librairie Python standard (PEP 621)** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.4"`) avec une séparation stricte entre son **Moteur Core Headless** (zéro dépendance X11 / Tkinter, prêt pour Docker et les serveurs d'API) et son **Interface Graphique Desktop optionnelle (`[ui]`)**.
+`dmd_gif_converter` est packagé comme une **librairie Python standard (PEP 621)** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.5"`) avec une séparation stricte entre son **Moteur Core Headless** (zéro dépendance X11 / Tkinter, prêt pour Docker et les serveurs d'API) et son **Interface Graphique Desktop optionnelle (`[ui]`)**.
 
 ---
 
@@ -103,7 +103,7 @@ pan_assets = processor.process_image_panorama(
 )
 ```
 
-### Garanties Panoramiques TATE/YOKO & Cadrage IA (`v8.0.3`–`v8.0.4`)
+### Garanties Panoramiques TATE/YOKO & Cadrage IA (`v8.0.3`–`v8.0.5`)
 
 - **`resolve_panorama_scroll_axis(src_w, src_h, target_width, target_height, scroll_direction="auto") -> str`** :
   - **TATE (`target_height > target_width`)** : Retourne toujours `"horizontal"` (défilement gauche vers droite), centré verticalement en cas de zoom.

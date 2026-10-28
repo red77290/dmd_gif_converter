@@ -1,5 +1,12 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.5] - 2026-10-28 (Stabilisation de la Caméra Platformer & Anti-Indécision)
+### Corrigé & Amélioré
+- **Filtrage Strict des Frames Sous-Échantillonnées (`FloorEstimationStage`, `HistorySynthesisStage`)** : Empêche la réinjection des boîtes mises en cache lors du sous-échantillonnage YOLO (`subsample_frames > 1` ou `auto_fast_tracking`) dans `_FloorEstimator` et `roi_history`, éliminant les faux déclenchements de posture haute au sommet d'un saut.
+- **Verrouillage Vertical Calme sur le Sol (`_build_camera_rect`)** : Restauration du cadrage vertical `_auto` nominal hors mode platformer et maintien strict de `cy = cy_floor` pour tous les déplacements et sauts compris dans la fenêtre DMD ancrée au sol (intervention uniquement en cas de franchissement réel des bords de la fenêtre).
+- **Continuité Horizontale du Sujet & Affinité de Sol Renforcée (`_FrameDetector`)** : Ajout d'une pondération de continuité horizontale `expected_cx` (`1.0 + 0.90 * exp(-dx_norm * 5.0)`) et renforcement de la préférence au sol actif (`0.05 + 8.0 * exp(-dist_to_floor * 7.5)`) pour supprimer les allers-retours d'indécision entre le joueur et les ennemis/partenaires secondaires.
+- **Fenêtre de Posture Raffermie & Zone Morte Trépied Élargie (`_FloorEstimator`, `CameraBuilderStage`)** : Exige `>= 6` détections fraîches à faible dispersion (`<= 4,5 %` de la hauteur, `_ALPHA_RELEASE_JUMP = 0.01`, `_ALPHA_ATTACK = 0.24`) avant de remonter vers une plateforme supérieure, avec hystérésis trépied élargie en mode platformer (`dead_x = 6,5 %`, `dead_y = 8,5 %`).
+
 ## [V8.0.4] - 2026-10-28 (Suivi de Sol Bidirectionnel Platformer & Protection de la Tête)
 ### Corrigé & Amélioré
 - **Estimateur de Sol Bidirectionnel Sensible à la Posture (`_FloorEstimator`)** : Évolution du suivi de sol d'un simple EMA asymétrique descendant vers un estimateur bidirectionnel (`_ALPHA_ATTACK = 0.25`, `_ALPHA_RELEASE_JUMP = 0.04`, `_ALPHA_RELEASE_STANCE = 0.28`). Ré-ancre dynamiquement la caméra vers le haut sur les plateformes élevées confirmées (dispersion sur 5 frames `<= 9 %` de la hauteur ou 9 échantillons élevés consécutifs), verrouille immédiatement la première vraie détection après des frames initiales `None`, et rejette les pics isolés d'une frame en bordure inférieure (`rb >= 0.96 * frame_h`).
