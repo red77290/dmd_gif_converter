@@ -1,5 +1,9 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.9] - 2026-10-28 (Zero-Intro Platformer Pipeline Shadowing Hotfix)
+### Fixed
+- **Zero-Intro Platformer Downward Slew Truncation (`auto_action/pipeline.py`)**: Removed a shadowed conditional local `from src.engine.auto_action.interfaces import CamRect` inside `processor_thread()` (`if intro_frames > 0:`). When `intro_duration == 0.0` (standard headless server / DMD Media Showcase mode), Python scoped `CamRect` as an uninitialized local variable inside `processor_thread()`, raising `UnboundLocalError` on the first downward platformer camera step (`> 4%` crop height) and prematurely terminating output videos after `0.2s–2.2s`. Added end-to-end regression test `test_preprocess_platformer_zero_intro_downward_drop_does_not_truncate`.
+
 ## [8.0.8] - 2026-10-28 (Responsive Downward Platform Recovery & Asymmetric Slew)
 ### Fixed & Improved
 - **Brisk Downward Platform Step-Down (`_FloorEstimator`, `HistorySynthesisStage`)**: Added asymmetric downward step-down convergence (`_ALPHA_DROP = 0.62`, `_ALPHA_DROP_CONFIRMED = 0.80` on 2nd+ consecutive lower-platform sample while preserving isolated bottom-border spike rejection and `_ALPHA_RELEASE_JUMP = 0.01` upward hold), and flushed stale upper-platform `roi_history` entries upon confirmed downward drops (`> 8%` frame height) so synthesized ROIs track lower landings without subsampling lag.

@@ -141,7 +141,6 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
                     t_linear = i / max(1, intro_frames - 1)
                     t = t_linear * t_linear * (3.0 - 2.0 * t_linear)
                     cy = cy_top + t * (cy_center - cy_top)
-                    from src.engine.auto_action.interfaces import CamRect
                     cam_intro = CamRect(cx, cy, crop_w_full, crop_h_src)
                     out_frame = renderer.render(first_frame_for_intro, cam_intro)
                     while not stop_event.is_set():

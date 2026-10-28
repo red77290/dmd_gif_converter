@@ -10,7 +10,7 @@ from src.ui.interfaces import IModel
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "8.0.8"
+APP_VERSION = "8.0.9"
 
 class ApplicationState(IModel):
     def __init__(self):

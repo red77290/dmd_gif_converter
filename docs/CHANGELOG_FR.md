@@ -1,5 +1,9 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.9] - 2026-10-28 (Correctif Critique Troncature Vidéo Platformer Sans Intro)
+### Corrigé
+- **Troncature Vidéo lors des Descentes Platformer Sans Intro (`auto_action/pipeline.py`)** : Suppression d'un `import CamRect` local redondant dans `if intro_frames > 0:` au sein de `processor_thread()`. Lorsque `intro_duration == 0.0` (mode serveur headless / DMD Media Showcase), Python masquait le symbole global `CamRect` dans toute la fonction, provoquant une `UnboundLocalError` dès la première descente de plateforme (`> 4 %` de la hauteur) et tronquant les vidéos de jeux entre `0,2 s` et `2,2 s`. Couvert par le test de non-régression `test_preprocess_platformer_zero_intro_downward_drop_does_not_truncate`.
+
 ## [V8.0.8] - 2026-10-28 (Descente Réactive sur Plateformes Basses & Lissage Asymétrique)
 ### Corrigé & Amélioré
 - **Convergence Rapide vers les Plateformes Inférieures (`_FloorEstimator`, `HistorySynthesisStage`)** : Ajout d'une attaque descendante asymétrique (`_ALPHA_DROP = 0.62`, `_ALPHA_DROP_CONFIRMED = 0.80` dès la 2ème détection basse consécutive tout en préservant le rejet des pics de bordure et le maintien immobile en saut `_ALPHA_RELEASE_JUMP = 0.01`) et purge des positions hautes obsolètes de `roi_history` lors d'une chute franche (`> 8 %` de la hauteur) afin d'éliminer l'inertie due au sous-échantillonnage.
