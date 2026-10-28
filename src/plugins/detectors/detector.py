@@ -322,10 +322,21 @@ class _FrameDetector(AbstractDetector):
                 ceiling_block = is_above_floor & is_far_from_floor
                 mask = mask & ~ceiling_block
 
-                # Strong exponential preference for the active platform floor while remaining
-                # non-zero (> 0.05) so upper-platform climbs are still tracked when no lower
-                # floor sprite competes.
-                floor_weight = 0.05 + 8.0 * np.exp(-dist_to_floor * 7.5)
+                # Asymmetric floor affinity: tight upward/border decay so jumps and bottom-border
+                # noise never steal focus, but gentler downward decay inside the playfield
+                # (`bottomness <= 0.94`) so dropping from an upper platform onto lower ground
+                # immediately re-locks onto the player.
+                is_playfield_drop = (boxes_bottom > expected_floor_model) & (bottomness <= 0.94)
+                is_border_drop = (boxes_bottom > expected_floor_model) & (bottomness > 0.94)
+                floor_weight = np.where(
+                    is_playfield_drop,
+                    0.55 + 7.5 * np.exp(-dist_to_floor * 4.0),
+                    np.where(
+                        is_border_drop,
+                        0.05 + 7.5 * np.exp(-dist_to_floor * 7.5),
+                        0.08 + 7.5 * np.exp(-dist_to_floor * 7.2),
+                    ),
+                )
                 platformer_scores = person_scores * mask * playfield_weight * horiz_weight * floor_weight
             else:
                 platformer_scores = person_scores * mask * playfield_weight * horiz_weight
@@ -526,7 +537,13 @@ class _FrameDetector(AbstractDetector):
                 base_score = eff_area * shape_weight * playfield_weight * horiz_weight
                 if expected_floor_y is not None:
                     dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
-                    return base_score * (0.05 + 8.0 * math.exp(-dist_to_floor * 7.5))
+                    if bottom_y > expected_floor_y and bottomness <= 0.94:
+                        fw_mult = 0.55 + 7.5 * math.exp(-dist_to_floor * 4.0)
+                    elif bottom_y > expected_floor_y:
+                        fw_mult = 0.05 + 7.5 * math.exp(-dist_to_floor * 7.5)
+                    else:
+                        fw_mult = 0.08 + 7.5 * math.exp(-dist_to_floor * 7.2)
+                    return base_score * fw_mult
                 return base_score
             return area
 

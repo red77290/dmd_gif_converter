@@ -33,7 +33,7 @@ from src.engine.conversion.quality import evaluate_gif_quality
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.7"
+__version__ = "8.0.8"
 
 DMDS_MAGIC = b"DMDS"
 DMDS_VERSION = 1

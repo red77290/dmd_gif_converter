@@ -1,6 +1,6 @@
-# 📦 Référence de la Librairie Python Headless & Flux Binaire (`v8.0.7`)
+# 📦 Référence de la Librairie Python Headless & Flux Binaire (`v8.0.8`)
 
-`dmd_gif_converter` est packagé comme une **librairie Python standard (PEP 621)** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.7"`) avec une séparation stricte entre son **Moteur Core Headless** (zéro dépendance X11 / Tkinter, prêt pour Docker et les serveurs d'API) et son **Interface Graphique Desktop optionnelle (`[ui]`)**.
+`dmd_gif_converter` est packagé comme une **librairie Python standard (PEP 621)** (`dmd-gif-converter`, `dmd_gif_converter.__version__ == "8.0.8"`) avec une séparation stricte entre son **Moteur Core Headless** (zéro dépendance X11 / Tkinter, prêt pour Docker et les serveurs d'API) et son **Interface Graphique Desktop optionnelle (`[ui]`)**.
 
 ---
 

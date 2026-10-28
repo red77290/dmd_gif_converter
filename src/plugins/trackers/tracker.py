@@ -229,6 +229,20 @@ class HistorySynthesisStage(ITrackerStage):
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.roi_history_enabled:
             if context.fresh_detection and context.raw_roi is not None:
+                if (
+                    bool(getattr(engine.cfg, "platformer_mode", False))
+                    and engine.roi_history
+                ):
+                    prev_hr = engine.roi_history[-1][1]
+                    prev_bottom = float(prev_hr[1] + prev_hr[3])
+                    new_bottom = float(context.raw_roi[1] + context.raw_roi[3])
+                    # Flush stale upper-platform history on genuine downward drops so
+                    # synthesized ROI immediately reflects the lower platform landing.
+                    if (
+                        new_bottom - prev_bottom > float(engine.effective_frame_h) * 0.08
+                        and new_bottom < float(engine.effective_frame_h) * 0.96
+                    ):
+                        engine.roi_history.clear()
                 engine.roi_history.append((1.0, context.raw_roi))
                 while len(engine.roi_history) > engine.roi_history_max_len:
                     engine.roi_history.popleft()
@@ -329,16 +343,23 @@ class CameraBuilderStage(ITrackerStage):
             prop_cx, prop_cy, cw, ch = float(raw_cam[0]), float(raw_cam[1]), float(raw_cam[2]), float(raw_cam[3])
             dx = prop_cx - prev_cx
             dy = prop_cy - prev_cy
-            # Tripod deadzone hysteresis: wider in platformer mode so sprite walk-cycle
-            # bounding-box wobble and normal hops never cause camera indecision.
+            # Tripod deadzone hysteresis: wider upward in platformer mode so sprite walk-cycle
+            # wobble and normal hops never cause bobbing, but responsive downward when dropping
+            # onto a lower platform.
             is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
             dead_x = cw * (0.065 if is_platformer else 0.04)
-            dead_y = ch * (0.085 if is_platformer else 0.04)
+            if is_platformer:
+                dead_y = ch * (0.035 if dy > 0.0 else 0.085)
+            else:
+                dead_y = ch * 0.04
             target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
             target_cy = prev_cy if abs(dy) <= dead_y else prev_cy + math.copysign(abs(dy) - dead_y, dy)
             # Maximum pan speed per frame before outer smoothing
             max_step_x = max(4.0, cw * (0.11 if is_platformer else 0.14))
-            max_step_y = max(2.5 if is_platformer else 3.5, ch * (0.08 if is_platformer else 0.14))
+            if is_platformer:
+                max_step_y = max(8.0, ch * 0.34) if dy > 0.0 else max(2.5, ch * 0.08)
+            else:
+                max_step_y = max(3.5, ch * 0.14)
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
             clamped_cy = prev_cy + _clamp(target_cy - prev_cy, -max_step_y, max_step_y)
             raw_cam = CamRect(clamped_cx, clamped_cy, cw, ch)

@@ -3,7 +3,7 @@ import queue
 import threading
 from src.engine.config.auto_action_config import AutoActionConfig
 from src.plugins.detectors.detector import available_detectors
-from .camera import _smooth
+from .camera import CamRect, _smooth
 
 from .reader import VideoReader
 from .writer import FFmpegWriter
@@ -189,6 +189,14 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
 
                 if snap_camera:
                     cam = cam_now
+                elif (
+                    bool(getattr(cfg, "platformer_mode", False))
+                    and cam_prev is not None
+                    and (cam_now[1] - cam_prev[1]) > cam_now[3] * 0.04
+                ):
+                    smoothed_xy = _smooth(cam_prev, cam_now, dynamic_smoothness)
+                    smoothed_down = _smooth(cam_prev, cam_now, min(dynamic_smoothness, 0.30))
+                    cam = CamRect(smoothed_xy[0], smoothed_down[1], smoothed_xy[2], smoothed_xy[3])
                 else:
                     cam = _smooth(cam_prev, cam_now, dynamic_smoothness)
                 cam_prev = cam

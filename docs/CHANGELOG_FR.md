@@ -1,5 +1,11 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.8] - 2026-10-28 (Descente Réactive sur Plateformes Basses & Lissage Asymétrique)
+### Corrigé & Amélioré
+- **Convergence Rapide vers les Plateformes Inférieures (`_FloorEstimator`, `HistorySynthesisStage`)** : Ajout d'une attaque descendante asymétrique (`_ALPHA_DROP = 0.62`, `_ALPHA_DROP_CONFIRMED = 0.80` dès la 2ème détection basse consécutive tout en préservant le rejet des pics de bordure et le maintien immobile en saut `_ALPHA_RELEASE_JUMP = 0.01`) et purge des positions hautes obsolètes de `roi_history` lors d'une chute franche (`> 8 %` de la hauteur) afin d'éliminer l'inertie due au sous-échantillonnage.
+- **Vitesse de Poursuite Descendante & Marge de Pieds (`_build_camera_rect`, `CameraBuilderStage`, `pipeline.py`)** : Alignement de la marge basse sur `1.0 - platformer_floor_ratio`, hystérésis/vitesse asymétriques en mode platformer (`dead_y = 3,5 %` et `max_step_y = max(8.0, 0.34 * ch)` en descente contre `8,5 %` et `0.08 * ch` en montée) et plafonnement du lissage vertical externe à `0.30` lors des descentes de plateforme.
+- **Pondération Playfield en Chute (`_FrameDetector`)** : Assouplissement ciblé de la pénalité de distance au sol lorsque le joueur descend sous une plateforme haute dans l'aire de jeu valide (`bottomness <= 0.94`, `0.55 + 7.5 * exp(-dist * 4.0)`), tout en maintenant le verrouillage strict vers le haut et en bordure inférieure (`> 0.94`).
+
 ## [V8.0.7] - 2026-10-28 (Durcissement Bundle Portable Windows & Colorimétrie Images Statiques)
 ### Corrigé & Amélioré
 - **Décodage Direct des Images Statiques en Auto-Colorimétrie (`colorimetry._sample_frames`)** : Décode les fichiers `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp` et `.tiff` directement via `numpy.fromfile` + `cv2.imdecode` (repli `cv2.imread`) sans passer par `cv2.VideoCapture`, éliminant les erreurs C++ OpenCV/FFmpeg `Could not find decoder for codec_id=61` sous Windows tout en supportant les chemins Unicode.

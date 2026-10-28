@@ -66,7 +66,7 @@ All UI components are modular and contained in `src/ui/panels/` or `src/ui/setti
 
 ---
 
-## 🎯 Camera, Panorama & Tracker Invariants (v8.0.7)
+## 🎯 Camera, Panorama & Tracker Invariants (v8.0.8)
 
 When modifying conversion geometry (`core.py`), camera framing (`camera.py`), floor estimation (`analysis.py`), or sprite detection (`detector.py`), preserve the following deterministic invariants:
 
@@ -84,7 +84,7 @@ When modifying conversion geometry (`core.py`), camera framing (`camera.py`), fl
 
 3. **Stance-Aware Bidirectional Floor Tracking (`_FloorEstimator` & Fresh-Sample Gate)**:
    - Defined in `src/engine/analysis/analysis.py`. Replaces one-way downward-only locking with three response regimes fed **exclusively** on fresh detector frames (`context.fresh_detection = True` in `FloorEstimationStage`):
-     - `_ALPHA_ATTACK = 0.24`: Smooth convergence when landing lower or dropping to a lower platform (`rb >= floor_y`).
+     - `_ALPHA_ATTACK = 0.28` / `_ALPHA_DROP = 0.62` (`0.80` on 2nd+ consecutive lower sample): Smooth convergence on same-level ripples and brisk downward step-down onto lower platforms (`rb > floor_y + 0.055 * frame_h`), coupled with `roi_history` flush on `> 8%` downward drops and asymmetric downward `CameraBuilderStage` / outer Y smoothing (`<= 0.30`).
      - `_ALPHA_RELEASE_JUMP = 0.01`: Rock-steady hold during transient jump arcs (`< 1 px` drift).
      - `_ALPHA_RELEASE_STANCE = 0.28`: Upward re-anchoring onto a confirmed higher platform once `>= 6` fresh samples have foot spread `<= 0.045 * frame_h` while elevated (or `>= 12` consecutive elevated fresh samples).
    - Tracks `_has_detection` explicitly so the very first real ROI snaps `_floor_y = rb` immediately even if preceded by `None` frames, and rejects isolated 1-frame downward spikes at the extreme bottom border (`rb >= 0.96 * frame_h` and `rb > floor_y + 0.12 * frame_h`) unless corroborated by `>= 2` consecutive samples.

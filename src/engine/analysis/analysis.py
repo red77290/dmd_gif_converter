@@ -10,7 +10,9 @@ class _FloorEstimator:
     """Stance-aware bidirectional floor/platform level estimator."""
 
     # α ∈ (0, 1] — higher = faster response
-    _ALPHA_ATTACK         = 0.24   # smooth downward landing / lower platform convergence
+    _ALPHA_ATTACK         = 0.28   # smooth same-platform landing convergence
+    _ALPHA_DROP           = 0.62   # brisk downward platform step-down convergence
+    _ALPHA_DROP_CONFIRMED = 0.80   # fast lock on 2nd+ consecutive lower-platform sample
     _ALPHA_RELEASE_JUMP   = 0.01   # rock-steady hold during transient jumps (<1px drift)
     _ALPHA_RELEASE_STANCE = 0.28   # upward re-anchoring onto a confirmed upper platform
 
@@ -21,6 +23,7 @@ class _FloorEstimator:
         self._window: Deque[float] = collections.deque(maxlen=12)
         self._consecutive_bottom_spikes: int = 0
         self._consecutive_elevated: int = 0
+        self._consecutive_lower: int = 0
         self._reanchoring_up: bool = False
 
     def update(self, roi_bottom: Optional[float]) -> float:
@@ -63,8 +66,21 @@ class _FloorEstimator:
         if rb >= self._floor_y:
             self._consecutive_elevated = 0
             self._reanchoring_up = False
-            self._floor_y += self._ALPHA_ATTACK * (rb - self._floor_y)
+            drop_delta = rb - self._floor_y
+            if drop_delta > 0.055 * self._frame_h and not is_extreme_bottom_spike:
+                self._consecutive_lower += 1
+                alpha_down = (
+                    self._ALPHA_DROP_CONFIRMED
+                    if self._consecutive_lower >= 2
+                    else self._ALPHA_DROP
+                )
+            else:
+                self._consecutive_lower = 0
+                alpha_down = self._ALPHA_ATTACK
+            self._floor_y += alpha_down * drop_delta
             return self._floor_y
+
+        self._consecutive_lower = 0
 
         # Character is elevated above current floor (rb < self._floor_y)
         if rb <= self._floor_y - 0.05 * self._frame_h:

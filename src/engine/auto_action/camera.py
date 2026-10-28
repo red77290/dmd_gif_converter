@@ -257,14 +257,16 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
                 cam_top_floor = cy_floor - crop_h / 2.0
                 cam_bottom_floor = cy_floor + crop_h / 2.0
                 head_pad = crop_h * 0.06
+                floor_ratio = _clamp(float(getattr(cfg, "platformer_floor_ratio", 0.90)), 0.50, 0.96)
+                foot_pad = crop_h * (1.0 - floor_ratio)
                 if float(h) > crop_h:
                     cy_upper = float(y) + float(h) * 0.45
                     max_head_cy = max(float(effective_frame_top), float(y) - crop_h * 0.04) + crop_h / 2.0
                     cy = min(cy_upper, max_head_cy)
                 elif float(y) < cam_top_floor + head_pad:
                     cy = (float(y) - head_pad) + crop_h / 2.0
-                elif float(y + h) > cam_bottom_floor:
-                    cy = float(y + h) - crop_h / 2.0
+                elif float(y + h) + foot_pad > cam_bottom_floor + 0.5:
+                    cy = (float(y + h) + foot_pad) - crop_h / 2.0
         elif (cy_floor - crop_h / 2.0) > ideal_top:
             scene_type = getattr(cfg.scene_profile, "scene_type", "") if getattr(cfg, "scene_profile", None) else ""
             if scene_type in ("platformer", "fighting_2d", "action_horizontal"):

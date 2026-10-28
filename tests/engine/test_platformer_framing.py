@@ -413,4 +413,77 @@ class TestCameraStabilityAndAntiIndecision:
         hero_cx = rx + rw / 2.0
         assert 70.0 <= hero_cx <= 100.0
 
+    def test_downward_platform_drop_recovers_briskly_even_with_subsampling(self):
+        """
+        Regression test for v8.0.8: when the player drops from an upper platform (y_bottom=95)
+        onto a lower platform (y_bottom=185) under subsample_frames=5 and smoothness=0.80,
+        the camera must descend rapidly onto the lower platform within <= 6 frames (~0.24s at 25fps)
+        instead of lagging for 2-3 seconds, while keeping jump hops steady.
+        """
+        from src.engine.auto_action.camera import _smooth
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=5,
+            auto_fast_tracking=False,
+            smoothness=0.80,
+            scene_change_threshold=0.0,
+        )
+        engine = TrackingEngine(
+            fps=25.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+
+        # Frame 1 & Frame 5: player standing on upper platform (y=59..95)
+        # Frame 10 & Frame 15: player drops to lower ground (y=149..185)
+        fresh_rois = [
+            BoundingBox(120, 59, 24, 36),
+            BoundingBox(124, 59, 24, 36),
+            BoundingBox(132, 149, 24, 36),
+            BoundingBox(136, 149, 24, 36),
+        ]
+        call_idx = {"i": 0}
+
+        def fake_detect(*args, **kwargs):
+            idx = min(call_idx["i"], len(fresh_rois) - 1)
+            call_idx["i"] += 1
+            return fresh_rois[idx]
+
+        engine.detector.detect = fake_detect
+        blank = np.full((fh, fw, 3), 64, dtype=np.uint8)
+        cam_prev = engine.cam_full_view
+
+        # Settle on upper platform through frame 9 (fresh detections at f=1 and f=5)
+        for f_idx in range(10):
+            cam_now = engine.process_frame(blank, cam_prev, f_idx, 128, 32)
+            cam_prev = cam_now if f_idx <= 1 else _smooth(cam_prev, cam_now, 0.80)
+
+        # At f_idx=10, fresh detection lands on y_bottom=185; run 6 frames of pipeline descent
+        for f_idx in range(10, 16):
+            cam_now = engine.process_frame(blank, cam_prev, f_idx, 128, 32)
+            if (cam_now[1] - cam_prev[1]) > cam_now[3] * 0.04:
+                sx = _smooth(cam_prev, cam_now, 0.80)
+                sy = _smooth(cam_prev, cam_now, 0.30)
+                cam_prev = type(sx)(sx[0], sy[1], sx[2], sx[3])
+            else:
+                cam_prev = _smooth(cam_prev, cam_now, 0.80)
+
+        # After just 6 frames from the drop, the character's feet (y=185) MUST be cleanly inside
+        # the DMD strip (cam_bottom >= 185) instead of still floating up on the old platform!
+        cam_bottom_after_6f = cam_prev[1] + cam_prev[3] / 2.0
+        assert cam_bottom_after_6f >= 185.0
+        assert engine.floor_est.floor_y > 165.0
+
+
 
