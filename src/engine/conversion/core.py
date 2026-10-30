@@ -368,12 +368,9 @@ LET_ME_HANDLE_PARAMS = {
 
 _PRESETS = {
     #               contrast  sat    bright  gamma  sh_lum sh_chr  dither
-    "pixel_art": (  1.6,      2.2,  -0.03,  0.85,  1.8,   0.5,   "none" ),
-    "anime":     (  1.5,      1.9,  -0.02,  0.87,  1.3,   0.3,   "none" ),
-    # gamma 0.90 was darkening already-dark cinema content; 0.95 is more neutral.
-    # contrast 1.35 (was 1.4) avoids crushing shadow detail in dark scenes.
-    # brightness 0.00 (was -0.01) stops the slight push toward black in low-light.
-    "cinema":    (  1.35,     1.3,   0.00,  0.95,  0.8,   0.2,   "none" ),
+    "pixel_art": (  1.28,     1.58, -0.02,  0.90,  1.00,  0.30,  "none" ),
+    "anime":     (  1.18,     1.35, -0.01,  0.93,  0.75,  0.25,  "none" ),
+    "cinema":    (  1.12,     1.18,  0.00,  0.98,  0.45,  0.15,  "none" ),
 }
 
 def process_file(src_path, out_path, params=None, start_s=None, end_s=None, callback=None, cancel_event=None):
@@ -399,6 +396,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             p["auto_color_enabled"] = bool(caller_params["auto_color_enabled"])
         if "auto_action_enabled" in caller_params:
             p["auto_action_enabled"] = bool(caller_params["auto_action_enabled"])
+        if "mode" in caller_params:
+            p["mode"] = caller_params["mode"]
     src_path = str(src_path)
     out_path = str(out_path)
     filename = os.path.basename(src_path)
@@ -481,14 +480,19 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             log(f"[ACTION ] {filename} — {pre_msg}")
         else:
             # Fall back to normal pipeline when dependency/tooling is unavailable.
+            auto_action_enabled = False
             log(f"[ACTION ] {filename} — disabled fallback: {pre_msg}", "warning")
 
     # ── Auto-colorimetry (heuristic keyframe analysis) ───────────────────────
     # Analyses the original source at 50 % duration and injects computed
-    # contrast / saturation / gamma / brightness — overrides any preset/manual.
+    # contrast / saturation / gamma / brightness scaled around the target mode.
     if bool(p.get("auto_color_enabled", False)):
         if _analyze_and_compensate is not None:
-            ok_c, color_params, color_msg = _analyze_and_compensate(original_src)
+            preset_mode_hint = str(caller_params.get("mode") or p.get("mode") or "pixel_art")
+            ok_c, color_params, color_msg = _analyze_and_compensate(
+                original_src,
+                mode=preset_mode_hint,
+            )
             if ok_c:
                 p = {**p, "mode": "custom", **color_params}
                 log(f"[COLOR  ] {filename} — {color_msg}")
@@ -518,7 +522,14 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         g  = p["gamma"];     sl = p["sharpen_lum"]; sc = p["sharpen_chr"]
         dither = p["dither"]
 
-    fps_render = snap_to_clean_fps(fps_src, p["fps_min"], p["fps_max"])
+    gif_fps_render = snap_to_clean_fps(fps_src, p["fps_min"], p["fps_max"])
+    raw_rgb24_out_path = str(p.get("raw_rgb24_out_path") or "").strip()
+    export_gif_output = bool(p.get("export_gif_output", True))
+    req_stream_fps = int(p.get("stream_fps") or 0)
+    if raw_rgb24_out_path and req_stream_fps > 0:
+        fps_render = float(max(1, min(120, req_stream_fps)))
+    else:
+        fps_render = gif_fps_render
 
     # ── Advanced parameters ────────────────────────────────────────────────────
     scroll_enabled  = bool(p.get("scroll_enabled", True))
@@ -811,9 +822,32 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         filter_graph = f"{filter_graph_base}[v_final];"
 
     is_mp4 = out_path.lower().endswith(".mp4")
+    emit_primary_file = is_mp4 or export_gif_output or not raw_rgb24_out_path
 
     if is_mp4:
-        filter_graph += "[v_final]format=yuv420p[out]"
+        if raw_rgb24_out_path:
+            filter_graph += (
+                "[v_final]split=2[v_raw][v_mp4];"
+                "[v_raw]format=rgb24[out_raw];"
+                "[v_mp4]format=yuv420p[out]"
+            )
+        else:
+            filter_graph += "[v_final]format=yuv420p[out]"
+    elif raw_rgb24_out_path and not export_gif_output:
+        filter_graph += "[v_final]format=rgb24[out_raw]"
+    elif raw_rgb24_out_path:
+        gif_fps_filter = (
+            f"fps={gif_fps_render},"
+            if abs(gif_fps_render - fps_render) > 0.05
+            else ""
+        )
+        filter_graph += (
+            "[v_final]split=2[v_raw][v_gif];"
+            "[v_raw]format=rgb24[out_raw];"
+            f"[v_gif]{gif_fps_filter}split[v1][v2];"
+            "[v1]palettegen=max_colors=256:reserve_transparent=0[pal];"
+            f"[v2][pal]paletteuse=dither={dither}[out]"
+        )
     else:
         filter_graph += (
             "[v_final]split[v1][v2];"
@@ -821,7 +855,10 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             f"[v2][pal]paletteuse=dither={dither}[out]"
         )
 
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    if emit_primary_file:
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    if raw_rgb24_out_path:
+        os.makedirs(os.path.dirname(os.path.abspath(raw_rgb24_out_path)), exist_ok=True)
 
     # ── FFmpeg command ────────────────────────────────────────────────────────
     # When auto_action is enabled the preprocessed MP4 already has the exact
@@ -842,20 +879,24 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     else:
         cmd += ["-stream_loop", "-1", "-t", duration_out, "-i", src_path]
         
-    cmd += ["-filter_complex", filter_graph, "-map", "[out]"]
-    
-    if is_mp4:
-        best_encoder = get_best_h264_encoder()
-        if best_encoder == "libx264":
-            cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+    cmd += ["-filter_complex", filter_graph]
+
+    if emit_primary_file:
+        cmd += ["-map", "[out]"]
+        if is_mp4:
+            best_encoder = get_best_h264_encoder()
+            if best_encoder == "libx264":
+                cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+            else:
+                # For hardware encoders like nvenc/qsv/videotoolbox, preset 'ultrafast' or '-crf 23' might not be supported identically
+                # so we use a high bitrate instead to guarantee quality and speed
+                cmd += ["-c:v", best_encoder, "-b:v", "5M"]
         else:
-            # For hardware encoders like nvenc/qsv/videotoolbox, preset 'ultrafast' or '-crf 23' might not be supported identically
-            # so we use a high bitrate instead to guarantee quality and speed
-            cmd += ["-c:v", best_encoder, "-b:v", "5M"]
-    else:
-        cmd += ["-gifflags", "-offsetting-transdiff", "-f", "gif"]
-        
-    cmd += [out_path]
+            cmd += ["-gifflags", "-offsetting-transdiff", "-f", "gif"]
+        cmd += [out_path]
+
+    if raw_rgb24_out_path:
+        cmd += ["-map", "[out_raw]", "-f", "rawvideo", "-pix_fmt", "rgb24", raw_rgb24_out_path]
 
     # ── Run ffmpeg with continuous stderr drain (prevents pipe-buffer deadlock) ─
     returncode, result_stderr = _run_ffmpeg_with_drain(cmd, cancel_event)
@@ -881,7 +922,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         log(f"[ERROR ] {filename} — ffmpeg: {last_line}", "error")
         return False, f"[ERROR] {filename} — {last_line}"
 
-    if _use_pillow_text:
+    if emit_primary_file and _use_pillow_text:
         ok_txt, txt_msg = _apply_text_overlay_pillow(
             out_path, text_content_raw, font_path_str,
             text_font_size, text_color, text_position,
@@ -894,11 +935,12 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             log(f"[TEXT  ] {filename} — Pillow text overlay failed: {txt_msg}", "warning")
 
     # Run quality evaluation on the generated GIF for UI rating and the Cleanup Assistant
-    try:
-        q_res = evaluate_gif_quality(out_path)
-        log(f"[QUALITY] {filename} — Quality Score: {q_res.get('score', 0)}% ({q_res.get('rating', 'Unknown')})")
-    except Exception as e:
-        log(f"[QUALITY] {filename} — Failed to evaluate quality: {e}", "warning")
+    if emit_primary_file:
+        try:
+            q_res = evaluate_gif_quality(out_path)
+            log(f"[QUALITY] {filename} — Quality Score: {q_res.get('score', 0)}% ({q_res.get('rating', 'Unknown')})")
+        except Exception as e:
+            log(f"[QUALITY] {filename} — Failed to evaluate quality: {e}", "warning")
 
     log(f"[OK    ] {filename}")
     return True, f"[OK] {filename}"
@@ -936,6 +978,8 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
             p["auto_color_enabled"] = bool(caller_params["auto_color_enabled"])
         if "auto_action_enabled" in caller_params:
             p["auto_action_enabled"] = bool(caller_params["auto_action_enabled"])
+        if "mode" in caller_params:
+            p["mode"] = caller_params["mode"]
     os.makedirs(str(folder_out), exist_ok=True)
 
     files = [

@@ -69,15 +69,84 @@ def _linear_interp(x: float, xp: "list[float]", fp: "list[float]") -> float:
     return float(fp[-1])
 
 
-# ── LED baseline (= pixel_art preset) ────────────────────────────────────────
-# These are the hand-tuned defaults for LED rendering.  The heuristic only
-# moves away from these when the source clearly needs it.
+# ── LED baseline (= legacy pixel_art reference constants) ────────────────────
+# Retained as module-level reference constants for delta curve tests; active
+# Smart Color Boost scales around mode-specific LED profiles below.
 _BASE_CONTRAST   = 1.60
 _BASE_SATURATION = 2.20
 _BASE_GAMMA      = 0.85
 _BASE_BRIGHTNESS = -0.03
 _BASE_SHARPEN_L  = 1.80
 _BASE_SHARPEN_C  = 0.50
+
+_MODE_COLOR_PROFILES: Dict[str, Dict[str, float]] = {
+    "cinema": {
+        "base_contrast": 1.12,
+        "contrast_lo": 1.05,
+        "contrast_hi": 1.25,
+        "contrast_scale": 0.22,
+        "base_saturation": 1.18,
+        "saturation_lo": 1.05,
+        "saturation_hi": 1.38,
+        "saturation_scale": 0.22,
+        "base_gamma": 0.98,
+        "gamma_lo": 0.82,
+        "gamma_hi": 1.35,
+        "gamma_scale": 0.60,
+        "base_brightness": 0.00,
+        "brightness_lo": -0.06,
+        "brightness_hi": 0.06,
+        "brightness_scale": 0.55,
+        "sharpen_lum": 0.45,
+        "sharpen_chr": 0.15,
+        "dark_contrast_hi": 1.16,
+        "dark_contrast_lo": 1.05,
+    },
+    "anime": {
+        "base_contrast": 1.18,
+        "contrast_lo": 1.08,
+        "contrast_hi": 1.32,
+        "contrast_scale": 0.25,
+        "base_saturation": 1.35,
+        "saturation_lo": 1.15,
+        "saturation_hi": 1.60,
+        "saturation_scale": 0.30,
+        "base_gamma": 0.93,
+        "gamma_lo": 0.78,
+        "gamma_hi": 1.45,
+        "gamma_scale": 0.75,
+        "base_brightness": -0.01,
+        "brightness_lo": -0.08,
+        "brightness_hi": 0.08,
+        "brightness_scale": 0.70,
+        "sharpen_lum": 0.75,
+        "sharpen_chr": 0.25,
+        "dark_contrast_hi": 1.22,
+        "dark_contrast_lo": 1.08,
+    },
+    "pixel_art": {
+        "base_contrast": 1.25,
+        "contrast_lo": 1.15,
+        "contrast_hi": 1.40,
+        "contrast_scale": 0.35,
+        "base_saturation": 1.55,
+        "saturation_lo": 1.30,
+        "saturation_hi": 1.85,
+        "saturation_scale": 0.40,
+        "base_gamma": 0.90,
+        "gamma_lo": 0.65,
+        "gamma_hi": 1.55,
+        "gamma_scale": 0.85,
+        "base_brightness": -0.02,
+        "brightness_lo": -0.10,
+        "brightness_hi": 0.10,
+        "brightness_scale": 0.80,
+        "sharpen_lum": 1.00,
+        "sharpen_chr": 0.30,
+        "dark_contrast_hi": 1.30,
+        "dark_contrast_lo": 1.15,
+    },
+}
 
 
 # ── Delta helpers — continuous piecewise-linear mappings ─────────────────────
@@ -190,9 +259,11 @@ def _average_metrics(frames: list, cv2, np) -> Tuple[float, float, float]:
     return sum(mean_lums) / n, sum(std_lums) / n, sum(mean_sats) / n
 
 
-def analyze_and_compensate(src_path: str,
-                             mid_pct: float = 0.50
-                             ) -> Tuple[bool, Dict, str]:
+def analyze_and_compensate(
+    src_path: str,
+    mid_pct: float = 0.50,
+    mode: str = "pixel_art",
+) -> Tuple[bool, Dict, str]:
     """Extract representative keyframes and compute LED-optimised colorimetry.
 
     Parameters
@@ -202,6 +273,10 @@ def analyze_and_compensate(src_path: str,
     mid_pct : float
         Unused — kept for backward compatibility.  Videos are always sampled
         at three fixed positions (25 %, 50 %, 75 %); GIFs use frame 0.
+    mode : str
+        Target content preset ("cinema" | "anime" | "pixel_art"). Scales smart
+        compensation around mode-appropriate LED baselines so live-action skin
+        tones and cel-animation palettes never get blown out into neon clipping.
 
     Returns
     -------
@@ -219,6 +294,11 @@ def analyze_and_compensate(src_path: str,
         return (False, {},
                 "OpenCV/NumPy unavailable — install opencv-python for auto-colorimetry")
 
+    norm_mode = str(mode or "pixel_art").strip().lower()
+    if norm_mode not in _MODE_COLOR_PROFILES:
+        norm_mode = "pixel_art"
+    prof = _MODE_COLOR_PROFILES[norm_mode]
+
     src_str = str(src_path)
     is_gif  = src_str.lower().endswith((".gif", ".png", ".jpg", ".jpeg", ".webp", ".bmp"))
 
@@ -230,22 +310,36 @@ def analyze_and_compensate(src_path: str,
     n_frames = len(sampled_frames)
 
     # ── 3. Gamma + brightness corrections ────────────────────────────────────
-    # Gamma cap raised to 1.70 (was 1.40) to allow stronger lifting of very dark content.
-    gamma      = _clamp(_BASE_GAMMA      + _gamma_delta(mean_lum),    0.55, 1.70)
-    brightness = _clamp(_BASE_BRIGHTNESS + _brightness_delta(mean_lum), -0.15, 0.12)
+    gamma = _clamp(
+        prof["base_gamma"] + _gamma_delta(mean_lum) * prof["gamma_scale"],
+        prof["gamma_lo"],
+        prof["gamma_hi"],
+    )
+    brightness = _clamp(
+        prof["base_brightness"] + _brightness_delta(mean_lum) * prof["brightness_scale"],
+        prof["brightness_lo"],
+        prof["brightness_hi"],
+    )
 
     # ── 4. Contrast + saturation corrections ─────────────────────────────────
-    contrast   = _clamp(_BASE_CONTRAST   + _contrast_delta(std_lum),  1.40, 2.50)
-    saturation = _clamp(_BASE_SATURATION + _saturation_delta(mean_sat), 0.90, 3.50)
+    contrast = _clamp(
+        prof["base_contrast"] + _contrast_delta(std_lum) * prof["contrast_scale"],
+        prof["contrast_lo"],
+        prof["contrast_hi"],
+    )
+    saturation = _clamp(
+        prof["base_saturation"] + _saturation_delta(mean_sat) * prof["saturation_scale"],
+        prof["saturation_lo"],
+        prof["saturation_hi"],
+    )
 
     # ── 4b. Dark-scene constraint: cap contrast to preserve shadow detail ─────
-    # High contrast on dark content (lum < 80) crushes the limited tonal range,
-    # making characters invisible.  Linearly reduce the contrast cap as the
-    # scene gets darker:  1.60 at lum=80 → 1.40 at lum=0.
     if mean_lum < 80.0:
-        dark_ratio   = (80.0 - mean_lum) / 80.0          # 0 at lum=80, 1 at lum=0
-        contrast_cap = 1.60 - dark_ratio * 0.20           # [1.40 … 1.60]
-        contrast     = min(contrast, contrast_cap)
+        dark_ratio = (80.0 - mean_lum) / 80.0
+        contrast_cap = prof["dark_contrast_hi"] - dark_ratio * (
+            prof["dark_contrast_hi"] - prof["dark_contrast_lo"]
+        )
+        contrast = min(contrast, contrast_cap)
 
     # ── 5. Build result ───────────────────────────────────────────────────────
     params: Dict = {
@@ -253,14 +347,14 @@ def analyze_and_compensate(src_path: str,
         "saturation":  round(saturation, 2),
         "brightness":  round(brightness, 3),
         "gamma":       round(gamma,      2),
-        "sharpen_lum": _BASE_SHARPEN_L,
-        "sharpen_chr": _BASE_SHARPEN_C,
+        "sharpen_lum": round(prof["sharpen_lum"], 2),
+        "sharpen_chr": round(prof["sharpen_chr"], 2),
         "dither":      "none",
     }
 
     frame_label = f"{n_frames} frame{'s' if n_frames > 1 else ''}"
-    delta_c = round(contrast   - _BASE_CONTRAST,   2)
-    delta_s = round(saturation - _BASE_SATURATION, 2)
+    delta_c = round(contrast   - prof["base_contrast"],   2)
+    delta_s = round(saturation - prof["base_saturation"], 2)
     
     type_tags = []
     if mean_lum < 80.0:
@@ -282,7 +376,7 @@ def analyze_and_compensate(src_path: str,
     type_tag_str = " + ".join(type_tags)
     
     message = (
-        f"auto-color ({frame_label}) [{type_tag_str}]: lum={mean_lum:.0f} std={std_lum:.0f} sat={mean_sat:.0f} "
+        f"auto-color/{norm_mode} ({frame_label}) [{type_tag_str}]: lum={mean_lum:.0f} std={std_lum:.0f} sat={mean_sat:.0f} "
         f"→ contrast={params['contrast']} ({delta_c:+.2f})  "
         f"sat={params['saturation']} ({delta_s:+.2f})  "
         f"gamma={params['gamma']}  bri={params['brightness']:+.3f}"

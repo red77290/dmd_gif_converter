@@ -369,3 +369,147 @@ def test_process_video_trailer_end_to_end(tmp_path: Path):
     assert header["height"] == 32
     assert header["total_frames"] == result.frame_count
 
+
+def test_cinema_auto_action_smart_color_preserves_gentle_saturation(tmp_path: Path):
+    """
+    Regression test: `mode='cinema'` with `use_auto_action=True, use_smart_color_boost=True`
+    must NOT be overwritten by legacy `pixel_art` 2.5-3.3x saturation or 1.8 sharpen.
+    """
+    video_path = tmp_path / "live_action_skin_tones.mp4"
+    width, height, fps = 320, 180, 15
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(video_path), fourcc, float(fps), (width, height))
+    assert writer.isOpened()
+
+    # Warm natural skin-tone midtone (RGB ~ (182, 138, 114)) with gentle motion
+    for idx in range(30):
+        frame_bgr = np.zeros((height, width, 3), dtype=np.uint8)
+        frame_bgr[:, :] = (114, 138, 182)
+        x0 = 40 + (idx * 5) % 200
+        cv2.circle(frame_bgr, (x0, 90), 28, (130, 156, 204), -1)
+        writer.write(frame_bgr)
+    writer.release()
+
+    logs: list[str] = []
+    processor = DmdMediaProcessor()
+    cfg = DmdClipConfig(
+        width=128,
+        height=32,
+        fps=15,
+        max_duration_s=1.8,
+        mode="cinema",
+        use_ai_moments=False,
+        use_auto_action=True,
+        use_smart_color_boost=True,
+    )
+    res = processor.process_video_trailer(
+        input_video=video_path,
+        output_dir=tmp_path / "cinema_out",
+        config=cfg,
+        export_gif=True,
+        export_rgb565_stream=True,
+        stem="cinema_clip",
+        callback=lambda m, _lvl: logs.append(m),
+    )
+
+    color_logs = [m for m in logs if "[COLOR" in m]
+    assert color_logs, f"Expected [COLOR] log entry, got: {logs}"
+    assert "auto-color/cinema" in color_logs[0]
+    import re
+
+    m_sat = re.search(r"→.*?sat=([0-9.]+)", color_logs[0])
+    assert m_sat is not None, f"Could not parse output saturation from: {color_logs[0]}"
+    sat_val = float(m_sat.group(1))
+    assert 1.05 <= sat_val <= 1.38, f"Cinema saturation out of calibrated range: {sat_val}"
+
+    # Verify skin-tone red channel in RGB565 stream is NOT blown out to 248 (0x1F)
+    raw = res.rgb565_stream_path.read_bytes()[DMDS_HEADER_SIZE:]
+    first_rgb = rgb565_le_to_rgb888(raw[: 128 * 32 * 2], 128, 32)
+    mean_r = float(first_rgb[:, :, 0].mean())
+    mean_g = float(first_rgb[:, :, 1].mean())
+    assert mean_r < 225.0 and (mean_r - mean_g) < 75.0, (
+        f"Unexpected red clipping on cinema midtones: R={mean_r:.1f}, G={mean_g:.1f}"
+    )
+
+
+def test_direct_rgb565_stream_preserves_true_16bit_gradients_with_and_without_gif(tmp_path: Path):
+    """
+    Regression test: `process_video_trailer(..., export_rgb565_stream=True)` must extract
+    24-bit RGB directly into 16-bit RGB565 (>256 smooth colors per frame, never 256-color GIF
+    quantized), both when `export_gif=True` and when `export_gif=False`.
+    """
+    assert dmd_gif_converter.SUPPORTS_DIRECT_RGB565_STREAM is True
+
+    video_path = tmp_path / "smooth_gradient_ramp.avi"
+    width, height, fps = 256, 64, 15
+    # Uncompressed MJPG / high-bitrate video with a 2D full-spectrum RGB gradient (>1,500 RGB565 colors)
+    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+    writer = cv2.VideoWriter(str(video_path), fourcc, float(fps), (width, height))
+    assert writer.isOpened()
+
+    xs = np.linspace(0, 255, width, dtype=np.float32)[None, :]
+    ys = np.linspace(0, 255, height, dtype=np.float32)[:, None]
+    for idx in range(24):
+        shift = float(idx * 2)
+        r = np.broadcast_to(np.clip(xs, 0, 255).astype(np.uint8), (height, width))
+        g = np.broadcast_to(np.clip(ys, 0, 255).astype(np.uint8), (height, width))
+        b = np.clip(255.0 - 0.5 * xs + 0.35 * ys - shift, 0, 255).astype(np.uint8)
+        bgr = np.stack([b, g, r], axis=-1)
+        writer.write(bgr)
+    writer.release()
+
+    processor = DmdMediaProcessor()
+    cfg = DmdClipConfig(
+        width=128,
+        height=32,
+        fps=15,
+        max_duration_s=1.4,
+        mode="cinema",
+        use_ai_moments=False,
+        use_auto_action=False,
+        use_smart_color_boost=False,
+    )
+
+    # 1. Both GIF + RGB565 stream
+    res_both = processor.process_video_trailer(
+        input_video=video_path,
+        output_dir=tmp_path / "both",
+        config=cfg,
+        export_gif=True,
+        export_rgb565_stream=True,
+        stem="grad_both",
+    )
+    assert res_both.gif_path is not None and res_both.gif_path.exists()
+    assert res_both.rgb565_stream_path is not None and res_both.rgb565_stream_path.exists()
+    assert res_both.fps == 15
+
+    gif_frames, _ = extract_frames_from_gif(res_both.gif_path)
+    gif_f0_565 = np.frombuffer(rgb888_to_rgb565_le(gif_frames[0]), dtype="<u2")
+    gif_unique_colors = int(np.unique(gif_f0_565).size)
+    assert gif_unique_colors <= 256
+
+    stream_raw = res_both.rgb565_stream_path.read_bytes()[DMDS_HEADER_SIZE:]
+    stream_f0_565 = np.frombuffer(stream_raw[: 128 * 32 * 2], dtype="<u2")
+    stream_unique_colors = int(np.unique(stream_f0_565).size)
+    assert stream_unique_colors > 600, (
+        f"Expected true 16-bit RGB565 smooth gradient (>600 unique colors), got {stream_unique_colors} (GIF had {gif_unique_colors})"
+    )
+
+    # 2. Stream-only (`export_gif=False`)
+    res_stream_only = processor.process_video_trailer(
+        input_video=video_path,
+        output_dir=tmp_path / "stream_only",
+        config=cfg,
+        export_gif=False,
+        export_rgb565_stream=True,
+        stem="grad_only",
+    )
+    assert res_stream_only.gif_path is None
+    assert not (tmp_path / "stream_only" / "grad_only.gif").exists()
+    assert res_stream_only.rgb565_stream_path is not None and res_stream_only.rgb565_stream_path.exists()
+    assert res_stream_only.fps == 15
+    only_raw = res_stream_only.rgb565_stream_path.read_bytes()[DMDS_HEADER_SIZE:]
+    only_unique_colors = int(np.unique(np.frombuffer(only_raw[: 128 * 32 * 2], dtype="<u2")).size)
+    assert only_unique_colors > 600
+
+

@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import struct
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Tuple
@@ -33,7 +34,8 @@ from src.engine.conversion.quality import evaluate_gif_quality
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.11"
+__version__ = "8.0.12"
+SUPPORTS_DIRECT_RGB565_STREAM = True
 
 DMDS_MAGIC = b"DMDS"
 DMDS_VERSION = 1
@@ -134,7 +136,7 @@ def write_rgb565_stream(
     Returns:
         Number of frames written.
     """
-    if not frames_rgb:
+    if len(frames_rgb) == 0:
         raise ValueError("Cannot write an empty frame sequence to .rgb565.stream")
 
     first = frames_rgb[0]
@@ -159,16 +161,81 @@ def write_rgb565_stream(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as f:
         f.write(header)
-        for idx in range(total_frames):
-            frame = frames_rgb[idx]
-            if frame.shape[0] != height or frame.shape[1] != width:
-                pil_img = Image.fromarray(frame[:, :, :3]).resize(
-                    (width, height), Image.Resampling.LANCZOS
-                )
-                frame = np.asarray(pil_img, dtype=np.uint8)
-            f.write(rgb888_to_rgb565_le(frame))
+        if (
+            isinstance(frames_rgb, np.ndarray)
+            and frames_rgb.ndim == 4
+            and frames_rgb.shape[1] == height
+            and frames_rgb.shape[2] == width
+            and frames_rgb.shape[3] >= 3
+        ):
+            sub = frames_rgb[:total_frames]
+            r = sub[:, :, :, 0].astype(np.uint16)
+            g = sub[:, :, :, 1].astype(np.uint16)
+            b = sub[:, :, :, 2].astype(np.uint16)
+            rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+            f.write(rgb565.astype("<u2").tobytes())
+        else:
+            for idx in range(total_frames):
+                frame = frames_rgb[idx]
+                if frame.shape[0] != height or frame.shape[1] != width:
+                    pil_img = Image.fromarray(frame[:, :, :3]).resize(
+                        (width, height), Image.Resampling.LANCZOS
+                    )
+                    frame = np.asarray(pil_img, dtype=np.uint8)
+                f.write(rgb888_to_rgb565_le(frame))
 
     return total_frames
+
+
+def _evaluate_rgb_frames_quality(frames_rgb: Sequence[np.ndarray]) -> int:
+    """Compute a lightweight LED readability score [0..100] directly from 24-bit RGB frames."""
+    n = len(frames_rgb)
+    if n == 0:
+        return 0
+    sample_indices = sorted({0, n // 2, n - 1})
+    score = 100
+    lums: list[float] = []
+    stds: list[float] = []
+    black_pcts: list[float] = []
+    for idx in sample_indices:
+        arr = frames_rgb[idx][:, :, :3].astype(np.float32)
+        lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+        lums.append(float(np.mean(lum)))
+        stds.append(float(np.std(lum)))
+        black_pcts.append(float(np.mean(lum < 12.0)))
+
+    avg_lum = sum(lums) / len(lums)
+    avg_std = sum(stds) / len(stds)
+    avg_black = sum(black_pcts) / len(black_pcts)
+    if avg_black > 0.85:
+        score -= 35
+    elif avg_black > 0.70:
+        score -= 15
+    if avg_lum < 18.0 or avg_lum > 235.0:
+        score -= 25
+    if avg_std < 14.0:
+        score -= 20
+    return max(10, min(100, int(score)))
+
+
+def _load_raw_rgb24_frames(
+    raw_rgb24_path: Path,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    """Load contiguous `-f rawvideo -pix_fmt rgb24` bytes as `(N, H, W, 3)` uint8 array."""
+    frame_rgb24_bytes = int(width) * int(height) * 3
+    if frame_rgb24_bytes <= 0 or not raw_rgb24_path.exists():
+        return np.zeros((0, max(1, height), max(1, width), 3), dtype=np.uint8)
+    raw_bytes = raw_rgb24_path.read_bytes()
+    n_frames = len(raw_bytes) // frame_rgb24_bytes
+    if n_frames <= 0:
+        return np.zeros((0, height, width, 3), dtype=np.uint8)
+    return (
+        np.frombuffer(raw_bytes[: n_frames * frame_rgb24_bytes], dtype=np.uint8)
+        .reshape((n_frames, height, width, 3))
+        .copy()
+    )
 
 
 def read_rgb565_stream_header(source: Path | str | bytes) -> dict:
@@ -404,6 +471,13 @@ class DmdMediaProcessor:
 
         gif_out_path = out_dir / f"{base_stem}.gif"
         stream_out_path = out_dir / f"{base_stem}.rgb565.stream"
+        eff_stream_fps = max(1, min(120, int(config.fps)))
+        use_direct_raw = bool(export_rgb565_stream or not export_gif)
+        raw_rgb24_tmp: Optional[Path] = (
+            out_dir / f"._tmp_rgb24_{base_stem}_{os.getpid()}_{uuid.uuid4().hex[:6]}.raw"
+            if use_direct_raw
+            else None
+        )
 
         params = {
             **DEFAULT_PARAMS,
@@ -428,30 +502,61 @@ class DmdMediaProcessor:
             "saturation": config.saturation,
             "gamma": config.gamma,
             "dither": config.dither,
+            **(
+                {
+                    "raw_rgb24_out_path": str(raw_rgb24_tmp),
+                    "stream_fps": eff_stream_fps,
+                    "export_gif_output": bool(export_gif),
+                }
+                if raw_rgb24_tmp is not None
+                else {}
+            ),
         }
 
-        ok, msg = process_file(
-            src_path=str(input_path),
-            out_path=str(gif_out_path),
-            params=params,
-            start_s=start_s,
-            end_s=end_s,
-            callback=callback,
-        )
-        if not ok or not gif_out_path.exists():
-            raise RuntimeError(f"DMD video conversion failed for {input_path.name}: {msg}")
+        frames_arr: Optional[np.ndarray] = None
+        try:
+            ok, msg = process_file(
+                src_path=str(input_path),
+                out_path=str(gif_out_path),
+                params=params,
+                start_s=start_s,
+                end_s=end_s,
+                callback=callback,
+            )
+            if not ok:
+                raise RuntimeError(f"DMD video conversion failed for {input_path.name}: {msg}")
+            if export_gif and not gif_out_path.exists():
+                raise RuntimeError(f"DMD GIF output missing for {input_path.name}: {msg}")
+            if raw_rgb24_tmp is not None:
+                frames_arr = _load_raw_rgb24_frames(raw_rgb24_tmp, config.width, config.height)
+                if len(frames_arr) == 0:
+                    raise RuntimeError(
+                        f"Direct RGB24 video stream produced 0 frames for {input_path.name}"
+                    )
+        finally:
+            if raw_rgb24_tmp is not None:
+                raw_rgb24_tmp.unlink(missing_ok=True)
 
-        eval_res = evaluate_gif_quality(str(gif_out_path))
-        quality_score = int(eval_res.get("score", 75))
-
-        frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
-        frame_count = len(frames_rgb)
-        duration_s = round(frame_count / max(1, effective_fps), 2)
-
-        final_stream_path: Optional[Path] = None
-        if export_rgb565_stream and frames_rgb:
-            write_rgb565_stream(frames_rgb, stream_out_path, fps=effective_fps)
-            final_stream_path = stream_out_path
+        if frames_arr is not None:
+            effective_fps = eff_stream_fps
+            frame_count = int(frames_arr.shape[0])
+            duration_s = round(frame_count / max(1, effective_fps), 2)
+            if export_gif and gif_out_path.exists():
+                eval_res = evaluate_gif_quality(str(gif_out_path))
+                quality_score = int(eval_res.get("score", 75))
+            else:
+                quality_score = _evaluate_rgb_frames_quality(frames_arr)
+            final_stream_path: Optional[Path] = None
+            if export_rgb565_stream:
+                write_rgb565_stream(frames_arr, stream_out_path, fps=effective_fps)
+                final_stream_path = stream_out_path
+        else:
+            eval_res = evaluate_gif_quality(str(gif_out_path))
+            quality_score = int(eval_res.get("score", 75))
+            frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
+            frame_count = len(frames_rgb)
+            duration_s = round(frame_count / max(1, effective_fps), 2)
+            final_stream_path = None
 
         final_gif_path: Optional[Path] = gif_out_path if export_gif else None
         if not export_gif and gif_out_path.exists():
@@ -601,6 +706,12 @@ class DmdMediaProcessor:
 
         gif_out_path = out_dir / f"{stem}_{width}x{height}.gif"
         stream_out_path = out_dir / f"{stem}_{width}x{height}.rgb565.stream"
+        use_direct_raw = bool(export_rgb565_stream or not export_gif)
+        raw_rgb24_tmp: Optional[Path] = (
+            out_dir / f"._tmp_rgb24_{stem}_{width}x{height}_{os.getpid()}_{uuid.uuid4().hex[:6]}.raw"
+            if use_direct_raw
+            else None
+        )
 
         params = {
             **DEFAULT_PARAMS,
@@ -618,8 +729,18 @@ class DmdMediaProcessor:
             "top_crop_pct": float(top_crop_pct),
             "auto_action_enabled": False,
             "auto_color_enabled": bool(smart_color_boost),
+            **(
+                {
+                    "raw_rgb24_out_path": str(raw_rgb24_tmp),
+                    "stream_fps": fps_clamped,
+                    "export_gif_output": bool(export_gif),
+                }
+                if raw_rgb24_tmp is not None
+                else {}
+            ),
         }
 
+        frames_arr: Optional[np.ndarray] = None
         try:
             ok, msg = process_file(
                 src_path=str(src_path),
@@ -627,24 +748,40 @@ class DmdMediaProcessor:
                 params=params,
                 callback=callback,
             )
+            if not ok:
+                raise RuntimeError(f"DMD image panorama conversion failed for {stem}: {msg}")
+            if export_gif and not gif_out_path.exists():
+                raise RuntimeError(f"DMD panorama GIF output missing for {stem}: {msg}")
+            if raw_rgb24_tmp is not None:
+                frames_arr = _load_raw_rgb24_frames(raw_rgb24_tmp, width, height)
+                if len(frames_arr) == 0:
+                    raise RuntimeError(f"Direct RGB24 panorama produced 0 frames for {stem}")
         finally:
             if temp_src_path is not None:
                 temp_src_path.unlink(missing_ok=True)
+            if raw_rgb24_tmp is not None:
+                raw_rgb24_tmp.unlink(missing_ok=True)
 
-        if not ok or not gif_out_path.exists():
-            raise RuntimeError(f"DMD image panorama conversion failed for {stem}: {msg}")
-
-        eval_res = evaluate_gif_quality(str(gif_out_path))
-        quality_score = int(eval_res.get("score", 75))
-
-        frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
-        frame_count = len(frames_rgb)
-        actual_duration_s = round(frame_count / max(1, effective_fps), 2)
-
-        final_stream_path: Optional[Path] = None
-        if export_rgb565_stream and frames_rgb:
-            write_rgb565_stream(frames_rgb, stream_out_path, fps=effective_fps)
-            final_stream_path = stream_out_path
+        if frames_arr is not None:
+            effective_fps = fps_clamped
+            frame_count = int(frames_arr.shape[0])
+            actual_duration_s = round(frame_count / max(1, effective_fps), 2)
+            if export_gif and gif_out_path.exists():
+                eval_res = evaluate_gif_quality(str(gif_out_path))
+                quality_score = int(eval_res.get("score", 75))
+            else:
+                quality_score = _evaluate_rgb_frames_quality(frames_arr)
+            final_stream_path: Optional[Path] = None
+            if export_rgb565_stream:
+                write_rgb565_stream(frames_arr, stream_out_path, fps=effective_fps)
+                final_stream_path = stream_out_path
+        else:
+            eval_res = evaluate_gif_quality(str(gif_out_path))
+            quality_score = int(eval_res.get("score", 75))
+            frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
+            frame_count = len(frames_rgb)
+            actual_duration_s = round(frame_count / max(1, effective_fps), 2)
+            final_stream_path = None
 
         final_gif_path: Optional[Path] = gif_out_path if export_gif else None
         if not export_gif and gif_out_path.exists():

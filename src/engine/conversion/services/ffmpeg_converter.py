@@ -86,7 +86,7 @@ class FFmpegConverter(IConverter):
             slum, schr = p["sharpen_lum"], p["sharpen_chr"]
         else:
             if p.get("auto_color_enabled", False) and _analyze_and_compensate is not None:
-                ok_c, color_params, color_msg = _analyze_and_compensate(original_src)
+                ok_c, color_params, color_msg = _analyze_and_compensate(original_src, mode=mode)
                 if ok_c:
                     cont = color_params["contrast"]
                     sat = color_params["saturation"]

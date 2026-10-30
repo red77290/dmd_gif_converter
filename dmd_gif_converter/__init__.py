@@ -10,6 +10,7 @@ from src.engine.api import (
     DMDS_HEADER_SIZE,
     DMDS_MAGIC,
     DMDS_VERSION,
+    SUPPORTS_DIRECT_RGB565_STREAM,
     DmdClipConfig,
     DmdMediaProcessor,
     DmdProcessedAssets,
@@ -26,6 +27,7 @@ from src.engine.api import (
 
 __all__ = [
     "__version__",
+    "SUPPORTS_DIRECT_RGB565_STREAM",
     "DMDS_MAGIC",
     "DMDS_VERSION",
     "DMDS_HEADER_FORMAT",
