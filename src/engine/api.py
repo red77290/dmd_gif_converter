@@ -34,7 +34,7 @@ from src.engine.conversion.quality import evaluate_gif_quality
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.12"
+__version__ = "8.0.13"
 SUPPORTS_DIRECT_RGB565_STREAM = True
 
 DMDS_MAGIC = b"DMDS"

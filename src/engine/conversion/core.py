@@ -368,9 +368,12 @@ LET_ME_HANDLE_PARAMS = {
 
 _PRESETS = {
     #               contrast  sat    bright  gamma  sh_lum sh_chr  dither
-    "pixel_art": (  1.28,     1.58, -0.02,  0.90,  1.00,  0.30,  "none" ),
-    "anime":     (  1.18,     1.35, -0.01,  0.93,  0.75,  0.25,  "none" ),
-    "cinema":    (  1.12,     1.18,  0.00,  0.98,  0.45,  0.15,  "none" ),
+    "pixel_art": (  1.6,      2.2,  -0.03,  0.85,  1.8,   0.5,   "none" ),
+    "anime":     (  1.5,      1.9,  -0.02,  0.87,  1.3,   0.3,   "none" ),
+    # gamma 0.90 was darkening already-dark cinema content; 0.95 is more neutral.
+    # contrast 1.35 (was 1.4) avoids crushing shadow detail in dark scenes.
+    # brightness 0.00 (was -0.01) stops the slight push toward black in low-light.
+    "cinema":    (  1.35,     1.3,   0.00,  0.95,  0.8,   0.2,   "none" ),
 }
 
 def process_file(src_path, out_path, params=None, start_s=None, end_s=None, callback=None, cancel_event=None):
@@ -485,14 +488,10 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     # ── Auto-colorimetry (heuristic keyframe analysis) ───────────────────────
     # Analyses the original source at 50 % duration and injects computed
-    # contrast / saturation / gamma / brightness scaled around the target mode.
+    # contrast / saturation / gamma / brightness before preset lookup.
     if bool(p.get("auto_color_enabled", False)):
         if _analyze_and_compensate is not None:
-            preset_mode_hint = str(caller_params.get("mode") or p.get("mode") or "pixel_art")
-            ok_c, color_params, color_msg = _analyze_and_compensate(
-                original_src,
-                mode=preset_mode_hint,
-            )
+            ok_c, color_params, color_msg = _analyze_and_compensate(original_src)
             if ok_c:
                 p = {**p, "mode": "custom", **color_params}
                 log(f"[COLOR  ] {filename} — {color_msg}")

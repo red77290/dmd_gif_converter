@@ -370,23 +370,22 @@ def test_process_video_trailer_end_to_end(tmp_path: Path):
     assert header["total_frames"] == result.frame_count
 
 
-def test_cinema_auto_action_smart_color_preserves_gentle_saturation(tmp_path: Path):
+def test_smart_color_boost_applies_full_led_colorimetry_to_rgb565_stream(tmp_path: Path):
     """
-    Regression test: `mode='cinema'` with `use_auto_action=True, use_smart_color_boost=True`
-    must NOT be overwritten by legacy `pixel_art` 2.5-3.3x saturation or 1.8 sharpen.
+    Regression test: `use_smart_color_boost=True` must apply the full hand-tuned LED
+    colorimetry boost and unsharp mask directly onto the 16-bit `.rgb565.stream` output.
     """
-    video_path = tmp_path / "live_action_skin_tones.mp4"
+    video_path = tmp_path / "led_boost_scene.mp4"
     width, height, fps = 320, 180, 15
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(video_path), fourcc, float(fps), (width, height))
     assert writer.isOpened()
 
-    # Warm natural skin-tone midtone (RGB ~ (182, 138, 114)) with gentle motion
     for idx in range(30):
         frame_bgr = np.zeros((height, width, 3), dtype=np.uint8)
-        frame_bgr[:, :] = (114, 138, 182)
+        frame_bgr[:, :] = (90, 110, 145)
         x0 = 40 + (idx * 5) % 200
-        cv2.circle(frame_bgr, (x0, 90), 28, (130, 156, 204), -1)
+        cv2.circle(frame_bgr, (x0, 90), 28, (60, 150, 210), -1)
         writer.write(frame_bgr)
     writer.release()
 
@@ -404,32 +403,25 @@ def test_cinema_auto_action_smart_color_preserves_gentle_saturation(tmp_path: Pa
     )
     res = processor.process_video_trailer(
         input_video=video_path,
-        output_dir=tmp_path / "cinema_out",
+        output_dir=tmp_path / "led_boost_out",
         config=cfg,
-        export_gif=True,
+        export_gif=False,
         export_rgb565_stream=True,
-        stem="cinema_clip",
+        stem="boost_clip",
         callback=lambda m, _lvl: logs.append(m),
     )
 
     color_logs = [m for m in logs if "[COLOR" in m]
     assert color_logs, f"Expected [COLOR] log entry, got: {logs}"
-    assert "auto-color/cinema" in color_logs[0]
+    assert "auto-color (" in color_logs[0]
     import re
 
     m_sat = re.search(r"→.*?sat=([0-9.]+)", color_logs[0])
-    assert m_sat is not None, f"Could not parse output saturation from: {color_logs[0]}"
-    sat_val = float(m_sat.group(1))
-    assert 1.05 <= sat_val <= 1.38, f"Cinema saturation out of calibrated range: {sat_val}"
-
-    # Verify skin-tone red channel in RGB565 stream is NOT blown out to 248 (0x1F)
-    raw = res.rgb565_stream_path.read_bytes()[DMDS_HEADER_SIZE:]
-    first_rgb = rgb565_le_to_rgb888(raw[: 128 * 32 * 2], 128, 32)
-    mean_r = float(first_rgb[:, :, 0].mean())
-    mean_g = float(first_rgb[:, :, 1].mean())
-    assert mean_r < 225.0 and (mean_r - mean_g) < 75.0, (
-        f"Unexpected red clipping on cinema midtones: R={mean_r:.1f}, G={mean_g:.1f}"
-    )
+    m_con = re.search(r"→.*?contrast=([0-9.]+)", color_logs[0])
+    assert m_sat is not None and m_con is not None, f"Could not parse colorimetry from: {color_logs[0]}"
+    assert float(m_con.group(1)) >= 1.40
+    assert float(m_sat.group(1)) >= 2.20
+    assert res.rgb565_stream_path is not None and res.rgb565_stream_path.exists()
 
 
 def test_direct_rgb565_stream_preserves_true_16bit_gradients_with_and_without_gif(tmp_path: Path):

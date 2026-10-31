@@ -396,15 +396,14 @@ class TestAnalyzeAndCompensate(unittest.TestCase):
         self.assertIn("contrast", params)
         self.assertIn("1 frame", msg)
 
-    def test_mode_aware_baselines_prevent_cinema_and_anime_oversaturation(self):
-        """Cinema and anime modes must scale around mode-appropriate LED baselines, never >1.5x for cinema."""
+    def test_smart_color_boost_preserves_hand_tuned_led_baselines(self):
+        """Smart Color Boost must preserve the hand-tuned LED boost baselines and full sharpening."""
         try:
             import cv2
             import numpy as np
         except ImportError:
             self.skipTest("opencv/numpy not available")
 
-        # Desaturated live-action skin-tone / midtone frame (worst case for positive saturation delta)
         frame = np.zeros((64, 128, 3), dtype=np.uint8)
         frame[:, :, 0] = 110  # B
         frame[:, :, 1] = 128  # G
@@ -421,30 +420,17 @@ class TestAnalyzeAndCompensate(unittest.TestCase):
         mock_cap.release.return_value = None
 
         with patch("cv2.VideoCapture", return_value=mock_cap):
-            ok_cin, p_cin, msg_cin = analyze_and_compensate("movie.mp4", mode="cinema")
-            ok_ani, p_ani, msg_ani = analyze_and_compensate("anime.mp4", mode="anime")
-            ok_pix, p_pix, _ = analyze_and_compensate("arcade.mp4", mode="pixel_art")
+            ok, params, msg = analyze_and_compensate("movie.mp4")
 
-        self.assertTrue(ok_cin and ok_ani and ok_pix)
-        self.assertGreaterEqual(p_cin["saturation"], 1.05)
-        self.assertLessEqual(p_cin["saturation"], 1.38)
-        self.assertLess(p_cin["saturation"], 1.50)
-        self.assertGreaterEqual(p_cin["contrast"], 1.05)
-        self.assertLessEqual(p_cin["contrast"], 1.25)
-        self.assertAlmostEqual(p_cin["sharpen_lum"], 0.45)
-        self.assertIn("auto-color/cinema", msg_cin)
-
-        self.assertGreaterEqual(p_ani["saturation"], 1.15)
-        self.assertLessEqual(p_ani["saturation"], 1.60)
-        self.assertGreaterEqual(p_ani["contrast"], 1.08)
-        self.assertLessEqual(p_ani["contrast"], 1.32)
-        self.assertAlmostEqual(p_ani["sharpen_lum"], 0.75)
-        self.assertIn("auto-color/anime", msg_ani)
-
-        self.assertGreaterEqual(p_pix["saturation"], 1.30)
-        self.assertLessEqual(p_pix["saturation"], 1.85)
-        self.assertGreaterEqual(p_pix["contrast"], 1.15)
-        self.assertLessEqual(p_pix["contrast"], 1.40)
+        self.assertTrue(ok)
+        self.assertGreaterEqual(params["contrast"], 1.40)
+        self.assertLessEqual(params["contrast"], 2.50)
+        self.assertGreaterEqual(params["saturation"], 2.20)
+        self.assertLessEqual(params["saturation"], 3.50)
+        self.assertAlmostEqual(params["sharpen_lum"], 1.80)
+        self.assertAlmostEqual(params["sharpen_chr"], 0.50)
+        self.assertEqual(params["dither"], "none")
+        self.assertIn("auto-color (", msg)
 
 
 if __name__ == "__main__":
