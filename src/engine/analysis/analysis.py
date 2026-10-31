@@ -10,11 +10,11 @@ class _FloorEstimator:
     """Stance-aware bidirectional floor/platform level estimator."""
 
     # α ∈ (0, 1] — higher = faster response
-    _ALPHA_ATTACK         = 0.28   # smooth same-platform landing convergence
-    _ALPHA_DROP           = 0.62   # brisk downward platform step-down convergence
+    _ALPHA_ATTACK         = 0.28   # smooth same-platform landing & unconfirmed drop step
+    _ALPHA_DROP           = 0.58   # moderate step-down convergence (<= 14% frame height)
     _ALPHA_DROP_CONFIRMED = 0.80   # fast lock on 2nd+ consecutive lower-platform sample
     _ALPHA_RELEASE_JUMP   = 0.01   # rock-steady hold during transient jumps (<1px drift)
-    _ALPHA_RELEASE_STANCE = 0.28   # upward re-anchoring onto a confirmed upper platform
+    _ALPHA_RELEASE_STANCE = 0.38   # brisk upward re-anchoring onto a confirmed upper platform
 
     def __init__(self, frame_h: int) -> None:
         self._frame_h: float = float(frame_h)
@@ -69,11 +69,13 @@ class _FloorEstimator:
             drop_delta = rb - self._floor_y
             if drop_delta > 0.055 * self._frame_h and not is_extreme_bottom_spike:
                 self._consecutive_lower += 1
-                alpha_down = (
-                    self._ALPHA_DROP_CONFIRMED
-                    if self._consecutive_lower >= 2
-                    else self._ALPHA_DROP
-                )
+                if self._consecutive_lower >= 2:
+                    alpha_down = self._ALPHA_DROP_CONFIRMED
+                elif drop_delta > 0.14 * self._frame_h:
+                    # Require 2nd sample before aggressive plunge into deep ground slabs
+                    alpha_down = self._ALPHA_ATTACK
+                else:
+                    alpha_down = self._ALPHA_DROP
             else:
                 self._consecutive_lower = 0
                 alpha_down = self._ALPHA_ATTACK
@@ -92,7 +94,20 @@ class _FloorEstimator:
         stance_detected = False
         stance_target = rb
 
-        if len(recent) >= 6:
+        if len(recent) >= 4:
+            recent_4 = recent[-4:]
+            spread_4 = max(recent_4) - min(recent_4)
+            if spread_4 <= 0.032 * self._frame_h:
+                elev_thresh_4 = (
+                    self._floor_y
+                    if self._reanchoring_up
+                    else (self._floor_y - 0.045 * self._frame_h)
+                )
+                if all(s <= elev_thresh_4 for s in recent_4):
+                    stance_detected = True
+                    stance_target = float(np.median(recent_4))
+
+        if not stance_detected and len(recent) >= 6:
             recent_6 = recent[-6:]
             spread_6 = max(recent_6) - min(recent_6)
             if spread_6 > 0.055 * self._frame_h:
@@ -107,11 +122,11 @@ class _FloorEstimator:
                     stance_detected = True
                     stance_target = float(np.median(recent_6))
 
-        if not stance_detected and self._consecutive_elevated >= 12 and len(recent) >= 12:
-            recent_12 = recent[-12:]
-            if (max(recent_12[-6:]) - min(recent_12[-6:])) <= 0.08 * self._frame_h:
+        if not stance_detected and self._consecutive_elevated >= 10 and len(recent) >= 10:
+            recent_10 = recent[-10:]
+            if (max(recent_10[-6:]) - min(recent_10[-6:])) <= 0.08 * self._frame_h:
                 stance_detected = True
-                stance_target = float(np.median(recent_12[-6:]))
+                stance_target = float(np.median(recent_10[-6:]))
 
         if stance_detected:
             self._reanchoring_up = True
@@ -124,6 +139,10 @@ class _FloorEstimator:
     @property
     def floor_y(self) -> Optional[float]:
         return self._floor_y
+
+    @property
+    def has_detection(self) -> bool:
+        return self._has_detection
 
 
 def _is_dark_frame(frame, threshold: float = 40.0) -> bool:
@@ -294,7 +313,13 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
     target_fps = float(sample_count) / duration_s
     check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False)
 
-    def _run_scan(det_type: str):
+    _explicit_scene_cfg = str(getattr(cfg, "scene_type", "") or "").strip()
+    initial_scan_plat = bool(
+        getattr(cfg, "platformer_mode", False) is True
+        or _explicit_scene_cfg in ("platformer", "fighting_2d")
+    )
+
+    def _run_scan(det_type: str, force_platformer: bool = False):
         _roi_tops: list[float]         = []
         _roi_bottoms_feet: list[float] = []
         _roi_bottoms_fp: list[float]   = []
@@ -311,10 +336,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         if not ok:
             return [], [], [], [], [], [], [], [], [], []
             
-        _scan_plat = bool(
-            getattr(cfg, "platformer_mode", False)
-            or str(getattr(cfg, "scene_type", "") or "").strip() in ("platformer", "fighting_2d")
-        )
+        _scan_plat = bool(force_platformer or initial_scan_plat)
         try:
             for _ in range(sample_count + 5):
                 ok, frame = reader.read()
@@ -459,6 +481,29 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         scene_profile, scoreboard_lines, scene_scores = classify_scene(scene_signals)
     else:
         scoreboard_lines = []
+
+    if (
+        not initial_scan_plat
+        and scene_profile is not None
+        and scene_profile.platformer_mode
+        and (best_detector in ("hybrid", "motion") or median_w > frame_w * 0.36)
+    ):
+        try:
+            (p_tops, p_btm_feet, p_btm_fp, p_heights, p_widths,
+             _, _, _, _, _) = _run_scan(best_detector, force_platformer=True)
+            if p_tops and p_heights:
+                arr_tops = np.array(p_tops)
+                arr_btm_feet = np.array(p_btm_feet)
+                arr_btm_fp = np.array(p_btm_fp)
+                arr_heights = np.array(p_heights)
+                arr_widths = np.array(p_widths) if p_widths else arr_heights
+                median_top = float(np.median(arr_tops))
+                median_bottom = float(np.median(arr_btm_feet))
+                median_height = float(np.median(arr_heights))
+                median_w = float(np.median(arr_widths)) if len(arr_widths) > 0 else max(1.0, median_height)
+                body_aspect = median_height / max(1.0, median_w)
+        except Exception:
+            pass
 
     reasons = []
     auto_bottom = False

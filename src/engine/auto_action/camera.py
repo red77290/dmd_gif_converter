@@ -209,7 +209,8 @@ def _build_camera_rect(frame_w: int, frame_h: int, roi, cfg: AutoActionConfig,
     floor_ratio_plat = _clamp(float(getattr(cfg, "platformer_floor_ratio", 0.90)), 0.50, 0.96)
     max_fit_h_plat = crop_h * max(0.20, floor_ratio_plat - _PLATFORMER_HEAD_PAD_RATIO)
     cfg_med_h = float(getattr(cfg, "median_subject_height", 0.0) or 0.0)
-    base_stand_h = max(cfg_med_h, float(standing_height or 0.0))
+    live_stand_h = float(standing_height or 0.0)
+    base_stand_h = live_stand_h if live_stand_h > 0.0 else cfg_med_h
 
     if roi is None:
         cx = effective_frame_left + effective_frame_w / 2.0

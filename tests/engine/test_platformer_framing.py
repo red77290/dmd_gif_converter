@@ -778,5 +778,175 @@ class TestUnifiedSmallVsTallSpriteFraming:
         assert aa_cfg.scene_type == "platformer"
 
 
+class TestDeepGroundPlatformerRegressionSuite:
+    """
+    Regression suite for v8.0.14 deep-ground platformer framing:
+    Prevents the floor line from sinking into deep tiled/brick ground (showing only the
+    character's feet until a crouch/jump snaps the camera back) and preserves standing height
+    across sustained crouches.
+    """
+
+    def test_uninitialized_floor_estimator_never_biases_frame0_detector_toward_deep_ground(self):
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(subsample_frames=1, smoothness=0.0, scene_change_threshold=0.0)
+        engine = TrackingEngine(
+            fps=25.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+        assert engine.floor_est is not None
+        assert engine.floor_est.has_detection is False
+
+        seen_expected_floors: list = []
+
+        def spy_detect(*args, **kwargs):
+            seen_expected_floors.append(kwargs.get("expected_floor_y"))
+            return BoundingBox(120, 96, 24, 36)  # surface at y=132 (60% height, NOT 80% = 179.2)
+
+        engine.detector.detect = spy_detect
+        blank = np.full((fh, fw, 3), 48, dtype=np.uint8)
+        cam = engine.cam_full_view
+        cam = engine.process_frame(blank, cam, 0, 128, 32)
+        cam = engine.process_frame(blank, cam, 1, 128, 32)
+
+        # Frame 0 MUST pass expected_floor_y=None (no synthetic 0.80*fh underground bias!)
+        assert seen_expected_floors[0] is None
+        # Frame 1+ passes the true locked surface floor y=132.0
+        assert seen_expected_floors[1] == pytest.approx(132.0, abs=0.5)
+
+    def test_detect_motion_strips_tiled_mortar_gap_deep_ground_scroll_and_locks_onto_sprite(self):
+        det = _FrameDetector()
+        fw, fh = 304, 224
+        bg = np.zeros((fh, fw, 3), dtype=np.uint8)
+        for _ in range(3):
+            det.detect_motion(bg.copy(), platformer_mode=True)
+
+        # Frame A: deep brick ground (y=136..224) with 16px bricks + 12px mortar gaps,
+        # plus compact player sprite standing on top at y=104..136, x=132..156.
+        frame_a = bg.copy()
+        for bx in range(20, 270, 28):
+            frame_a[136:224, bx : bx + 16] = (140, 140, 140)
+        frame_a[104:136, 132:156] = (230, 230, 230)
+        det.detect_motion(frame_a, platformer_mode=True)
+
+        # Frame B: deep ground scrolls left by 6px (creating gapped brick motion contours across
+        # the whole 250px ground span) while sprite walks right by 6px.
+        frame_b = bg.copy()
+        for bx in range(14, 264, 28):
+            frame_b[136:224, bx : bx + 16] = (240, 240, 240)
+        frame_b[104:136, 138:162] = (255, 255, 255)
+
+        roi = det.detect_motion(frame_b, platformer_mode=True)
+        assert roi is not None
+        rx, ry, rw, rh = roi
+        assert rw < 55
+        assert 96 <= ry <= 114
+        assert 128 <= (ry + rh) <= 144
+
+        # Verify camera framing puts 2..4.5 DMD pixels of ground below feet with full head visibility
+        cfg = _platformer_cfg(target_width=128, target_height=32)
+        _, cy, _, ch = _build_camera_rect(
+            fw, fh, roi, cfg, floor_y_est=float(ry + rh), face_priority_mode=False
+        )
+        ground_dmd_px = ((cy + ch / 2.0) - float(ry + rh)) * (32.0 / ch)
+        assert 2.0 <= ground_dmd_px <= 4.5
+        assert (cy - ch / 2.0) < ry - 8.0
+
+    def test_hybrid_detector_never_fuses_surface_sprite_with_disjoint_underground_motion(self):
+        from src.engine.auto_action.interfaces import BoundingBox
+
+        det = _FrameDetector()
+        det.detect_person = lambda *a, **kw: BoundingBox(130, 100, 24, 36)
+        det.detect_motion = lambda *a, **kw: BoundingBox(40, 184, 72, 34)
+
+        frame = np.zeros((224, 304, 3), dtype=np.uint8)
+        roi = det.detect(frame, mode="hybrid", platformer_mode=True)
+        assert roi == BoundingBox(130, 100, 24, 36)
+
+    def test_yolo_moderated_floor_affinity_immediately_breaks_drifted_underground_lock(self):
+        det = _FrameDetector()
+        det._model_w = 640
+        det._model_h = 640
+
+        # Box 0: low-confidence underground brick pareidolia right at drifted expected_floor_y=202
+        #        (bottom_model = 202 * 640 / 224 = 577, cy=532, bh=90, conf=0.24)
+        # Box 1: genuine player sprite on surface y=100..136
+        #        (bottom_model = 136 * 640 / 224 = 388.6, cy=337, bh=103, conf=0.65)
+        pred = np.zeros((1, 5, 2), dtype=np.float32)
+        pred[0, :, 0] = [320.0, 532.0, 72.0, 90.0, 0.24]
+        pred[0, :, 1] = [280.0, 337.0, 52.0, 103.0, 0.65]
+
+        mock_session = MagicMock()
+        mock_input = MagicMock()
+        mock_input.name = "images"
+        mock_session.get_inputs.return_value = [mock_input]
+        mock_session.run.return_value = [pred]
+        det._onnx_session_fast = mock_session
+
+        frame = np.zeros((224, 304, 3), dtype=np.uint8)
+        roi = det._detect_yolo(frame, platformer_mode=True, expected_floor_y=202.0)
+        assert roi is not None
+        _, ry, _, rh = roi
+        assert 128 <= (ry + rh) <= 144
+
+        # And _FloorEstimator recovers rapidly from y=202 upward onto y=136 in <= 6 walking frames
+        fe = _FloorEstimator(frame_h=224)
+        fe.update(202.0)
+        for _ in range(6):
+            fe.update(136.0)
+        assert fe.floor_y < 155.0
+
+    def test_sustained_35_frame_crouch_preserves_tall_sprite_standing_height_and_imaginary_floor(self):
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=1,
+            smoothness=0.0,
+            scene_change_threshold=0.0,
+            roi_history_window_s=0.0,
+        )
+        engine = TrackingEngine(
+            fps=25.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+        blank = np.full((fh, fw, 3), 48, dtype=np.uint8)
+        cam = engine.cam_full_view
+
+        # Stand for 8 frames (tall sprite h=92, feet=180)
+        for i in range(8):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(120, 88, 40, 92)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+        cy_stand = cam[1]
+
+        # Hold crouch for 35 frames (> maxlen=30) on the same floor (h=54, feet=180)
+        for i in range(8, 43):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(120, 126, 42, 54)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+
+        assert engine.standing_subject_h == pytest.approx(92.0, abs=1.0)
+        assert cam[1] == pytest.approx(cy_stand, abs=0.5)
+
+
+
 
 

@@ -1,5 +1,5 @@
 {
-  "task_id": "531BC",
+  "task_id": "A3622",
   "file_info": {
     "filename": "platformer_jump_3.gif",
     "video_width": 498,
@@ -8,39 +8,39 @@
   },
   "camera_params": {
     "strength": {
-      "value": 0.55,
-      "reason": "Reduced strength to stabilize the tall subject."
+      "value": 0.65,
+      "reason": "High strength to track fast action."
     },
     "smoothness": {
       "value": 0.85,
-      "reason": "Increased smoothness to prevent motion sickness."
+      "reason": "Standard smoothness."
     }
   },
   "raw_signals": {
-    "tall_ratio": 1.534136546184739,
-    "fill_ratio": 0.4360730593607306,
-    "body_aspect": 0.8451327433628318,
+    "tall_ratio": 0.8835341365461847,
+    "fill_ratio": 0.2511415525114155,
+    "body_aspect": 1.0576923076923077,
     "floor_in_lower": true,
-    "floor_var_score": 0.091096238331033,
-    "x_variance": 0.042554921931604976,
-    "y_variance": 0.01179904598155438
+    "floor_var_score": 0.1203588893248056,
+    "x_variance": 0.028841796448551612,
+    "y_variance": 0.013563911952699795
   },
   "decisions": {
     "face_priority": {
-      "value": true,
-      "reason": "Very tall subject detected, switching to portrait mode."
+      "value": false,
+      "reason": "Subject not dominant, face priority disabled."
     },
     "auto_vertical_bias": {
-      "value": false,
-      "reason": "Floor tracking disabled (contradictory with portrait mode)."
+      "value": true,
+      "reason": "Floor line detected, tracking enabled."
     },
     "auto_bottom_crop": {
       "value": false,
-      "reason": "Bottom crop forced to frame the upper body."
+      "reason": "Feet are close to the bottom edge."
     },
     "auto_top_crop": {
       "value": false,
-      "reason": "Top crop forced to frame the head."
+      "reason": "Unnecessary for standard video games."
     },
     "pillarbox": {
       "value": "L:0px",

@@ -93,16 +93,23 @@ class AiMomentsEngine:
         with _quiet_c_stderr():
             cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
             if cap is None or not cap.isOpened():
+                if cap is not None:
+                    cap.release()
                 cap = cv2.VideoCapture(self.video_path)
-        if not cap.isOpened():
+        if cap is None or not cap.isOpened():
+            if cap is not None:
+                cap.release()
             logger.error("Could not open video.")
             return []
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            fps = 25.0
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = total_frames / fps
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0:
+                fps = 25.0
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            duration = total_frames / fps
+        finally:
+            cap.release()
         
         # Subsample for speed (configurable)
         analyze_fps = float(self.options.get("analyze_fps", 5.0))
@@ -141,34 +148,35 @@ class AiMomentsEngine:
         signals = []
         idx = 0
         last_log_pct = 0.0
-        while not self._cancel:
-            ret, frame = reader.read()
-            if not ret:
-                break
-            
-            # Downscale for performance during analysis
-            small = cv2.resize(frame, (320, 180))
-            
-            # Use Layer 1 pure measurement
-            sig = self.signal_engine.score_frame(small, frame_idx=idx)
-            
-            # We store the time manually for moment creation
-            sig_with_time = (sig, idx / fps)
-            signals.append(sig_with_time)
-                
-            idx += 1
-            if idx % int(fps) == 0:
-                self.progress_cb("Signal Extraction", 0.4 * (idx / max(1, total_frames)))
-                
-            pct = (idx / max(1, total_frames)) * 100
-            if pct - last_log_pct >= 5.0 or idx == total_frames:
-                bar_len = 30
-                filled = int(bar_len * pct / 100)
-                bar = "#" * filled + "-" * (bar_len - filled)
-                logger.info(f"[AI MOMENT] Signal Extraction: [{bar}] {pct:.1f}% ({idx}/{total_frames})")
-                last_log_pct = pct
-                
-        reader.release()
+        try:
+            while not self._cancel:
+                ret, frame = reader.read()
+                if not ret:
+                    break
+
+                # Downscale for performance during analysis
+                small = cv2.resize(frame, (320, 180))
+
+                # Use Layer 1 pure measurement
+                sig = self.signal_engine.score_frame(small, frame_idx=idx)
+
+                # We store the time manually for moment creation
+                sig_with_time = (sig, idx / fps)
+                signals.append(sig_with_time)
+
+                idx += 1
+                if idx % max(1, int(fps)) == 0:
+                    self.progress_cb("Signal Extraction", 0.4 * (idx / max(1, total_frames)))
+
+                pct = (idx / max(1, total_frames)) * 100
+                if pct - last_log_pct >= 5.0 or idx == total_frames:
+                    bar_len = 30
+                    filled = int(bar_len * pct / 100)
+                    bar = "#" * filled + "-" * (bar_len - filled)
+                    logger.info(f"[AI MOMENT] Signal Extraction: [{bar}] {pct:.1f}% ({idx}/{total_frames})")
+                    last_log_pct = pct
+        finally:
+            reader.release()
         
         if not signals or self._cancel:
             logger.info(f"[AI MOMENT] Signal extraction ended: {len(signals)} signal points extracted (cancelled: {self._cancel}).")

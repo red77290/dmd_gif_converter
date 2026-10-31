@@ -100,9 +100,9 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
     # 6. Renderer
     renderer = Renderer(reader.frame_w, reader.frame_h, analyzer.out_w, analyzer.out_h, cfg.bg_sub_enable)
 
-    # State variables
-    read_q = queue.Queue(maxsize=16)
-    write_q = queue.Queue(maxsize=16)
+    # State variables (bounded to 4 frames to cap 1080p BGR24 queue memory < 50 MB/worker)
+    read_q = queue.Queue(maxsize=4)
+    write_q = queue.Queue(maxsize=4)
     stop_event = threading.Event()
 
     def reader_thread():

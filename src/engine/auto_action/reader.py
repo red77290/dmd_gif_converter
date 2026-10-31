@@ -99,6 +99,8 @@ class FFmpegPipeReader:
 
         cmd = [
             "ffmpeg", "-y",
+            "-loglevel", "error",
+            "-nostats",
             "-i", self.src_path,
             "-f", "image2pipe",
             "-vcodec", "rawvideo",
@@ -111,8 +113,14 @@ class FFmpegPipeReader:
             "-"
         ])
 
+        pipe_bufsize = min(max(65536, self._frame_bytes * 2), 8 * 1024 * 1024)
         try:
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=self._frame_bytes * 10)
+            self.proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=pipe_bufsize,
+            )
             
             # Test-read the very first frame to verify that ffmpeg is actually pipe-outputting
             raw_frame = self.proc.stdout.read(self._frame_bytes)
@@ -121,9 +129,12 @@ class FFmpegPipeReader:
                 try:
                     self.proc.stdout.close()
                     self.proc.terminate()
-                    self.proc.wait()
+                    self.proc.wait(timeout=3)
                 except Exception:
-                    pass
+                    try:
+                        self.proc.kill()
+                    except Exception:
+                        pass
                 self.proc = None
                 return self._open_cv2(target_fps)
 
@@ -134,8 +145,12 @@ class FFmpegPipeReader:
             if self.proc:
                 try:
                     self.proc.terminate()
+                    self.proc.wait(timeout=2)
                 except Exception:
-                    pass
+                    try:
+                        self.proc.kill()
+                    except Exception:
+                        pass
                 self.proc = None
             return self._open_cv2(target_fps)
 
@@ -227,11 +242,16 @@ class FFmpegPipeReader:
             self._cv2_cap = None
         if self.proc:
             try:
-                self.proc.stdout.close()
+                if self.proc.stdout:
+                    self.proc.stdout.close()
                 self.proc.terminate()
-                self.proc.wait()
+                self.proc.wait(timeout=3)
             except Exception:
-                pass
+                try:
+                    self.proc.kill()
+                    self.proc.wait(timeout=1)
+                except Exception:
+                    pass
             self.proc = None
         if self._gif_pre_tmpdir:
             shutil.rmtree(self._gif_pre_tmpdir, ignore_errors=True)

@@ -100,7 +100,11 @@ class SceneChangeStage(ITrackerStage):
 class DetectionStage(ITrackerStage):
     """Invokes the detector model to retrieve raw ROI."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
-        expected_floor_y = engine.floor_est.floor_y if engine.floor_est is not None else None
+        expected_floor_y = (
+            engine.floor_est.floor_y
+            if (engine.floor_est is not None and engine.floor_est.has_detection)
+            else None
+        )
         expected_cx = getattr(engine, "_last_valid_roi_cx", None)
         
         if getattr(engine.cfg, 'auto_fast_tracking', False):
@@ -216,26 +220,46 @@ class FloorEstimationStage(ITrackerStage):
                 engine._platformer = getattr(engine.cfg, "platformer_mode", False)
                 bottom_val = float(ry + rh)
                 if engine._platformer:
-                    # Reject squat horizontal tiles wholly below the established floor surface
-                    # (prevents deep-ground brick pareidolia from pulling the floor underground)
-                    is_underground_tile = (
+                    # Reject squat horizontal tiles or horizontally-teleported pareidolia wholly
+                    # below the established floor surface (prevents deep-ground bricks/pillars
+                    # from pulling the floor underground).
+                    has_floor = (
                         engine.floor_est.floor_y is not None
-                        and getattr(engine.floor_est, "_has_detection", False)
-                        and float(ry) >= float(engine.floor_est.floor_y) - 2.0
-                        and float(rw) > float(rh) * 1.15
+                        and engine.floor_est.has_detection
+                    )
+                    wholly_below_floor = (
+                        has_floor and float(ry) >= float(engine.floor_est.floor_y) - 2.0
+                    )
+                    roi_cx_val = float(rx) + float(rw) * 0.5
+                    is_underground_tile = wholly_below_floor and float(rw) > float(rh) * 1.15
+                    is_underground_teleport = (
+                        wholly_below_floor
+                        and engine._last_valid_roi_cx is not None
+                        and abs(roi_cx_val - engine._last_valid_roi_cx) > float(engine.effective_frame_w) * 0.24
                     )
                     min_valid_bottom = float(engine.effective_frame_top) + float(engine.effective_frame_h) * 0.30
                     is_wide_explosion = (
                         float(rw) > float(engine.effective_frame_w) * 0.60
                         and float(rh) > float(engine.effective_frame_h) * 0.55
                     )
-                    if is_underground_tile:
+                    if is_underground_tile or is_underground_teleport:
                         context.raw_roi = None
                         context.face_roi = None
                     elif not is_wide_explosion and float(rh) <= float(engine.effective_frame_h) * 0.78 and bottom_val >= min_valid_bottom:
-                        # Clamp single-frame downward bbox bloat into deep ground shadows/tiles
-                        # when the character's head stayed steady on the same platform.
-                        if len(engine.standing_heights) >= 3 and engine._prev_valid_top is not None:
+                        prev_floor_y = float(engine.floor_est.floor_y) if has_floor else None
+                        # Clamp downward bbox bloat into deep ground shadows/pillars/tiles
+                        if float(rh) > float(rw) * 3.2 and float(rh) > float(engine.effective_frame_h) * 0.32:
+                            ref_h = (
+                                float(np.median(engine.standing_heights))
+                                if engine.standing_heights
+                                else float(rw) * 2.2
+                            )
+                            clamped_h = max(8, int(round(ref_h)))
+                            context.raw_roi = BoundingBox(rx, ry, rw, clamped_h)
+                            context.face_roi = engine._clip_to_face_roi(context.raw_roi)
+                            rh = clamped_h
+                            bottom_val = float(ry + rh)
+                        elif len(engine.standing_heights) >= 3 and engine._prev_valid_top is not None:
                             med_char_h = float(np.median(engine.standing_heights))
                             if float(rh) > med_char_h * 1.28 and abs(float(ry) - engine._prev_valid_top) <= med_char_h * 0.25:
                                 clamped_h = max(8, int(round(med_char_h)))
@@ -244,10 +268,21 @@ class FloorEstimationStage(ITrackerStage):
                                 rh = clamped_h
                                 bottom_val = float(ry + rh)
                         roi_bottom = bottom_val
-                        engine.standing_heights.append(float(rh))
-                        cfg_med = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
-                        engine.standing_subject_h = max(cfg_med, float(np.percentile(engine.standing_heights, 75)))
-                        engine._prev_valid_top = float(ry)
+                        is_same_floor_crouch = (
+                            prev_floor_y is not None
+                            and engine.standing_subject_h > 0.0
+                            and abs(bottom_val - prev_floor_y) <= max(6.0, float(engine.effective_frame_h) * 0.035)
+                            and float(rh) < engine.standing_subject_h * 0.78
+                        )
+                        if not is_same_floor_crouch:
+                            engine.standing_heights.append(float(rh))
+                            engine._prev_valid_top = float(ry)
+                        if engine.standing_heights:
+                            pct75_h = float(np.percentile(engine.standing_heights, 75))
+                            cfg_med = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
+                            engine.standing_subject_h = (
+                                pct75_h if len(engine.standing_heights) >= 6 else max(cfg_med, pct75_h)
+                            )
                 elif not engine.face_priority_mode:
                     # Non-platformer ground estimation: use actual feet bottom (never ry + 0.25*H,
                     # which falsely treated a close-up character's forehead as their shoes),
@@ -400,8 +435,9 @@ class CameraBuilderStage(ITrackerStage):
             # a lower platform and when rescuing a sprite head crowding the top border.
             is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
             med_h = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
-            roi_h = float(context.face_roi[3]) if context.face_roi is not None else med_h
-            is_tall_sprite = is_platformer and max(med_h, engine.standing_subject_h, roi_h) > ch * 0.79
+            eff_stand_h = engine.standing_subject_h if engine.standing_subject_h > 0.0 else med_h
+            roi_h = float(context.face_roi[3]) if context.face_roi is not None else eff_stand_h
+            is_tall_sprite = is_platformer and max(eff_stand_h, roi_h) > ch * 0.79
             prev_top = prev_cy - ch / 2.0
             head_crowded = (
                 is_platformer

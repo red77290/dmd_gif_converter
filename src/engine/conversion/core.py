@@ -934,7 +934,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             log(f"[TEXT  ] {filename} — Pillow text overlay failed: {txt_msg}", "warning")
 
     # Run quality evaluation on the generated GIF for UI rating and the Cleanup Assistant
-    if emit_primary_file:
+    if emit_primary_file and not bool(p.get("skip_quality_eval", False)):
         try:
             q_res = evaluate_gif_quality(out_path)
             log(f"[QUALITY] {filename} — Quality Score: {q_res.get('score', 0)}% ({q_res.get('rating', 'Unknown')})")

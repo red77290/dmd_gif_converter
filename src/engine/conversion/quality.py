@@ -17,29 +17,37 @@ def evaluate_gif_quality(gif_path: str) -> dict:
 
     scores = []
     reasons_set = set()
-    
-    # Evaluate up to 10 frames sampled evenly
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 10)
-    step = max(1, total_frames // 10)
-    
-    for i in range(0, total_frames, step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, float(i))
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            break
-            
-        score_info = _evaluate_dmd_frame(frame)
-        scores.append(score_info["score"])
-        for r in score_info["reasons"]:
-            reasons_set.add(r)
-            
-    cap.release()
-    
+
+    try:
+        # Evaluate up to 10 frames sampled evenly in a single sequential pass
+        # (avoids O(N^2) random GIF seeking and libavformat non-keyframe seek errors).
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 10)
+        if total_frames <= 0:
+            total_frames = 10
+        step = max(1, total_frames // 10)
+        target_indices = set(range(0, total_frames, step))
+        max_target = max(target_indices) if target_indices else 0
+
+        for idx in range(max_target + 1):
+            if idx in target_indices:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    break
+                score_info = _evaluate_dmd_frame(frame)
+                scores.append(score_info["score"])
+                for r in score_info["reasons"]:
+                    reasons_set.add(r)
+            else:
+                if not cap.grab():
+                    break
+    finally:
+        cap.release()
+
     if not scores:
         return _fallback_result("No readable frames")
-        
+
     final_score = int(np.mean(scores) * 100.0)
-    
+
     # Evaluate GIF duration and frame count to penalize unreadable/too fast GIFs
     try:
         from PIL import Image
@@ -48,7 +56,9 @@ def evaluate_gif_quality(gif_path: str) -> dict:
             duration_ms = 0
             for i in range(real_frames):
                 img.seek(i)
-                duration_ms += img.info.get("duration", 100)
+                duration_ms += int(img.info.get("duration", 100) or 100)
+                if real_frames > 2 and duration_ms >= 400:
+                    break
     except Exception:
         real_frames = total_frames
         duration_ms = real_frames * 100

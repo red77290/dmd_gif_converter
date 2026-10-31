@@ -146,15 +146,28 @@ class AbstractDetector(IDetector):
             m = self.detect_motion(frame, **motion_kw)
             return m if m is not None else self.detect_person(frame, **person_kw)
 
-        # hybrid: merge both
+        # hybrid: merge only spatially adjacent boxes in non-platformer scenes;
+        # never fuse a clean sprite box with disjoint scrolling ground/background contours.
         p = self.detect_person(frame, **person_kw)
         m = self.detect_motion(frame, **motion_kw)
         if p and m:
-            x1 = min(p[0], m[0])
-            y1 = min(p[1], m[1])
-            x2 = max(p[0] + p[2], m[0] + m[2])
-            y2 = max(p[1] + p[3], m[1] + m[3])
-            return BoundingBox(x1, y1, x2 - x1, y2 - y1)
+            px2, py2 = p[0] + p[2], p[1] + p[3]
+            mx2, my2 = m[0] + m[2], m[1] + m[3]
+            pad_x = max(p[2], m[2]) * 0.35
+            pad_y = max(p[3], m[3]) * 0.35
+            near_overlap = not (
+                px2 + pad_x < m[0]
+                or mx2 + pad_x < p[0]
+                or py2 + pad_y < m[1]
+                or my2 + pad_y < p[1]
+            )
+            if near_overlap and not platformer_mode:
+                x1 = min(p[0], m[0])
+                y1 = min(p[1], m[1])
+                x2 = max(px2, mx2)
+                y2 = max(py2, my2)
+                return BoundingBox(x1, y1, x2 - x1, y2 - y1)
+            return p
         return p or m
 
 
@@ -173,6 +186,8 @@ class _FrameDetector(AbstractDetector):
 
     _shared_session_fast = None
     _shared_session_batch = None
+    _shared_model_path: Optional[str] = None
+    _shared_model_checked: bool = False
     _shared_model_h = 640
     _shared_model_w = 640
     _shared_model_type = ""
@@ -181,69 +196,98 @@ class _FrameDetector(AbstractDetector):
     def _create_session(self, model_path: str, num_threads: int):
         import onnxruntime as ort
         sess_options = ort.SessionOptions()
-        sess_options.intra_op_num_threads = num_threads
-        sess_options.inter_op_num_threads = 2
-        
+        sess_options.intra_op_num_threads = max(1, int(num_threads))
+        sess_options.inter_op_num_threads = 1
+        sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        sess_options.enable_cpu_mem_arena = False
+
         session = ort.InferenceSession(
-            model_path, 
+            model_path,
             sess_options=sess_options,
-            providers=["CPUExecutionProvider"]
+            providers=["CPUExecutionProvider"],
         )
         return session
 
+    @staticmethod
+    def _resolve_ort_threads(is_batch: bool) -> int:
+        env_raw = os.environ.get("DMD_ORT_THREADS") or os.environ.get("OMP_NUM_THREADS")
+        if env_raw:
+            try:
+                return max(1, min(8, int(env_raw)))
+            except ValueError:
+                pass
+        cpu_cores = os.cpu_count() or 4
+        if is_batch:
+            return max(1, min(2, cpu_cores // 2))
+        return min(4, max(1, cpu_cores))
+
     def _try_load_onnx(self) -> None:
         with self._session_lock:
-            if _FrameDetector._shared_session_fast is not None:
-                self._onnx_session_fast = _FrameDetector._shared_session_fast
-                self._onnx_session_batch = _FrameDetector._shared_session_batch
-                self._model_h = _FrameDetector._shared_model_h
-                self._model_w = _FrameDetector._shared_model_w
+            self._onnx_session_fast = _FrameDetector._shared_session_fast
+            self._onnx_session_batch = _FrameDetector._shared_session_batch
+            self._model_h = _FrameDetector._shared_model_h
+            self._model_w = _FrameDetector._shared_model_w
+            if _FrameDetector._shared_model_checked:
+                self._model_path = _FrameDetector._shared_model_path
                 self.model_type = _FrameDetector._shared_model_type
                 return
 
             try:
                 model_path = _ensure_yolo_model()
-                if model_path is None:
-                    self._onnx_session_fast = None
-                    self._onnx_session_batch = None
-                    return
-                
-                import os
-                cpu_cores = os.cpu_count() or 4
-                fast_threads = min(8, max(1, cpu_cores))
-                batch_threads = max(1, min(2, cpu_cores // 2))
-                
-                session_fast = self._create_session(model_path, fast_threads)
-                session_batch = self._create_session(model_path, batch_threads)
-                
-                inputs = session_fast.get_inputs()[0]
-                model_h = inputs.shape[2]
-                model_w = inputs.shape[3]
-                if not isinstance(model_h, int) or not isinstance(model_w, int):
-                    model_h, model_w = 640, 640
-                
-                _FrameDetector._shared_session_fast = session_fast
-                _FrameDetector._shared_session_batch = session_batch
-                _FrameDetector._shared_model_h = model_h
-                _FrameDetector._shared_model_w = model_w
-                _FrameDetector._shared_model_type = "onnx"
-
-                self._onnx_session_fast = session_fast
-                self._onnx_session_batch = session_batch
-                self._model_h = model_h
-                self._model_w = model_w
-                self.model_type = "onnx"
+                _FrameDetector._shared_model_checked = True
+                _FrameDetector._shared_model_path = model_path
+                _FrameDetector._shared_model_type = "onnx" if model_path else ""
+                self._model_path = model_path
+                self.model_type = _FrameDetector._shared_model_type
             except Exception:
-                self._onnx_session_fast = None
-                self._onnx_session_batch = None
-                self._model_h = 640
-                self._model_w = 640
+                _FrameDetector._shared_model_checked = True
+                _FrameDetector._shared_model_path = None
+                _FrameDetector._shared_model_type = ""
+                self._model_path = None
                 self.model_type = ""
 
     def _get_active_session(self, is_batch: bool = False):
-        if is_batch:
+        if is_batch and self._onnx_session_batch is not None:
             return self._onnx_session_batch
-        return self._onnx_session_fast
+        if not is_batch and self._onnx_session_fast is not None:
+            return self._onnx_session_fast
+
+        with self._session_lock:
+            if is_batch and _FrameDetector._shared_session_batch is not None:
+                self._onnx_session_batch = _FrameDetector._shared_session_batch
+                self._model_h = _FrameDetector._shared_model_h
+                self._model_w = _FrameDetector._shared_model_w
+                return self._onnx_session_batch
+            if not is_batch and _FrameDetector._shared_session_fast is not None:
+                self._onnx_session_fast = _FrameDetector._shared_session_fast
+                self._model_h = _FrameDetector._shared_model_h
+                self._model_w = _FrameDetector._shared_model_w
+                return self._onnx_session_fast
+
+            model_path = getattr(self, "_model_path", None) or _FrameDetector._shared_model_path
+            if not model_path:
+                return None
+
+            try:
+                threads = self._resolve_ort_threads(is_batch=is_batch)
+                session = self._create_session(model_path, threads)
+                inputs = session.get_inputs()[0]
+                model_h, model_w = inputs.shape[2], inputs.shape[3]
+                if not isinstance(model_h, int) or not isinstance(model_w, int):
+                    model_h, model_w = 640, 640
+                _FrameDetector._shared_model_h = model_h
+                _FrameDetector._shared_model_w = model_w
+                self._model_h = model_h
+                self._model_w = model_w
+                if is_batch:
+                    _FrameDetector._shared_session_batch = session
+                    self._onnx_session_batch = session
+                else:
+                    _FrameDetector._shared_session_fast = session
+                    self._onnx_session_fast = session
+                return session
+            except Exception:
+                return None
 
     def _detect_yolo(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
                      roi_persistence_score: float = 1.0, platformer_mode: bool = False,
@@ -267,7 +311,10 @@ class _FrameDetector(AbstractDetector):
         class_prob = pred[4:].T
         person_scores = class_prob[:, 0]
 
-        effective_min_conf = max(0.05, min_conf * (1.0 - 0.5 * roi_persistence_score))
+        if platformer_mode:
+            effective_min_conf = max(0.18, min_conf * (1.0 - 0.30 * roi_persistence_score))
+        else:
+            effective_min_conf = max(0.05, min_conf * (1.0 - 0.5 * roi_persistence_score))
         mask = person_scores > effective_min_conf
         if not np.any(mask):
             return None
@@ -298,8 +345,8 @@ class _FrameDetector(AbstractDetector):
                     0.75 + 2.9 * (bottomness - 0.28),
                     np.where(
                         (bottomness > 0.88) & (bottomness <= 0.93),
-                        1.00,
-                        np.where(bottomness > 0.93, 0.50, 0.30),
+                        0.85,
+                        np.where(bottomness > 0.93, 0.40, 0.30),
                     ),
                 ),
             )
@@ -332,10 +379,9 @@ class _FrameDetector(AbstractDetector):
                 ceiling_block = is_above_floor & is_far_from_floor
                 mask = mask & ~ceiling_block
 
-                # Asymmetric floor affinity: tight upward/border decay so jumps and bottom-border
-                # noise never steal focus, but gentler downward decay inside the playfield
-                # (`bottomness <= 0.94`) so dropping from an upper platform onto lower ground
-                # immediately re-locks onto the player.
+                # Moderated floor affinity (~5x range instead of 95x): keeps grounded players
+                # favored over background hops while guaranteeing that a real sprite on the
+                # surface immediately breaks free if expected_floor_y ever drifted underground.
                 is_playfield_drop = (
                     (boxes_bottom > expected_floor_model)
                     & (bottomness <= 0.93)
@@ -344,11 +390,11 @@ class _FrameDetector(AbstractDetector):
                 is_border_drop = (boxes_bottom > expected_floor_model) & (bottomness > 0.94)
                 floor_weight = np.where(
                     is_playfield_drop,
-                    0.55 + 7.5 * np.exp(-dist_to_floor * 4.0),
+                    0.45 + 2.4 * np.exp(-dist_to_floor * 3.8),
                     np.where(
                         is_border_drop,
-                        0.05 + 7.5 * np.exp(-dist_to_floor * 7.5),
-                        0.08 + 7.5 * np.exp(-dist_to_floor * 7.2),
+                        0.08 + 1.8 * np.exp(-dist_to_floor * 7.5),
+                        0.50 + 2.0 * np.exp(-dist_to_floor * 5.0),
                     ),
                 )
                 platformer_scores = person_scores * mask * playfield_weight * horiz_weight * floor_weight
@@ -393,6 +439,9 @@ class _FrameDetector(AbstractDetector):
         y  = max(0, y)
         bw = min(bw, w - x)
         bh = min(bh, h - y)
+        if platformer_mode and bw >= 8 and bh > int(bw * 3.2):
+            # Trim downward pillar/column bleed beneath a standing sprite anchored at head `y`
+            bh = min(bh, max(8, int(round(bw * 2.4))))
         if bw < 8 or bh < 8:
             return None
         return BoundingBox(x, y, bw, bh)
@@ -482,12 +531,15 @@ class _FrameDetector(AbstractDetector):
             # Reject global camera flashes before band suppression
             if cv2.countNonZero(mask) > int(frame_w * frame_h * 0.70):
                 return None
-            # Strip wide horizontal ground/HUD scroll bands (>= 38% frame width)
-            # so a compact player sprite standing directly on top of a scrolling
-            # thick ground slab is cleanly separated rather than fused into it.
+            # Bridge horizontal brick/mortar/checkerboard gaps strictly along X (height=1 so
+            # sprite feet are NEVER fused vertically into ground), then strip wide horizontal
+            # ground/HUD scroll bands (>= 38% frame width).
+            gap_w = max(9, int(frame_w * 0.065))
+            gap_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_w, 1))
+            band_probe = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, gap_kernel)
             band_w = max(16, int(frame_w * 0.38))
             horiz_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (band_w, 3))
-            wide_bands = cv2.morphologyEx(mask, cv2.MORPH_OPEN, horiz_kernel)
+            wide_bands = cv2.morphologyEx(band_probe, cv2.MORPH_OPEN, horiz_kernel)
             stripped = cv2.bitwise_and(mask, cv2.bitwise_not(wide_bands))
             if cv2.countNonZero(stripped) > 0:
                 mask = stripped
@@ -521,7 +573,7 @@ class _FrameDetector(AbstractDetector):
                 if bottom_y >= frame_h * 0.98 and w > frame_w * 0.42 and aspect_wh > 1.35:
                     return 0.0
 
-                eff_area = min(float(area), float(frame_w * frame_h) * 0.06)
+                eff_area = min(float(area), float(frame_w * frame_h) * 0.025)
                 aspect_hw = float(h) / max(1.0, float(w))
                 if 0.60 <= aspect_hw <= 2.6:
                     shape_weight = 1.35
@@ -531,14 +583,14 @@ class _FrameDetector(AbstractDetector):
                     shape_weight = 0.25
 
                 bottomness = bottom_y / float(frame_h)
-                if 0.50 <= bottomness <= 0.92:
+                if 0.45 <= bottomness <= 0.88:
                     playfield_weight = 1.25
-                elif 0.30 <= bottomness < 0.50:
-                    playfield_weight = 0.75 + 2.5 * (bottomness - 0.30)
-                elif 0.92 < bottomness <= 0.95:
-                    playfield_weight = 1.05
-                elif bottomness > 0.95:
-                    playfield_weight = 0.55
+                elif 0.30 <= bottomness < 0.45:
+                    playfield_weight = 0.75 + 3.3 * (bottomness - 0.30)
+                elif 0.88 < bottomness <= 0.94:
+                    playfield_weight = 0.85
+                elif bottomness > 0.94:
+                    playfield_weight = 0.25
                 else:
                     playfield_weight = 0.30
 
@@ -552,11 +604,11 @@ class _FrameDetector(AbstractDetector):
                 if expected_floor_y is not None:
                     dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
                     if bottom_y > expected_floor_y and bottomness <= 0.94:
-                        fw_mult = 0.55 + 7.5 * math.exp(-dist_to_floor * 4.0)
+                        fw_mult = 0.45 + 2.4 * math.exp(-dist_to_floor * 3.8)
                     elif bottom_y > expected_floor_y:
-                        fw_mult = 0.05 + 7.5 * math.exp(-dist_to_floor * 7.5)
+                        fw_mult = 0.08 + 1.8 * math.exp(-dist_to_floor * 7.5)
                     else:
-                        fw_mult = 0.08 + 7.5 * math.exp(-dist_to_floor * 7.2)
+                        fw_mult = 0.50 + 2.0 * math.exp(-dist_to_floor * 5.0)
                     return base_score * fw_mult
                 return base_score
             return area

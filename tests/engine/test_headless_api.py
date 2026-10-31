@@ -505,3 +505,62 @@ def test_direct_rgb565_stream_preserves_true_16bit_gradients_with_and_without_gi
     assert only_unique_colors > 600
 
 
+def test_from_start_and_zero_quality_eval_fast_showcase_path(tmp_path: Path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import src.engine.api as api_mod
+
+    monkeypatch.setattr(api_mod, "get_metadata", lambda _p: (1280, 720, 30.0, 120.0))
+    processor = DmdMediaProcessor()
+
+    cfg_30 = DmdClipConfig(max_duration_s=30.0, from_start=True, use_ai_moments=False)
+    assert processor.select_best_clip_window("dummy.mp4", cfg_30) == (0.0, 30.0)
+
+    cfg_60 = DmdClipConfig(max_duration_s=60.0, from_start=True, use_ai_moments=False)
+    assert processor.select_best_clip_window("dummy.mp4", cfg_60) == (0.0, 60.0)
+
+    monkeypatch.setattr(api_mod, "get_metadata", lambda _p: (1280, 720, 30.0, 18.5))
+    assert processor.select_best_clip_window("dummy.mp4", cfg_30) == (0.0, 18.5)
+
+    # End-to-end stream-only conversion with evaluate_quality=False + from_start=True
+    monkeypatch.undo()
+    video_path = tmp_path / "fast_trailer.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(str(video_path), fourcc, 15.0, (160, 90))
+    assert writer.isOpened()
+    for idx in range(45):
+        frame = np.zeros((90, 160, 3), dtype=np.uint8)
+        cv2.rectangle(frame, (10 + idx * 2, 20), (50 + idx * 2, 70), (40, 220, 120), -1)
+        writer.write(frame)
+    writer.release()
+
+    eval_spy = MagicMock(wraps=api_mod.evaluate_gif_quality)
+    monkeypatch.setattr(api_mod, "evaluate_gif_quality", eval_spy)
+
+    out_dir = tmp_path / "fast_out"
+    res = processor.process_video_trailer(
+        input_video=video_path,
+        output_dir=out_dir,
+        config=DmdClipConfig(
+            width=128,
+            height=32,
+            fps=15,
+            max_duration_s=2.0,
+            use_ai_moments=False,
+            use_auto_action=False,
+            from_start=True,
+            evaluate_quality=False,
+        ),
+        export_gif=False,
+        export_rgb565_stream=True,
+        stem="fast_showcase",
+    )
+    assert res.selected_start_s == 0.0
+    assert res.quality_score == 0
+    assert res.gif_path is None
+    assert res.rgb565_stream_path is not None and res.rgb565_stream_path.exists()
+    assert not list(out_dir.glob("*.scores.json"))
+    assert eval_spy.call_count == 0
+
+
+

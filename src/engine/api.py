@@ -30,11 +30,11 @@ from src.engine.conversion.core import (
     resolve_panorama_scroll_axis,
 )
 from src.engine.conversion.ffmpeg_utils import get_metadata
-from src.engine.conversion.quality import evaluate_gif_quality
+from src.engine.conversion.quality import evaluate_gif_quality, load_score_sidecar
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.13"
+__version__ = "8.0.14"
 SUPPORTS_DIRECT_RGB565_STREAM = True
 
 DMDS_MAGIC = b"DMDS"
@@ -65,6 +65,8 @@ class DmdClipConfig:
     saturation: float = 1.85
     gamma: float = 0.90
     dither: Literal["none", "bayer", "floyd_steinberg"] = "none"
+    from_start: bool = False
+    evaluate_quality: bool = True
 
 
 @dataclass(frozen=True)
@@ -168,12 +170,14 @@ def write_rgb565_stream(
             and frames_rgb.shape[2] == width
             and frames_rgb.shape[3] >= 3
         ):
-            sub = frames_rgb[:total_frames]
-            r = sub[:, :, :, 0].astype(np.uint16)
-            g = sub[:, :, :, 1].astype(np.uint16)
-            b = sub[:, :, :, 2].astype(np.uint16)
-            rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-            f.write(rgb565.astype("<u2").tobytes())
+            chunk_frames = 64
+            for start_idx in range(0, total_frames, chunk_frames):
+                sub = frames_rgb[start_idx : min(total_frames, start_idx + chunk_frames)]
+                r = sub[:, :, :, 0].astype(np.uint16)
+                g = sub[:, :, :, 1].astype(np.uint16)
+                b = sub[:, :, :, 2].astype(np.uint16)
+                rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+                f.write(rgb565.astype("<u2").tobytes())
         else:
             for idx in range(total_frames):
                 frame = frames_rgb[idx]
@@ -218,24 +222,89 @@ def _evaluate_rgb_frames_quality(frames_rgb: Sequence[np.ndarray]) -> int:
     return max(10, min(100, int(score)))
 
 
-def _load_raw_rgb24_frames(
+def _stream_raw_rgb24_to_rgb565(
     raw_rgb24_path: Path,
+    out_stream_path: Optional[Path],
     width: int,
     height: int,
-) -> np.ndarray:
-    """Load contiguous `-f rawvideo -pix_fmt rgb24` bytes as `(N, H, W, 3)` uint8 array."""
+    fps: int,
+    evaluate_quality: bool = True,
+    chunk_frames: int = 64,
+) -> Tuple[int, int]:
+    """
+    Stream contiguous `-f rawvideo -pix_fmt rgb24` bytes directly into `.rgb565.stream`
+    in bounded `chunk_frames` slices (< 5 MB peak RAM regardless of clip duration),
+    returning `(frame_count, quality_score)`.
+    """
     frame_rgb24_bytes = int(width) * int(height) * 3
     if frame_rgb24_bytes <= 0 or not raw_rgb24_path.exists():
-        return np.zeros((0, max(1, height), max(1, width), 3), dtype=np.uint8)
-    raw_bytes = raw_rgb24_path.read_bytes()
-    n_frames = len(raw_bytes) // frame_rgb24_bytes
+        return 0, 0
+    file_size = raw_rgb24_path.stat().st_size
+    n_frames = min(65535, file_size // frame_rgb24_bytes)
     if n_frames <= 0:
-        return np.zeros((0, height, width, 3), dtype=np.uint8)
-    return (
-        np.frombuffer(raw_bytes[: n_frames * frame_rgb24_bytes], dtype=np.uint8)
-        .reshape((n_frames, height, width, 3))
-        .copy()
-    )
+        return 0, 0
+
+    quality_score = 0
+    if evaluate_quality:
+        sample_indices = sorted({0, n_frames // 2, n_frames - 1})
+        samples: list[np.ndarray] = []
+        with open(raw_rgb24_path, "rb") as f_sample:
+            for s_idx in sample_indices:
+                f_sample.seek(s_idx * frame_rgb24_bytes)
+                buf = f_sample.read(frame_rgb24_bytes)
+                if len(buf) == frame_rgb24_bytes:
+                    samples.append(
+                        np.frombuffer(buf, dtype=np.uint8).reshape((height, width, 3)).copy()
+                    )
+        quality_score = _evaluate_rgb_frames_quality(samples) if samples else 75
+
+    if out_stream_path is not None:
+        fps_clamped = max(1, min(120, int(fps)))
+        frame_delay_ms = max(1, int(round(1000.0 / fps_clamped)))
+        header = struct.pack(
+            DMDS_HEADER_FORMAT,
+            DMDS_MAGIC,
+            DMDS_VERSION,
+            fps_clamped,
+            int(width),
+            int(height),
+            int(n_frames),
+            frame_delay_ms,
+            0,
+        )
+        out_stream_path = Path(out_stream_path)
+        out_stream_path.parent.mkdir(parents=True, exist_ok=True)
+        step_frames = max(1, int(chunk_frames))
+        with open(raw_rgb24_path, "rb") as f_in, open(out_stream_path, "wb") as f_out:
+            f_out.write(header)
+            remaining = n_frames
+            while remaining > 0:
+                batch_n = min(step_frames, remaining)
+                raw_chunk = f_in.read(batch_n * frame_rgb24_bytes)
+                actual_n = len(raw_chunk) // frame_rgb24_bytes
+                if actual_n <= 0:
+                    break
+                sub = np.frombuffer(
+                    raw_chunk[: actual_n * frame_rgb24_bytes], dtype=np.uint8
+                ).reshape((actual_n, height, width, 3))
+                r = sub[:, :, :, 0].astype(np.uint16)
+                g = sub[:, :, :, 1].astype(np.uint16)
+                b = sub[:, :, :, 2].astype(np.uint16)
+                rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+                f_out.write(rgb565.astype("<u2").tobytes())
+                remaining -= actual_n
+
+    return n_frames, quality_score
+
+
+def _resolve_gif_quality_score(gif_path: Path, evaluate_quality: bool) -> int:
+    if not evaluate_quality or not gif_path.exists():
+        return 0
+    cached = load_score_sidecar(str(gif_path))
+    if isinstance(cached, dict) and "score" in cached:
+        return int(cached.get("score", 75))
+    eval_res = evaluate_gif_quality(str(gif_path))
+    return int(eval_res.get("score", 75))
 
 
 def read_rgb565_stream_header(source: Path | str | bytes) -> dict:
@@ -395,7 +464,7 @@ class DmdMediaProcessor:
             return 0.0, max(1.0, config.max_duration_s)
 
         target_len = max(1.0, float(config.max_duration_s))
-        if duration_full <= target_len * 1.15:
+        if config.from_start or duration_full <= target_len * 1.15:
             return 0.0, round(min(duration_full, target_len), 2)
 
         skip_start = max(0.0, min(duration_full * 0.35, duration_full * config.skip_intro_pct))
@@ -502,6 +571,7 @@ class DmdMediaProcessor:
             "saturation": config.saturation,
             "gamma": config.gamma,
             "dither": config.dither,
+            "skip_quality_eval": not bool(config.evaluate_quality),
             **(
                 {
                     "raw_rgb24_out_path": str(raw_rgb24_tmp),
@@ -513,7 +583,9 @@ class DmdMediaProcessor:
             ),
         }
 
-        frames_arr: Optional[np.ndarray] = None
+        raw_frame_count = 0
+        raw_quality_score = 0
+        final_stream_path: Optional[Path] = None
         try:
             ok, msg = process_file(
                 src_path=str(input_path),
@@ -528,31 +600,35 @@ class DmdMediaProcessor:
             if export_gif and not gif_out_path.exists():
                 raise RuntimeError(f"DMD GIF output missing for {input_path.name}: {msg}")
             if raw_rgb24_tmp is not None:
-                frames_arr = _load_raw_rgb24_frames(raw_rgb24_tmp, config.width, config.height)
-                if len(frames_arr) == 0:
+                need_raw_q = bool(config.evaluate_quality and not (export_gif and gif_out_path.exists()))
+                raw_frame_count, raw_quality_score = _stream_raw_rgb24_to_rgb565(
+                    raw_rgb24_path=raw_rgb24_tmp,
+                    out_stream_path=stream_out_path if export_rgb565_stream else None,
+                    width=config.width,
+                    height=config.height,
+                    fps=eff_stream_fps,
+                    evaluate_quality=need_raw_q,
+                )
+                if raw_frame_count <= 0:
                     raise RuntimeError(
                         f"Direct RGB24 video stream produced 0 frames for {input_path.name}"
                     )
+                if export_rgb565_stream:
+                    final_stream_path = stream_out_path
         finally:
             if raw_rgb24_tmp is not None:
                 raw_rgb24_tmp.unlink(missing_ok=True)
 
-        if frames_arr is not None:
+        if raw_rgb24_tmp is not None:
             effective_fps = eff_stream_fps
-            frame_count = int(frames_arr.shape[0])
+            frame_count = raw_frame_count
             duration_s = round(frame_count / max(1, effective_fps), 2)
             if export_gif and gif_out_path.exists():
-                eval_res = evaluate_gif_quality(str(gif_out_path))
-                quality_score = int(eval_res.get("score", 75))
+                quality_score = _resolve_gif_quality_score(gif_out_path, config.evaluate_quality)
             else:
-                quality_score = _evaluate_rgb_frames_quality(frames_arr)
-            final_stream_path: Optional[Path] = None
-            if export_rgb565_stream:
-                write_rgb565_stream(frames_arr, stream_out_path, fps=effective_fps)
-                final_stream_path = stream_out_path
+                quality_score = raw_quality_score if config.evaluate_quality else 0
         else:
-            eval_res = evaluate_gif_quality(str(gif_out_path))
-            quality_score = int(eval_res.get("score", 75))
+            quality_score = _resolve_gif_quality_score(gif_out_path, config.evaluate_quality)
             frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
             frame_count = len(frames_rgb)
             duration_s = round(frame_count / max(1, effective_fps), 2)
@@ -668,6 +744,7 @@ class DmdMediaProcessor:
         scroll_direction: str = "auto",
         export_gif: bool = True,
         export_rgb565_stream: bool = True,
+        evaluate_quality: bool = True,
         stem: str = "pan",
         callback: Optional[Callable[[str, str], None]] = None,
     ) -> DmdProcessedAssets:
@@ -729,6 +806,7 @@ class DmdMediaProcessor:
             "top_crop_pct": float(top_crop_pct),
             "auto_action_enabled": False,
             "auto_color_enabled": bool(smart_color_boost),
+            "skip_quality_eval": not bool(evaluate_quality),
             **(
                 {
                     "raw_rgb24_out_path": str(raw_rgb24_tmp),
@@ -740,7 +818,9 @@ class DmdMediaProcessor:
             ),
         }
 
-        frames_arr: Optional[np.ndarray] = None
+        raw_frame_count = 0
+        raw_quality_score = 0
+        final_stream_path: Optional[Path] = None
         try:
             ok, msg = process_file(
                 src_path=str(src_path),
@@ -753,31 +833,35 @@ class DmdMediaProcessor:
             if export_gif and not gif_out_path.exists():
                 raise RuntimeError(f"DMD panorama GIF output missing for {stem}: {msg}")
             if raw_rgb24_tmp is not None:
-                frames_arr = _load_raw_rgb24_frames(raw_rgb24_tmp, width, height)
-                if len(frames_arr) == 0:
+                need_raw_q = bool(evaluate_quality and not (export_gif and gif_out_path.exists()))
+                raw_frame_count, raw_quality_score = _stream_raw_rgb24_to_rgb565(
+                    raw_rgb24_path=raw_rgb24_tmp,
+                    out_stream_path=stream_out_path if export_rgb565_stream else None,
+                    width=width,
+                    height=height,
+                    fps=fps_clamped,
+                    evaluate_quality=need_raw_q,
+                )
+                if raw_frame_count <= 0:
                     raise RuntimeError(f"Direct RGB24 panorama produced 0 frames for {stem}")
+                if export_rgb565_stream:
+                    final_stream_path = stream_out_path
         finally:
             if temp_src_path is not None:
                 temp_src_path.unlink(missing_ok=True)
             if raw_rgb24_tmp is not None:
                 raw_rgb24_tmp.unlink(missing_ok=True)
 
-        if frames_arr is not None:
+        if raw_rgb24_tmp is not None:
             effective_fps = fps_clamped
-            frame_count = int(frames_arr.shape[0])
+            frame_count = raw_frame_count
             actual_duration_s = round(frame_count / max(1, effective_fps), 2)
             if export_gif and gif_out_path.exists():
-                eval_res = evaluate_gif_quality(str(gif_out_path))
-                quality_score = int(eval_res.get("score", 75))
+                quality_score = _resolve_gif_quality_score(gif_out_path, evaluate_quality)
             else:
-                quality_score = _evaluate_rgb_frames_quality(frames_arr)
-            final_stream_path: Optional[Path] = None
-            if export_rgb565_stream:
-                write_rgb565_stream(frames_arr, stream_out_path, fps=effective_fps)
-                final_stream_path = stream_out_path
+                quality_score = raw_quality_score if evaluate_quality else 0
         else:
-            eval_res = evaluate_gif_quality(str(gif_out_path))
-            quality_score = int(eval_res.get("score", 75))
+            quality_score = _resolve_gif_quality_score(gif_out_path, evaluate_quality)
             frames_rgb, effective_fps = extract_frames_from_gif(gif_out_path)
             frame_count = len(frames_rgb)
             actual_duration_s = round(frame_count / max(1, effective_fps), 2)
