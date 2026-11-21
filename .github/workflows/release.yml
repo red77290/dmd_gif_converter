@@ -65,13 +65,7 @@ jobs:
       - name: Provision portable FFmpeg & FFprobe (macOS)
         if: runner.os == 'macOS'
         run: |
-          if ! (which ffmpeg && which ffprobe); then
-            if brew install ffmpeg-full && brew link --overwrite --force ffmpeg-full; then
-              echo "Installed Homebrew ffmpeg-full (includes libfreetype/drawtext)"
-            else
-              brew install ffmpeg
-            fi
-          fi
+          which ffmpeg && which ffprobe || brew install ffmpeg
           ffmpeg -version
           ffprobe -version
 

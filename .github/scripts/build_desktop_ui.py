@@ -40,8 +40,9 @@ YOLO_MODEL_URL = (
 )
 YOLO_MIN_BYTES = 5_000_000
 
-RUNTIME_HOOK_CODE = '''\
+RUNTIME_HOOK_CODE = r'''
 import os
+import re as _re
 import shutil
 import stat
 import subprocess
@@ -60,17 +61,24 @@ os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 
 # 3. Prepend bundled portable ffmpeg/ffprobe directory to PATH
 _base_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
-_bin_dir = _base_dir / "bin"
-if _bin_dir.is_dir():
-    if sys.platform != "win32":
-        for _tool in ("ffmpeg", "ffprobe"):
-            _tp = _bin_dir / _tool
-            if _tp.is_file() and not os.access(_tp, os.X_OK):
-                try:
-                    _tp.chmod(_tp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                except OSError:
-                    pass
-    os.environ["PATH"] = f"{_bin_dir}{os.pathsep}{_base_dir}{os.pathsep}" + os.environ.get("PATH", "")
+_candidate_bins = [
+    _base_dir.parent / "Resources" / "ffmpeg_bin",  # macOS .app isolated FFmpeg dir
+    _base_dir / "bin",                              # Windows / Linux --onefile FFmpeg dir
+]
+_prepend_paths = []
+for _bdir in _candidate_bins:
+    if _bdir.is_dir():
+        if sys.platform != "win32":
+            for _tool in ("ffmpeg", "ffprobe"):
+                _tp = _bdir / _tool
+                if _tp.is_file() and not os.access(_tp, os.X_OK):
+                    try:
+                        _tp.chmod(_tp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                    except OSError:
+                        pass
+        _prepend_paths.append(str(_bdir))
+if _prepend_paths:
+    os.environ["PATH"] = os.pathsep.join([*_prepend_paths, str(_base_dir), os.environ.get("PATH", "")])
 
 # 4. Configure bundled CA certificates for HTTPS (GIF search / requests / ddgs)
 _cacert = _base_dir / "certifi" / "cacert.pem"
@@ -94,11 +102,12 @@ if _bundled_yolo.is_file():
 
 # 6. Prevent flashing cmd.exe console windows & escape Windows drive colons in drawtext fontfile
 if sys.platform == "win32":
-    import re as _re
-
     _orig_popen_init = subprocess.Popen.__init__
     _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
     _DRAWTEXT_COLON_RE = _re.compile(r"(drawtext=fontfile=')([A-Za-z]):/")
+
+    def _escape_drawtext_win(arg: str) -> str:
+        return _DRAWTEXT_COLON_RE.sub(lambda m: m.group(1) + m.group(2) + "\\:/", arg)
 
     def _quiet_popen_init(self, *args, **kwargs):
         if not kwargs.get("creationflags"):
@@ -107,7 +116,7 @@ if sys.platform == "win32":
             prog = str(args[0][0]).lower()
             if prog.endswith(("ffmpeg", "ffmpeg.exe")):
                 patched_cmd = [
-                    _DRAWTEXT_COLON_RE.sub(r"\1\2\\:/", a) if isinstance(a, str) else a
+                    _escape_drawtext_win(a) if isinstance(a, str) else a
                     for a in args[0]
                 ]
                 args = (patched_cmd, *args[1:])
@@ -124,7 +133,7 @@ if sys.platform == "darwin":
         pass
 '''
 
-ENTRYPOINT_CODE = '''\
+ENTRYPOINT_CODE = r'''
 import logging
 import multiprocessing
 import os
@@ -158,7 +167,8 @@ def _run_standalone_selftest() -> int:
     try:
         assert getattr(sys, "frozen", False), "Binary is not running in PyInstaller frozen mode"
         meipass = Path(getattr(sys, "_MEIPASS")).resolve()
-        _log(f"[SELFTEST] Frozen _MEIPASS = {meipass}")
+        bundle_root = meipass.parent if sys.platform == "darwin" else meipass
+        _log(f"[SELFTEST] Frozen _MEIPASS = {meipass} (bundle_root = {bundle_root})")
 
         # 1. Verify bundled portable ffmpeg & ffprobe take precedence over system PATH
         for tool in ("ffmpeg", "ffprobe"):
@@ -166,8 +176,8 @@ def _run_standalone_selftest() -> int:
             assert found, f"Bundled '{tool}' not found in PATH"
             resolved = Path(found).resolve()
             _log(f"[SELFTEST] {tool} -> {found} (resolved: {resolved})")
-            assert meipass in resolved.parents or meipass in Path(found).parents, (
-                f"{tool} did not resolve inside bundle ({found} vs {meipass})"
+            assert bundle_root in resolved.parents or bundle_root in Path(found).parents, (
+                f"{tool} did not resolve inside bundle ({found} vs {bundle_root})"
             )
 
         ff_filters = subprocess.run(
@@ -305,12 +315,12 @@ def _run_standalone_selftest() -> int:
         _log("[SELFTEST] End-to-end GIF + Auto-Action AI + text overlay + DMDS stream PASSED")
         rc = 0
     except Exception:
-        _log("[SELFTEST] FAILED:\\n" + traceback.format_exc())
+        _log("[SELFTEST] FAILED:\n" + traceback.format_exc())
         rc = 1
 
     if report_file:
         try:
-            Path(report_file).write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+            Path(report_file).write_text("\n".join(lines) + "\n", encoding="utf-8")
         except OSError:
             pass
     return rc
@@ -600,11 +610,6 @@ def _prepare_common_pyinstaller_args(
         # Bundle YOLOv8n ONNX model for 100% offline out-of-the-box Auto-Action
         "--add-data",
         f"{yolo_path}{sep}models",
-        # Bundle portable FFmpeg & FFprobe binaries
-        "--add-binary",
-        f"{Path(ffmpeg_path).resolve()}{sep}bin",
-        "--add-binary",
-        f"{Path(ffprobe_path).resolve()}{sep}bin",
         # Collect GUI, AI, search, and SSL packages + data assets
         "--collect-all",
         "customtkinter",
@@ -649,6 +654,17 @@ def _prepare_common_pyinstaller_args(
         "ruff",
     ]
 
+    # On Windows/Linux (--onefile), bundle static ffmpeg/ffprobe via --add-binary;
+    # on macOS (.app), bundle into isolated Contents/Resources/ffmpeg_bin/lib to avoid
+    # dylib filename collisions with Pillow / OpenCV inside Contents/Frameworks/.
+    if sys.platform != "darwin":
+        args += [
+            "--add-binary",
+            f"{Path(ffmpeg_path).resolve()}{sep}bin",
+            "--add-binary",
+            f"{Path(ffprobe_path).resolve()}{sep}bin",
+        ]
+
     if sys.platform == "win32":
         args += ["--collect-submodules", "send2trash.win"]
     elif sys.platform == "darwin":
@@ -674,13 +690,17 @@ def _otool_deps(macho_file: Path) -> list[str]:
     return deps
 
 
-def _relocate_and_audit_macos_dylibs(app_bundle: Path) -> None:
+def _bundle_and_audit_macos_ffmpeg(app_bundle: Path) -> None:
     """
-    Ensure zero `/opt/homebrew` or `/usr/local` dylib references remain inside
-    `DMD GIF Converter.app` (including `Contents/Frameworks/bin/ffmpeg` and `ffprobe`),
-    so the `.dmg` works on clean Macs without Homebrew installed.
+    Copy `ffmpeg` + `ffprobe` into `Contents/Resources/ffmpeg_bin/` and relocate all of
+    their Homebrew `.dylib` dependencies into a private `Contents/Resources/ffmpeg_bin/lib/`
+    folder (100% isolated from Pillow/OpenCV `.dylib`s in `Contents/Frameworks/`), then
+    audit the entire `.app` for zero `/opt/homebrew` or `/usr/local` dylib leaks.
     """
-    frameworks_dir = app_bundle / "Contents" / "Frameworks"
+    ff_bin_dir = app_bundle / "Contents" / "Resources" / "ffmpeg_bin"
+    ff_lib_dir = ff_bin_dir / "lib"
+    ff_lib_dir.mkdir(parents=True, exist_ok=True)
+
     external_prefixes = (
         "/opt/homebrew/",
         "/usr/local/opt/",
@@ -688,26 +708,28 @@ def _relocate_and_audit_macos_dylibs(app_bundle: Path) -> None:
         "/usr/local/lib/",
     )
 
-    def _collect_macho_targets() -> list[Path]:
-        targets: list[Path] = []
-        for p in app_bundle.rglob("*"):
-            if p.is_symlink() or not p.is_file():
-                continue
-            if p.suffix in (".dylib", ".so") or p.parent.name in ("MacOS", "bin"):
-                targets.append(p)
-        return targets
+    for tool in ("ffmpeg", "ffprobe"):
+        found = shutil.which(tool)
+        if not found:
+            raise RuntimeError(f"macOS build missing '{tool}' in PATH")
+        dst_tool = ff_bin_dir / tool
+        shutil.copy2(Path(found).resolve(), dst_tool)
+        dst_tool.chmod(0o755)
 
-    visited: set[Path] = set()
-    for _pass in range(6):
+    # Relocate private FFmpeg dylib closure inside Contents/Resources/ffmpeg_bin/lib/
+    for _pass in range(12):
         progressed = False
-        for target in _collect_macho_targets():
+        ff_targets = [
+            ff_bin_dir / "ffmpeg",
+            ff_bin_dir / "ffprobe",
+            *sorted(ff_lib_dir.glob("*.dylib")),
+        ]
+        for target in ff_targets:
             deps = _otool_deps(target)
             if not deps:
                 continue
-            rel_to_fw = os.path.relpath(frameworks_dir, target.parent)
-            loader_prefix = (
-                "@loader_path" if rel_to_fw == "." else f"@loader_path/{rel_to_fw}"
-            )
+            is_exe = target.parent == ff_bin_dir
+            loader_prefix = "@loader_path/lib" if is_exe else "@loader_path"
             for dep in deps:
                 if not dep.startswith(external_prefixes):
                     continue
@@ -716,7 +738,7 @@ def _relocate_and_audit_macos_dylibs(app_bundle: Path) -> None:
                     raise RuntimeError(
                         f"Missing external dylib '{dep}' referenced by {target}"
                     )
-                bundled_dylib = frameworks_dir / src_dylib.name
+                bundled_dylib = ff_lib_dir / src_dylib.name
                 if not bundled_dylib.exists():
                     shutil.copy2(src_dylib, bundled_dylib)
                     bundled_dylib.chmod(0o755)
@@ -739,21 +761,31 @@ def _relocate_and_audit_macos_dylibs(app_bundle: Path) -> None:
                         check=True,
                     )
                     progressed = True
-            visited.add(target)
         if not progressed:
             break
 
+    # Audit the entire .app bundle (both Contents/Frameworks and Contents/Resources/ffmpeg_bin)
     leaks: list[str] = []
-    for target in _collect_macho_targets():
-        for dep in _otool_deps(target):
-            if dep.startswith(external_prefixes):
-                leaks.append(f"{target.relative_to(app_bundle)} -> {dep}")
+    macho_count = 0
+    for target in app_bundle.rglob("*"):
+        if target.is_symlink() or not target.is_file():
+            continue
+        if target.suffix in (".dylib", ".so") or target.parent.name in ("MacOS", "ffmpeg_bin"):
+            deps = _otool_deps(target)
+            if deps:
+                macho_count += 1
+            for dep in deps:
+                if dep.startswith(external_prefixes):
+                    leaks.append(f"{target.relative_to(app_bundle)} -> {dep}")
     if leaks:
         raise RuntimeError(
             "Unrelocated Homebrew / usr-local dylib references detected:\n  "
             + "\n  ".join(leaks[:15])
         )
-    print(f"[MACOS] Audited {len(visited)} Mach-O binaries: 0 external Homebrew dylib leaks.")
+    print(
+        f"[MACOS] Bundled isolated FFmpeg ({len(list(ff_lib_dir.glob('*.dylib')))} dylibs) "
+        f"& audited {macho_count} Mach-O files: 0 external leaks."
+    )
 
 
 def _sign_macos_app_bundle(app_bundle: Path, signing_identity: str) -> None:
@@ -765,12 +797,21 @@ def _sign_macos_app_bundle(app_bundle: Path, signing_identity: str) -> None:
         f"[MACOS] Signing {app_bundle.name} inside-out "
         f"(identity={'Developer ID' if signing_identity != '-' else 'ad-hoc'}) ..."
     )
+    ff_bin_dir = app_bundle / "Contents" / "Resources" / "ffmpeg_bin"
+    if ff_bin_dir.is_dir():
+        for dylib in sorted((ff_bin_dir / "lib").glob("*.dylib")):
+            subprocess.run([*base_sign, "--sign", signing_identity, str(dylib)], check=True)
+        for tool in ("ffmpeg", "ffprobe"):
+            tp = ff_bin_dir / tool
+            if tp.is_file():
+                subprocess.run([*base_sign, "--sign", signing_identity, str(tp)], check=True)
+
     fw_dir = app_bundle / "Contents" / "Frameworks"
     if fw_dir.is_dir():
         for item in sorted(fw_dir.rglob("*")):
             if item.is_symlink() or not item.is_file():
                 continue
-            if item.suffix in (".dylib", ".so") or item.parent.name == "bin":
+            if item.suffix in (".dylib", ".so"):
                 subprocess.run([*base_sign, "--sign", signing_identity, str(item)], check=True)
 
     subprocess.run(
@@ -1001,7 +1042,7 @@ def _build_macos_dmg(run_selftest: bool) -> Path:
     with plist_path.open("wb") as fp:
         plistlib.dump(plist_data, fp)
 
-    _relocate_and_audit_macos_dylibs(final_app)
+    _bundle_and_audit_macos_ffmpeg(final_app)
 
     signing_identity = (os.environ.get("APPLE_SIGNING_IDENTITY") or "").strip() or "-"
     _sign_macos_app_bundle(final_app, signing_identity)
