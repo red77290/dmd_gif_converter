@@ -4,8 +4,10 @@
 
 | Problème | Solution |
 |---|---|
-| `ffmpeg: command not found` | FFmpeg non installé ou pas dans le PATH |
-| Aperçu vide | FFmpeg doit être installé et accessible dans le PATH |
+| Windows SmartScreen (« Windows a protégé votre ordinateur ») sur le `.exe` | Cliquez sur **Informations complémentaires** → **Exécuter quand même** |
+| macOS Gatekeeper bloque `DMD GIF Converter.app` (`.dmg`) | Faites Clic droit sur l'app → **Ouvrir**, ou exécutez `xattr -cr "/Applications/DMD GIF Converter.app"` dans le Terminal |
+| `ffmpeg: command not found` | Utilisez le `.exe` / `.dmg` autonome (FFmpeg déjà inclus), ou installez FFmpeg dans le PATH depuis les sources |
+| Aperçu vide | Utilisez le `.exe` / `.dmg` autonome, ou vérifiez que FFmpeg est dans le PATH |
 | `[ERROR] xxx — metadata unreadable` | Fichier corrompu ou format non supporté |
 | Conversion très lente | Augmenter `--workers` (utiliser `--no-auto-workers` pour forcer) |
 | Couleurs trop saturées | Passer en `--mode anime` ou baisser `--saturation` en mode custom |

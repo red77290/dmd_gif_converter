@@ -4,9 +4,14 @@ Welcome to the DMD GIF Converter. This tool makes it trivial to convert folders 
 
 ## 🖥️ 1. Using the GUI
 
-To launch the graphical interface:
+### Option A — Standalone App (Recommended — Zero Installation)
+Download the ready-to-run package from **[GitHub Releases](https://github.com/red77290/dmd_gif_converter/releases/latest)** — Python, FFmpeg, pixel-art fonts, and the YOLOv8n AI model are **all included out of the box**:
+- **🪟 Windows (x64)**: Download **`DMD_GIF_Converter_Windows_x64.exe`** and double-click it *(if Windows SmartScreen prompts you, click **More info** → **Run anyway**)*.
+- **🍎 macOS (Apple Silicon `arm64`)**: Download **`DMD_GIF_Converter_macOS_arm64.dmg`**, drag **`DMD GIF Converter.app`** into **`Applications`**, and open it *(if macOS Gatekeeper blocks first launch, right-click → **Open** or run `xattr -cr "/Applications/DMD GIF Converter.app"` in Terminal)*.
+
+### Option B — From Source (`git clone` / Linux)
 - **Windows**: Double-click `launch_ui.bat`
-- **Mac/Linux**: Run `./launch_ui.sh`
+- **macOS / Linux**: Run `./launch_ui.sh`
 
 ### The Ultimate "Zero Config" Workflow:
 1. Look at the top right of the application (in the `⚙️ Parameters` panel).

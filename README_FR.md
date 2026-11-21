@@ -75,12 +75,27 @@ Marre de recadrer manuellement vos vidéos pour votre matrice LED basse résolut
 
 ## 🚀 Démarrage rapide
 
+### Option 1 — Application Autonome (Recommandé — Zéro Installation)
+
+Aucune installation de Python, Homebrew ou FFmpeg requise — tout est déjà embarqué (FFmpeg/FFprobe portables, interface CustomTkinter, OpenCV, ONNXRuntime, modèle IA YOLOv8n et polices pixel-art) !
+
+Téléchargez la dernière version depuis **[GitHub Releases](https://github.com/red77290/dmd_gif_converter/releases/latest)** :
+
+| OS | Fichier | Lancement |
+|---|---|---|
+| 🪟 **Windows (x64)** | `DMD_GIF_Converter_Windows_x64.exe` | Double-cliquez pour lancer directement *(SmartScreen : **Informations complémentaires** → **Exécuter quand même**)* |
+| 🍎 **macOS (Apple Silicon `arm64`)** | `DMD_GIF_Converter_macOS_arm64.dmg` | Ouvrez le `.dmg`, glissez **`DMD GIF Converter.app`** dans **`Applications`**, puis lancez-la *(Gatekeeper : Clic droit → **Ouvrir** ou `xattr -cr "/Applications/DMD GIF Converter.app"`)* |
+
+---
+
+### Option 2 — Depuis les sources (`git clone` — Linux / CLI / Développeurs)
+
 ```bash
 git clone https://github.com/red77290/dmd_gif_converter.git
 cd dmd_gif_converter
 ```
 
-Lancez ensuite le script correspondant à votre OS — **tout est configuré automatiquement à la première exécution** (création du venv, installation des dépendances) :
+Lancez ensuite le script correspondant à votre OS — **les dépendances Python sont installées automatiquement à la première exécution** (nécessite Python 3.10+ et FFmpeg sur le système, voir [Prérequis](#prérequis)) :
 
 | OS | Commande |
 |---|---|
@@ -128,7 +143,9 @@ Un problème avec OpenCV ou FFmpeg ? Besoin d'aide pour l'installation sur un OS
 
 ## 📋 Prérequis
 
-### 1 — Système : Python 3.8+ et FFmpeg
+> **Sources / CLI / Linux uniquement :** Vous utilisez l'application autonome `.exe` (Windows) ou `.dmg` (macOS) ? Ignorez toute cette section — Python, FFmpeg et toutes les bibliothèques IA/UI sont déjà inclus !
+
+### 1 — Système : Python 3.10+ et FFmpeg
 
 #### 🍎 macOS
 

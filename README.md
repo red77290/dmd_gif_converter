@@ -76,12 +76,27 @@ Tired of manually cropping and adjusting videos for your low-res LED matrix? Thi
 
 ## 🚀 Quick start
 
+### Option 1 — Standalone App (Recommended — Zero Setup)
+
+No Python, Homebrew, or FFmpeg installation required — everything (portable FFmpeg/FFprobe, CustomTkinter UI, OpenCV, ONNXRuntime, YOLOv8n AI model, and pixel-art fonts) is bundled inside!
+
+Download the latest release from **[GitHub Releases](https://github.com/red77290/dmd_gif_converter/releases/latest)**:
+
+| OS | File | How to run |
+|---|---|---|
+| 🪟 **Windows (x64)** | `DMD_GIF_Converter_Windows_x64.exe` | Double-click to launch directly *(SmartScreen: **More info** → **Run anyway**)* |
+| 🍎 **macOS (Apple Silicon `arm64`)** | `DMD_GIF_Converter_macOS_arm64.dmg` | Open `.dmg`, drag **`DMD GIF Converter.app`** to **`Applications`**, and launch *(Gatekeeper: right-click → **Open** or `xattr -cr "/Applications/DMD GIF Converter.app"`)* |
+
+---
+
+### Option 2 — From Source (`git clone` — Linux / CLI / Developers)
+
 ```bash
 git clone https://github.com/red77290/dmd_gif_converter.git
 cd dmd_gif_converter
 ```
 
-Then launch with the script for your OS — **it sets everything up automatically on the first run** (creates a Python venv, installs dependencies):
+Then launch with the script for your OS — **it sets up Python dependencies automatically on the first run** (requires system Python 3.10+ and FFmpeg, see [Requirements](#requirements)):
 
 | OS | Command |
 |---|---|
@@ -129,7 +144,9 @@ Running into OpenCV or FFmpeg issues? Need help with installation on a specific 
 
 ## 📋 Requirements
 
-### 1 — System: Python 3.8+ and FFmpeg
+> **Source / CLI / Linux only:** Using the standalone `.exe` (Windows) or `.dmg` (macOS)? Skip this entire section — Python, FFmpeg, and all AI/UI libraries are already included!
+
+### 1 — System: Python 3.10+ and FFmpeg
 
 #### 🍎 macOS
 ```bash

@@ -4,9 +4,14 @@ Bienvenue dans le DMD GIF Converter. Cet outil permet de convertir très facilem
 
 ## 🖥️ 1. Utilisation de l'Interface Graphique (GUI)
 
-Pour lancer l'interface graphique :
+### Option A — Application Autonome (Recommandé — Zéro Installation)
+Téléchargez directement la version prête à l'emploi depuis **[GitHub Releases](https://github.com/red77290/dmd_gif_converter/releases/latest)** — Python, FFmpeg, les polices pixel-art et le modèle IA YOLOv8n sont **100 % inclus** :
+- **🪟 Windows (x64)** : Téléchargez **`DMD_GIF_Converter_Windows_x64.exe`** et double-cliquez dessus *(si Windows SmartScreen s'affiche, cliquez sur **Informations complémentaires** → **Exécuter quand même**)*.
+- **🍎 macOS (Apple Silicon `arm64`)** : Téléchargez **`DMD_GIF_Converter_macOS_arm64.dmg`**, glissez **`DMD GIF Converter.app`** dans **`Applications`**, puis lancez-la *(si Gatekeeper bloque le premier lancement, faites Clic droit → **Ouvrir** ou exécutez `xattr -cr "/Applications/DMD GIF Converter.app"` dans le Terminal)*.
+
+### Option B — Depuis les sources (`git clone` / Linux)
 - **Windows** : Double-cliquez sur `launch_ui.bat`
-- **Mac/Linux** : Lancez `./launch_ui.sh`
+- **macOS / Linux** : Lancez `./launch_ui.sh`
 
 ### Le workflow "Zéro Config" ultime :
 1. Regardez en haut à droite de l'application (dans le panneau `⚙️ Paramètres`).
