@@ -92,14 +92,25 @@ if _bundled_yolo.is_file():
     except OSError:
         pass
 
-# 6. Prevent flashing cmd.exe console windows when spawning ffmpeg/ffprobe on Windows
+# 6. Prevent flashing cmd.exe console windows & escape Windows drive colons in drawtext fontfile
 if sys.platform == "win32":
+    import re as _re
+
     _orig_popen_init = subprocess.Popen.__init__
     _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    _DRAWTEXT_COLON_RE = _re.compile(r"(drawtext=fontfile=')([A-Za-z]):/")
 
     def _quiet_popen_init(self, *args, **kwargs):
         if not kwargs.get("creationflags"):
             kwargs["creationflags"] = _CREATE_NO_WINDOW
+        if args and isinstance(args[0], (list, tuple)) and args[0]:
+            prog = str(args[0][0]).lower()
+            if prog.endswith(("ffmpeg", "ffmpeg.exe")):
+                patched_cmd = [
+                    _DRAWTEXT_COLON_RE.sub(r"\1\2\\:/", a) if isinstance(a, str) else a
+                    for a in args[0]
+                ]
+                args = (patched_cmd, *args[1:])
         _orig_popen_init(self, *args, **kwargs)
 
     subprocess.Popen.__init__ = _quiet_popen_init
@@ -114,6 +125,7 @@ if sys.platform == "darwin":
 '''
 
 ENTRYPOINT_CODE = '''\
+import logging
 import multiprocessing
 import os
 import shutil
@@ -133,6 +145,14 @@ def _run_standalone_selftest() -> int:
             print(msg, flush=True)
         except Exception:
             pass
+
+    class _SelftestLogHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.levelno >= logging.WARNING or "[FFMPEG]" in record.getMessage():
+                _log(f"[CORE-LOG] {record.getMessage()}")
+
+    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(_SelftestLogHandler())
 
     report_file = os.environ.get("DMD_SELFTEST_REPORT_FILE", "").strip()
     try:
@@ -205,7 +225,7 @@ def _run_standalone_selftest() -> int:
         # 4. Verify UI, Tkinter >= 8.6, ImageTk, CustomTkinter, GIF search & Trash modules
         import certifi
         import customtkinter  # noqa: F401
-        import cv2  # noqa: F401
+        import cv2
         import darkdetect  # noqa: F401
         import ddgs  # noqa: F401
         import PIL.ImageTk  # noqa: F401
@@ -220,28 +240,21 @@ def _run_standalone_selftest() -> int:
         assert Path(certifi.where()).is_file(), "Bundled certifi CA bundle missing"
         _log(f"[SELFTEST] UI & search stack verified (Tk {tk.TkVersion})")
 
-        # 5. End-to-end conversion test (synthetic MP4 + text overlay + DMDS stream)
+        # 5. End-to-end conversion test (synthetic MP4 + Auto-Action + text overlay + DMDS)
         with tempfile.TemporaryDirectory(prefix="dmd_selftest_") as tmp:
             tmp_dir = Path(tmp)
             src_mp4 = tmp_dir / "sample.mp4"
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "testsrc=duration=1.2:size=320x180:rate=15",
-                    "-c:v",
-                    "libx264",
-                    "-pix_fmt",
-                    "yuv420p",
-                    str(src_mp4),
-                ],
-                capture_output=True,
-                check=True,
-                timeout=30,
+            writer = cv2.VideoWriter(
+                str(src_mp4), cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (320, 180)
             )
+            assert writer.isOpened(), "cv2.VideoWriter failed to open synthetic MP4"
+            for idx in range(24):
+                frm = np.zeros((180, 320, 3), dtype=np.uint8)
+                x0 = (idx * 8) % 240
+                cv2.rectangle(frm, (x0, 40), (x0 + 60, 140), (0, 200, 255), -1)
+                writer.write(frm)
+            writer.release()
+
             out_gif = tmp_dir / "out.gif"
             params = dict(conv_core.DEFAULT_PARAMS)
             params.update(
@@ -252,6 +265,8 @@ def _run_standalone_selftest() -> int:
                     "text_overlay_enabled": True,
                     "text_content": "ARCADE",
                     "text_font_file": "HelvetiPixel.ttf",
+                    "verbose": True,
+                    "log_level": "DEBUG",
                 }
             )
             ok, msg = conv_core.process_file(str(src_mp4), str(out_gif), params)
@@ -741,22 +756,34 @@ def _relocate_and_audit_macos_dylibs(app_bundle: Path) -> None:
     print(f"[MACOS] Audited {len(visited)} Mach-O binaries: 0 external Homebrew dylib leaks.")
 
 
-def _sign_and_create_macos_dmg(app_bundle: Path, dmg_path: Path) -> None:
-    signing_identity = (os.environ.get("APPLE_SIGNING_IDENTITY") or "").strip() or "-"
-    sign_cmd = ["codesign", "--force", "--deep"]
+def _sign_macos_app_bundle(app_bundle: Path, signing_identity: str) -> None:
+    base_sign = ["codesign", "--force"]
     if signing_identity != "-":
-        sign_cmd += ["--options", "runtime", "--timestamp"]
-    sign_cmd += ["--sign", signing_identity, str(app_bundle)]
+        base_sign += ["--options", "runtime", "--timestamp"]
 
     print(
-        f"[MACOS] Signing {app_bundle.name} "
+        f"[MACOS] Signing {app_bundle.name} inside-out "
         f"(identity={'Developer ID' if signing_identity != '-' else 'ad-hoc'}) ..."
     )
-    subprocess.run(sign_cmd, check=True)
+    fw_dir = app_bundle / "Contents" / "Frameworks"
+    if fw_dir.is_dir():
+        for item in sorted(fw_dir.rglob("*")):
+            if item.is_symlink() or not item.is_file():
+                continue
+            if item.suffix in (".dylib", ".so") or item.parent.name == "bin":
+                subprocess.run([*base_sign, "--sign", signing_identity, str(item)], check=True)
+
+    subprocess.run(
+        [*base_sign, "--deep", "--sign", signing_identity, str(app_bundle)], check=True
+    )
     subprocess.run(
         ["codesign", "--verify", "--deep", "--strict", str(app_bundle)], check=True
     )
 
+
+def _create_and_notarize_macos_dmg(
+    app_bundle: Path, dmg_path: Path, signing_identity: str
+) -> None:
     if dmg_path.exists():
         dmg_path.unlink()
     dmg_path.parent.mkdir(parents=True, exist_ok=True)
@@ -976,13 +1003,16 @@ def _build_macos_dmg(run_selftest: bool) -> Path:
 
     _relocate_and_audit_macos_dylibs(final_app)
 
-    os.symlink("/Applications", staging_dir / "Applications")
-    dmg_path = DIST_DESKTOP_DIR / f"DMD_GIF_Converter_macOS_{arch}.dmg"
-    _sign_and_create_macos_dmg(final_app, dmg_path)
+    signing_identity = (os.environ.get("APPLE_SIGNING_IDENTITY") or "").strip() or "-"
+    _sign_macos_app_bundle(final_app, signing_identity)
 
     if run_selftest:
         macos_bin = final_app / "Contents" / "MacOS" / app_name
         _run_hermetic_selftest(macos_bin)
+
+    os.symlink("/Applications", staging_dir / "Applications")
+    dmg_path = DIST_DESKTOP_DIR / f"DMD_GIF_Converter_macOS_{arch}.dmg"
+    _create_and_notarize_macos_dmg(final_app, dmg_path, signing_identity)
 
     shutil.rmtree(staging_dir, ignore_errors=True)
     size_mb = dmg_path.stat().st_size / (1024 * 1024)
