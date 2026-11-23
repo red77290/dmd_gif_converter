@@ -21,8 +21,8 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from src.engine.conversion.core import (
-    get_metadata, process_file, process_folder,
-    DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
+    get_metadata, is_static_image_source, process_file, process_folder,
+    resolve_panorama_scroll_axis, DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
 )
 from src.engine.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
 from src.ui.widgets import _InfoBadge
@@ -393,8 +393,9 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                                      text="⏳  Loading preview…",
                                      fill="#7ec8e3", font=("Helvetica", 12), justify="center",
                                      width=cw - 20, tags="info_text")
+        is_static_img = not is_converted and is_static_image_source(file_path)
         _, __, ___, dur = get_metadata(file_path)
-        self._source_duration = dur if dur and dur > 0 else 10.0
+        self._source_duration = 10.0 if is_static_img else (dur if dur and dur > 0 else 10.0)
         self.panel._update_trim_sliders()
 
         if is_converted:
@@ -414,7 +415,10 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             self._draw_canvas_idle()
             self._draw_auto_canvas_idle()
         else:
-            self.panel.controls.show_trim()
+            if is_static_img:
+                self.panel.controls.hide_trim()
+            else:
+                self.panel.controls.show_trim()
             self.panel.controls.hide_diagnosis()
             threading.Thread(target=self._extract_source_frames,
                              args=(file_path, getattr(self, "_src_gen_id", 0)), daemon=True).start()
@@ -440,6 +444,25 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
 
     def _extract_source_frames(self, file_path, gen_id):
         tmpdir = tempfile.mkdtemp(prefix="dmd_src_")
+        if is_static_image_source(file_path):
+            pil_frames, delays = [], []
+            try:
+                from PIL import ImageOps
+                with Image.open(file_path) as raw_im:
+                    im = ImageOps.exif_transpose(raw_im)
+                    if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
+                        rgba = im.convert("RGBA")
+                        bg = Image.new("RGBA", rgba.size, (13, 13, 26, 255))
+                        bg.alpha_composite(rgba)
+                        pil_frames.append(bg.convert("RGB"))
+                    else:
+                        pil_frames.append(im.convert("RGB").copy())
+                    delays.append(1000)
+            except Exception:
+                pass
+            self.after(0, lambda: self._on_source_frames_ready(pil_frames, delays, tmpdir, file_path, gen_id))
+            return
+
         fps_prev = 12.5
         dur = min(self._source_duration, 10.0)
         cmd = ["ffmpeg", "-y", "-i", file_path, "-t", str(dur),
@@ -482,21 +505,29 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         self._src_frames = [None] * len(pil_frames)
         self._src_delays = delays
         self._src_idx = 0
-        self._src_info.configure(
-            text=f"{Path(file_path).name}   ·   {len(pil_frames)} frames   ·   {self._source_duration:.1f} s")
+        if len(pil_frames) == 1 and is_static_image_source(file_path):
+            p0 = pil_frames[0]
+            self._src_info.configure(
+                text=f"{Path(file_path).name}   ·   Static image ({p0.width}×{p0.height})")
+        else:
+            self._src_info.configure(
+                text=f"{Path(file_path).name}   ·   {len(pil_frames)} frames   ·   {self._source_duration:.1f} s")
         self._animate_src()
 
     def _animate_src(self):
         if not self._src_pil_frames:
             return
         num = len(self._src_pil_frames)
-        idx = self._src_idx % (num + 1)
-        if idx == num:
-            self._src_canvas.delete("all")
-            self._src_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
-            self._src_idx += 1
-            self._src_job = self.after(1000, self._animate_src)
-            return
+        if num == 1:
+            idx = 0
+        else:
+            idx = self._src_idx % (num + 1)
+            if idx == num:
+                self._src_canvas.delete("all")
+                self._src_canvas.create_rectangle(0, 0, 9999, 9999, fill="black", outline="")
+                self._src_idx += 1
+                self._src_job = self.after(1000, self._animate_src)
+                return
             
         cw = getattr(self, "_last_src_w", SRC_CANVAS_W)
         ch = getattr(self, "_last_src_h", SRC_CANVAS_H)
@@ -511,13 +542,14 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
             else:
                 new_h = ch
                 new_w = int(ch * img_ratio)
-            resized = pil_img.resize((new_w, new_h), Image.BILINEAR)
+            resized = pil_img.resize((max(1, new_w), max(1, new_h)), Image.BILINEAR)
             self._src_frames[idx] = ImageTk.PhotoImage(resized)
             
         self._src_canvas.delete("all")
         self._src_canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._src_frames[idx])
-        self._src_idx += 1
-        self._src_job = self.after(self._src_delays[idx] if self._src_delays else 80, self._animate_src)
+        if num > 1:
+            self._src_idx += 1
+            self._src_job = self.after(self._src_delays[idx] if self._src_delays else 80, self._animate_src)
 
     def show_source_preview(self):
         if not self._current_path:
@@ -585,6 +617,7 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         except Exception:
             pass
             
+        src_w, src_h = 0, 0
         try:
             if getattr(self, "_current_path", None):
                 from src.engine.conversion.ffmpeg_utils import get_metadata
@@ -594,6 +627,10 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
                         is_perfect_ratio = True
         except Exception:
             pass
+
+        if not is_original_mode and is_static_image_source(src):
+            self._on_auto_static_poster(src_w, src_h, tw, th)
+            return
 
         if is_original_mode or (bypass_active and is_perfect_ratio):
             self._on_auto_bypass()
@@ -724,6 +761,26 @@ class PreviewPlayer(ctk.CTkScrollableFrame):
         self._flush_auto_pending()
         
         # Chain to DMD generation
+        if self._current_path:
+            self._start_dmd_generation(self._current_path)
+
+    def _on_auto_static_poster(self, src_w, src_h, tw, th):
+        self._auto_rendering = False
+        self.panel.controls._btn_auto.configure(state="normal", text="🎯 Auto")
+        if getattr(self, "_auto_tmpdir", None) and os.path.isdir(self._auto_tmpdir):
+            shutil.rmtree(self._auto_tmpdir, ignore_errors=True)
+            self._auto_tmpdir = None
+        axis = resolve_panorama_scroll_axis(src_w or 128, src_h or 128, tw or 128, th or 32, "auto")
+        dir_lbl = "Left → Right (TATE)" if axis == "horizontal" else "Top → Bottom (YOKO)"
+        self._auto_canvas.delete("all")
+        cw = max(20, self._auto_canvas.winfo_width()) if self._auto_canvas.winfo_width() > 10 else AUTO_CANVAS_W
+        self._auto_canvas.create_text(cw // 2, getattr(self, "_last_auto_h", AUTO_CANVAS_H) // 2,
+                                      text=f"🖼️  Poster Panorama\n({dir_lbl})",
+                                      fill="#2ecc71", font=("Helvetica", 12), justify="center",
+                                      width=cw - 20, tags="info_text")
+        self._auto_info.configure(text=f"Static image detected — {axis} zero-bar panorama scroll ({tw}×{th}).")
+        self._flush_auto_pending()
+
         if self._current_path:
             self._start_dmd_generation(self._current_path)
 

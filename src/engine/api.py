@@ -26,6 +26,8 @@ from PIL import Image, ImageEnhance, ImageOps
 from src.engine.conversion.core import (
     DEFAULT_PARAMS,
     LET_ME_HANDLE_PARAMS,
+    STATIC_IMAGE_EXTENSIONS,
+    is_static_image_source,
     process_file,
     resolve_panorama_scroll_axis,
 )
@@ -34,7 +36,7 @@ from src.engine.conversion.quality import evaluate_gif_quality, load_score_sidec
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.14"
+__version__ = "8.0.17"
 SUPPORTS_DIRECT_RGB565_STREAM = True
 
 DMDS_MAGIC = b"DMDS"

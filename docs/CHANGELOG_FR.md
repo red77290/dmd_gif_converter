@@ -1,5 +1,14 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.17] - 2026-11-23 (Défilement Panoramique Automatique des Affiches & Marquees dans l'UI / CLI)
+### Ajouté & Corrigé
+- **Détection Automatique d'Images Statiques & Défilement Panoramique selon la Résolution (`core.py`, `batch_orchestrator.py`, `api.py`)** : L'import d'images fixes (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff` et `.gif` statiques à 1 frame) dans l'interface ou en CLI avec **« Let Me Handle It »** (ou **Auto-Action**) contourne désormais automatiquement le suivi vidéo YOLOv8 à 1 frame et bascule directement sur le défilement panoramique zéro bande noire adapté à la dalle (`haut → bas` sur dalles horizontales YOKO `128×32` / `128×64` / `256×64`, `gauche → droite` sur dalles verticales TATE `64×128` / `32×128`, rognage haut/bas forcé à `0 %`, normalisation EXIF, pré-composition de la transparence RGBA/palette sur noir pur `#000000` et bouclage FFmpeg `-loop 1` pour les JPEG/PNG/WebP).
+- **Import d'Affiches & Aperçu Temps Réel dans l'UI (`left_panel.py`, `preview_player.py`)** : Ajout des formats d'image (`PNG`, `JPG`, `WEBP`, `BMP`, `TIFF`) et de l'icône `🖼` au sélecteur de fichiers, décodage instantané Pillow sans clignotement noir d'une seconde dans l'aperçu source, masquage automatique des curseurs de découpe temporelle vidéo (`Trim`) sur les images fixes, et affichage de l'indicateur `« 🖼️ Poster Panorama »` enchaînant directement sur la simulation DMD animée.
+
+## [V8.0.16] - 2026-11-21 (Applications de Bureau Autonomes Sans Dépendance Windows `.exe` & macOS `.dmg`)
+### Ajouté
+- **Exécutables Clé-en-Main Windows `.exe` & macOS `.dmg` (`release.yml`, `build_desktop_ui.py`)** : Génération CI/CD automatisée et validée par auto-test d'applications autonomes (`DMD_GIF_Converter_Windows_x64.exe` et `DMD_GIF_Converter_macOS_arm64.dmg`) embarquant Python, CustomTkinter, OpenCV, ONNX Runtime, le modèle `yolov8n.onnx`, les polices pixel-art ainsi que `ffmpeg` + `ffprobe` portables isolés — aucune installation externe requise.
+
 ## [V8.0.11] - 2026-10-28 (Priorité au Sprite sur Sol Profond & Loi de la Ligne de Sol Imaginaire)
 ### Corrigé & Amélioré
 - **Loi de la Ligne de Sol Imaginaire pour Grands Sprites (`camera.py`, `tracker.py`)** : Remplace le suivi de tête image-par-image des grands sprites (`standing_h > 0.79 * crop_h`, Platformer & VS Fighting) par une **ligne de sol imaginaire verrouillée** remontée au niveau des genoux/cuisses (`active_floor_y = floor_y - (standing_h - max_fit_h)`) jusqu'à cadrer le visage avec `_PLATFORMER_HEAD_PAD_RATIO = 0.11` (~3,5 px DMD d'air au-dessus de la tête) et 3 à 4 px de sol maximum (`platformer_floor_ratio = 0.90`). Cette ligne de sol imaginaire reste immobile lors des accroupissements/attaques, accompagne les grands sauts sans couper la tête, revient exactement au point de référence à la réception, et se ré-ancre sur les genoux lors d'un changement de plateforme.

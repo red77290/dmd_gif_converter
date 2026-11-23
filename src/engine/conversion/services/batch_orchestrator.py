@@ -12,18 +12,16 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..interfaces import IBatchOrchestrator
+from ..core import SUPPORTED_EXTENSIONS as _CORE_SUPPORTED_EXTENSIONS, is_static_image_source
 from ..ffmpeg_utils import get_metadata
 
 logger = logging.getLogger(__name__)
 
 
 class BatchOrchestrator(IBatchOrchestrator):
-    """Orchestrates parallel batch processing of video/GIF files."""
+    """Orchestrates parallel batch processing of video/GIF/image files."""
 
-    SUPPORTED_EXTENSIONS = {
-        ".gif", ".mp4", ".avi", ".mkv", ".mov", ".webm",
-        ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp"
-    }
+    SUPPORTED_EXTENSIONS = set(_CORE_SUPPORTED_EXTENSIONS)
 
     def __init__(self, process_file_fn: Callable, preprocess_fn: Optional[Callable] = None):
         """
@@ -90,6 +88,9 @@ class BatchOrchestrator(IBatchOrchestrator):
 
         def _run_preprocess(filename):
             src = os.path.join(str(input_folder), filename)
+            if is_static_image_source(src):
+                log(f"[POSTER] {filename} — Static image detected, skipping video YOLO Phase 1.")
+                return filename, src, None
             ok, pre_src, msg = self._preprocess(src)
             if ok and pre_src:
                 log(f"[ACTION] {filename} — {msg}")
@@ -101,7 +102,7 @@ class BatchOrchestrator(IBatchOrchestrator):
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
             pre_results = list(ex.map(_run_preprocess, files))
 
-        p_no_action = {**params, "auto_action_enabled": False}
+        p_no_action = {**params, "auto_action_enabled": False, "_batch_auto_action_requested": True}
         log(f"[BATCH] Phase 2/2 — ffmpeg conversion ({len(files)} files, {max_workers} workers)")
 
         import threading

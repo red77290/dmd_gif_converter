@@ -1,10 +1,10 @@
 # 🎞️ DMD GIF Converter
 
-Converts **any animated GIF or video** (MP4, MKV, MOV, AVI, WEBM…) into formats (`.gif`, `.rgb565.stream`) optimised for **HUB75 LED matrix panels** (`128×32`, `128×64`, `256×64`, `64×64`, and vertical TATE `64×128` / `32×128`) driven by **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)**, and the companion **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** streaming server (also compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
+Converts **any animated GIF, video, or static poster/marquee** (MP4, MKV, MOV, AVI, WEBM, PNG, JPG, WEBP…) into formats (`.gif`, `.rgb565.stream`) optimised for **HUB75 LED matrix panels** (`128×32`, `128×64`, `256×64`, `64×64`, and vertical TATE `64×128` / `32×128`) driven by **[ArcadeMatrix (ESP32 / ESP32-S3)](https://github.com/red77290/ArcadeMatrix)**, **[ArcadeMatrix_RPi (Raspberry Pi)](https://github.com/red77290/ArcadeMatrix_RPi)**, and the companion **[dmd_media_showcase](https://github.com/red77290/dmd_media_showcase)** streaming server (also compatible with [Retro Pixel LED Lite](https://github.com/fjgordillo86/RetroPixelLED-Lite) and the [AnimatedGIF](https://github.com/bitbank2/AnimatedGIF) library).
 
 Now ships with a **full cross-platform graphical interface** — no command line needed.
 
-[![Version](https://img.shields.io/badge/Version-v8.0.7-00C853?style=for-the-badge)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v8.0.17-00C853?style=for-the-badge)](docs/CHANGELOG.md)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Project-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/red1l)
 [![Telegram Community](https://img.shields.io/badge/Telegram-Join%20Community-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+DrSdAO8UMUViNmE0)
 
@@ -16,7 +16,7 @@ Tired of manually cropping and adjusting videos for your low-res LED matrix? Thi
 
 - **🤖 AI Iconic Moments**: Automatically analyzes entire videos to find and extract the absolute best, most action-packed moments specifically tailored for a 128x32 display.
 - **🎥 Cinematic Auto-Action Framing**: Uses YOLOv8 AI to track subjects, pan the camera dynamically, calibrate close-ups onto the eyes-to-mouth band, and track 2D platformer ground & elevated platforms bidirectionally (`platformer_floor_ratio=0.90`).
-- **🖼️ Zero-Bar TATE / YOKO Panoramas**: Deterministically pans left-to-right on TATE panels (`64×128`, `32×128`) and top-to-bottom on YOKO panels (`128×32`, `128×64`, `256×64`) with uniform 1:1 Lanczos zoom-to-cover scaling.
+- **🖼️ Zero-Bar TATE / YOKO Panoramas**: Deterministically pans left-to-right on TATE panels (`64×128`, `32×128`) and top-to-bottom on YOKO panels (`128×32`, `128×64`, `256×64`) with uniform 1:1 Lanczos zoom-to-cover scaling — automatically activated when dropping static posters, flyers, or marquees into the UI!
 - **🎨 Smart Color Boost**: Automatically detects dark or washed-out scenes and injects the perfect amount of brightness, contrast, and saturation so your GIFs pop on LED panels.
 - **🧠 Continuous Scoring Matrix**: Intelligently scores your scene (Platformer, Talking Closeup, Action) to select the perfect camera profile without any manual intervention.
 - **⚡ Hardware Acceleration & Multithreading**: Auto-detects and uses hardware encoders (VideoToolbox on macOS, NVENC/QSV/AMF on Windows/Linux) and utilizes intelligent CPU auto-workers to massively accelerate batch video processing up to 10x.
@@ -46,7 +46,7 @@ Tired of manually cropping and adjusting videos for your low-res LED matrix? Thi
 
 | Feature | Details |
 |---|---|
-| **Import by file or folder** | ➕ individual files, 📂 entire folder — all video formats accepted |
+| **Import by file or folder** | ➕ individual files, 📂 entire folder — all video, GIF, and static poster/marquee formats accepted |
 | **Multi-select file list** | Ctrl+click / Shift+click to select multiple files · Del removes all selected at once |
 | **Smart Conversion Lists** | Files move from **Files To Convert** to **Converted Files** automatically upon completion. |
 | **DMD Quality Score** | Converted files receive a 0-100% Quality Score (color-coded from Red to Premium Green) based on contrast, occupancy, and shape separation. |

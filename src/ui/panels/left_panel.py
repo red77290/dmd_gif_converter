@@ -16,7 +16,7 @@ from PIL import Image, ImageTk
 
 from src.engine.conversion.core import (
     get_metadata, process_file, process_folder,
-    DEFAULT_PARAMS, SUPPORTED_EXTENSIONS,
+    DEFAULT_PARAMS, STATIC_IMAGE_EXTENSIONS, SUPPORTED_EXTENSIONS,
 )
 from src.engine.auto_action.main import AutoActionConfig, preprocess_video_for_dmd
 from src.engine.conversion.colorimetry import analyze_and_compensate as _ui_analyze_color
@@ -497,8 +497,8 @@ class LeftPanel(ctk.CTkFrame):
     def add_files(self):
         ext_list = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTENSIONS))
         paths = filedialog.askopenfilenames(
-            title="Select video / GIF files",
-            filetypes=[("Video / GIF", ext_list), ("All files", "*.*")]
+            title="Select video / GIF / image files",
+            filetypes=[("Video / GIF / Image", ext_list), ("All files", "*.*")]
         )
         if paths:
             self._batch_insert(list(paths), 0)
@@ -563,7 +563,7 @@ class LeftPanel(ctk.CTkFrame):
         if path in self._file_paths:
             return
         ext  = Path(path).suffix.lower()
-        icon = "🎞" if ext == ".gif" else "🎬"
+        icon = "🎞" if ext == ".gif" else ("🖼" if ext in STATIC_IMAGE_EXTENSIONS else "🎬")
         name = Path(path).name
         disp = (name[:20] + "…") if len(name) > 22 else name
         iid  = self._tree.insert("", "end", text=f"  {icon}  {disp}", values=("", "Pending"), tags=("idle",))

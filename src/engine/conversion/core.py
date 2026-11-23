@@ -243,11 +243,65 @@ def _compute_scroll_motion(
     return expr, duration_out, step, stop_pos, frac, full_cyc
 
 
+STATIC_IMAGE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff",
+}
+
 SUPPORTED_EXTENSIONS = {
     ".gif", ".mp4", ".avi", ".mkv", ".mov", ".webm",
     ".flv", ".wmv", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp",
-    ".png", ".jpg", ".jpeg", ".webp", ".bmp",
+    *STATIC_IMAGE_EXTENSIONS,
 }
+
+
+def is_static_image_source(file_path) -> bool:
+    """Return True if *file_path* is a static image (including 1-frame GIFs)."""
+    if not file_path:
+        return False
+    ext = Path(str(file_path)).suffix.lower()
+    if ext in STATIC_IMAGE_EXTENSIONS:
+        return True
+    if ext == ".gif" and os.path.isfile(str(file_path)):
+        try:
+            from PIL import Image
+            with Image.open(file_path) as im:
+                return int(getattr(im, "n_frames", 1) or 1) <= 1
+        except Exception:
+            return False
+    return False
+
+
+def _prepare_static_image_source(src_path: str):
+    """
+    Normalize a static image when needed (1-frame GIF, EXIF rotation, or RGBA/palette
+    transparency composited onto pure #000000 black for HUB75 LED panels).
+    Returns `(effective_src_path, temp_dir_or_None)`.
+    """
+    ext = Path(src_path).suffix.lower()
+    try:
+        import tempfile
+        from PIL import Image, ImageOps
+
+        with Image.open(src_path) as raw_im:
+            exif_val = raw_im.getexif().get(0x0112, 1) if hasattr(raw_im, "getexif") else 1
+            im = ImageOps.exif_transpose(raw_im)
+            has_alpha = im.mode in ("RGBA", "LA", "PA") or ("transparency" in im.info)
+            needs_temp_png = (ext == ".gif") or has_alpha or (exif_val not in (1, None))
+            if not needs_temp_png:
+                return src_path, None
+
+            tmpdir = tempfile.mkdtemp(prefix="dmd_poster_")
+            out_png = os.path.join(tmpdir, "poster_norm.png")
+            if has_alpha:
+                rgba = im.convert("RGBA")
+                bg = Image.new("RGBA", rgba.size, (0, 0, 0, 255))
+                bg.alpha_composite(rgba)
+                bg.convert("RGB").save(out_png, format="PNG")
+            else:
+                im.convert("RGB").save(out_png, format="PNG")
+            return out_png, tmpdir
+    except Exception:
+        return src_path, None
 
 # ── Default parameters ─────────────────────────────────────────────────────────
 DEFAULT_PARAMS = {
@@ -422,16 +476,34 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         log(f"[CANCEL] {filename} — Cancelled before processing", "warning")
         return False, f"[CANCEL] {filename}"
 
-    # Optional preprocessor temp dir (auto action mode).
+    # Optional preprocessor temp dirs (auto action mode / static poster normalization).
     temp_pre_src = None
-    # Keep a reference to the original source for keyframe analysis (auto-color
-    # must analyse the original colours, not the auto-action crop).
+    temp_static_dir = None
+
+    def _cleanup_temps():
+        import shutil
+        for tdir in (temp_pre_src, temp_static_dir):
+            if tdir and os.path.isdir(tdir):
+                shutil.rmtree(tdir, ignore_errors=True)
+
+    is_static_image = is_static_image_source(src_path)
+    if is_static_image:
+        src_path, temp_static_dir = _prepare_static_image_source(src_path)
+
+    # Keep a reference to the original (or alpha-normalized) source for keyframe color analysis.
     original_src = src_path
 
     src_w, src_h, fps_src, duration_full = get_metadata(src_path)
     if not src_w:
+        _cleanup_temps()
         log(f"[ERROR] {filename} — could not read metadata", "error")
         return False, f"[ERROR] {filename} — metadata unreadable"
+
+    if is_static_image:
+        # Static images have no intrinsic framerate or video trim range
+        fps_src = max(fps_src, 25.0)
+        start_s = None
+        end_s = None
 
     # Get target dimensions
     target_width = int(p.get("target_width", 128))
@@ -453,6 +525,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         is_perfect_ratio = abs(src_ratio - target_ratio) < 0.05
 
     auto_action_enabled = bool(p.get("auto_action_enabled", False))
+    static_auto_panorama = False
 
     if keep_original_resolution:
         p["scroll_enabled"] = False
@@ -461,6 +534,31 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         p["manual_y"] = 0
         auto_action_enabled = False
         log(f"[BYPASS ] {filename} — Keep Original Resolution active ({src_w}x{src_h})", "info")
+    elif is_static_image:
+        # Static posters / flyers / marquees never go through 1-frame YOLO video tracking.
+        # Under "Let Me Handle It" (or Auto-Action), route directly to resolution-aware
+        # zero-black-bar panorama scroll (top-to-bottom on YOKO, left-to-right on TATE).
+        if (
+            auto_action_enabled
+            or bool(p.get("let_me_handle_it", False))
+            or bool(p.get("_batch_auto_action_requested", False))
+        ):
+            auto_action_enabled = False
+            static_auto_panorama = True
+            p["scroll_enabled"] = True
+            p["scroll_direction"] = str(caller_params.get("scroll_direction") or "auto")
+            if "force_panorama_scroll" not in caller_params:
+                p["force_panorama_scroll"] = True
+            p["bottom_crop_pct"] = 0.0
+            p["top_crop_pct"] = 0.0
+            axis_preview = resolve_panorama_scroll_axis(
+                src_w, src_h, target_width, target_height, p["scroll_direction"]
+            )
+            log(
+                f"[POSTER ] {filename} — Static image ({src_w}x{src_h}) routed to "
+                f"{axis_preview} panorama scroll for {target_width}x{target_height}.",
+                "info",
+            )
     elif is_perfect_ratio and auto_action_enabled and smart_ratio_bypass:
         auto_action_enabled = False
         log(f"[BYPASS ] {filename} — Source matches target ratio ({src_w}x{src_h}), auto-framing bypassed.", "info")
@@ -506,7 +604,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
 
     # Apply max_duration cap: trim_end = min(trim_end, trim_start + max_duration)
     max_dur = float(p.get("max_duration", 0.0))
-    if max_dur > 0.0:
+    if max_dur > 0.0 and not is_static_image:
         trim_end = min(trim_end, trim_start + max_dur)
         log(f"[MAXDUR ] {filename} — cap {max_dur:.0f}s → [{trim_start:.1f}s … {trim_end:.1f}s]")
 
@@ -591,8 +689,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     force_panorama = bool(p.get("force_panorama_scroll", False))
 
     if scroll_axis == "horizontal":
-        horiz_top_crop = max(0.0, float(caller_params.get("top_crop_pct", 0.0)))
-        horiz_bot_crop = max(0.0, float(caller_params.get("bottom_crop_pct", 0.0)))
+        horiz_top_crop = 0.0 if static_auto_panorama else max(0.0, float(caller_params.get("top_crop_pct", 0.0)))
+        horiz_bot_crop = 0.0 if static_auto_panorama else max(0.0, float(caller_params.get("bottom_crop_pct", 0.0)))
         usable_frac_h = max(0.25, 1.0 - horiz_top_crop - horiz_bot_crop)
         req_h = max(target_height, math.ceil((target_height * zoom / usable_frac_h) / 2.0) * 2)
         if force_panorama:
@@ -625,9 +723,18 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         cycles = float(p.get("scroll_cycles", 1.5))
         scroll_dur_req = float(p.get("scroll_duration", 0.0))
 
+        def _cap_static_scroll_dur(dist_px: int) -> float:
+            if scroll_dur_req > 0.0 or not is_static_image or max_dur <= 0.0 or dist_px <= 0:
+                return scroll_dur_req
+            full_c = int(cycles)
+            frac_c = max(0.0, cycles - full_c)
+            total_px = max(float(dist_px), (2.0 * full_c + frac_c) * dist_px)
+            nat_dur = total_px / max(1.0, float(p["scroll_speed"]))
+            return max_dur if nat_dur > max_dur else 0.0
+
         if scroll_axis == "horizontal":
-            horiz_top_crop = max(0.0, float(caller_params.get("top_crop_pct", 0.0)))
-            horiz_bot_crop = max(0.0, float(caller_params.get("bottom_crop_pct", 0.0)))
+            horiz_top_crop = 0.0 if static_auto_panorama else max(0.0, float(caller_params.get("top_crop_pct", 0.0)))
+            horiz_bot_crop = 0.0 if static_auto_panorama else max(0.0, float(caller_params.get("bottom_crop_pct", 0.0)))
             top_off_h = math.floor(scaled_h * horiz_top_crop / 2) * 2
             eff_h_horiz = max(
                 math.floor(scaled_h * (1.0 - horiz_bot_crop) / 2) * 2 - top_off_h,
@@ -639,10 +746,11 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             )
             crop_y = str(center_y)
             avail_dist_x = max(0, target_w_scaled - target_width)
-            if scroll_dur_req > 0.0:
+            eff_scroll_dur_h = _cap_static_scroll_dur(avail_dist_x)
+            if eff_scroll_dur_h > 0.0:
                 max_pan_dist_x = max(
                     target_width * 4,
-                    round(target_width * 1.35 * max(2.5, scroll_dur_req)),
+                    round(target_width * 1.35 * max(2.5, eff_scroll_dur_h)),
                 )
                 scroll_dist = min(avail_dist_x, max_pan_dist_x)
             else:
@@ -653,7 +761,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
                 crop_x, duration_out, step, stop_pos, frac, full_cyc = _compute_scroll_motion(
                     scroll_dist=scroll_dist,
                     cycles=cycles,
-                    scroll_dur_req=scroll_dur_req,
+                    scroll_dur_req=eff_scroll_dur_h,
                     scroll_speed=float(p["scroll_speed"]),
                     fps_render=fps_render,
                     duration_src=duration_src,
@@ -678,6 +786,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
             effective_h = math.floor(scaled_h * (1.0 - p["bottom_crop_pct"]) / 2) * 2
             effective_h = max(effective_h - top_offset, target_height)
             scroll_dist = effective_h - target_height
+            eff_scroll_dur_v = _cap_static_scroll_dur(scroll_dist)
             # Horizontal: centered whenever uniform zoom makes width exceed panel width
             crop_x = str((target_w_scaled - target_width) // 2) if target_w_scaled > target_width else "0"
 
@@ -685,7 +794,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
                 crop_y, duration_out, step, stop_pos, frac, full_cyc = _compute_scroll_motion(
                     scroll_dist=scroll_dist,
                     cycles=cycles,
-                    scroll_dur_req=scroll_dur_req,
+                    scroll_dur_req=eff_scroll_dur_v,
                     scroll_speed=float(p["scroll_speed"]),
                     fps_render=fps_render,
                     duration_src=duration_src,
@@ -875,6 +984,8 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     
     if auto_action_enabled:
         cmd += ["-i", src_path]
+    elif is_static_image:
+        cmd += ["-loop", "1", "-t", duration_out, "-i", src_path]
     else:
         cmd += ["-stream_loop", "-1", "-t", duration_out, "-i", src_path]
         
@@ -901,9 +1012,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
     returncode, result_stderr = _run_ffmpeg_with_drain(cmd, cancel_event)
     if returncode == -1:
         log(f"[CANCEL] {filename} — ffmpeg interrupted by user", "warning")
-        if temp_pre_src and os.path.isdir(temp_pre_src):
-            import shutil
-            shutil.rmtree(temp_pre_src, ignore_errors=True)
+        _cleanup_temps()
         return False, f"[CANCEL] {filename} interrupted"
 
     if (p.get("verbose") or p.get("log_level") == "DEBUG") and result_stderr:
@@ -911,9 +1020,7 @@ def process_file(src_path, out_path, params=None, start_s=None, end_s=None, call
         if ffmpeg_log:
             log(f"[FFMPEG] {filename}:\n{ffmpeg_log}", "debug")
 
-    if temp_pre_src and os.path.isdir(temp_pre_src):
-        import shutil
-        shutil.rmtree(temp_pre_src, ignore_errors=True)
+    _cleanup_temps()
 
     if returncode != 0:
         err = result_stderr.decode(errors="replace").strip().splitlines()
@@ -1046,6 +1153,9 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
         cfg = action_cfg.copy()
         if cancel_event and cancel_event.is_set():
             return filename, src, None
+        if is_static_image_source(src):
+            log(f"[POSTER ] {filename} — Static image detected, skipping video YOLO Phase 1.")
+            return filename, src, None
 
         ok, pre_src, msg = preprocess_video_for_dmd(src, cfg, cancel_event=cancel_event, callback=log)
         if ok and pre_src:
@@ -1062,7 +1172,7 @@ def process_folder(folder_in, folder_out, params=None, callback=None, progress_c
     # Phase 2: run ffmpeg on all (pre-processed or original) sources in parallel.
     # Build a params copy with auto_action disabled so process_file skips
     # the preprocessor stage (it already ran in phase 1).
-    p_no_action = {**p, "auto_action_enabled": False}
+    p_no_action = {**p, "auto_action_enabled": False, "_batch_auto_action_requested": True}
 
     log(f"[BATCH  ] Phase 2/2 — ffmpeg conversion ({len(files)} files, {max_workers} workers)")
 

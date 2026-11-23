@@ -1,5 +1,14 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.17] - 2026-11-23 (Automatic Static Poster & Marquee Panorama Scroll in UI / CLI)
+### Added & Fixed
+- **Automatic Static-Image Detection & Resolution-Aware Panorama Scroll (`core.py`, `batch_orchestrator.py`, `api.py`)**: Dropping static images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`, `.tif`, `.tiff`, and single-frame `.gif` files) into the UI or CLI with **"Let Me Handle It"** (or **Auto-Action**) now automatically bypasses 1-frame YOLOv8 video tracking and routes directly to zero-black-bar resolution-aware panorama scrolling (`top-to-bottom` on horizontal YOKO panels such as `128×32` / `128×64` / `256×64`, `left-to-right` on vertical TATE panels such as `64×128` / `32×128`, with `0%` top/bottom crop, EXIF rotation normalization, RGBA/palette transparency compositing onto `#000000` black, and `-loop 1` FFmpeg `image2` looping for multi-frame JPEG/PNG/WebP output).
+- **UI Poster Import & Live Preview Polish (`left_panel.py`, `preview_player.py`)**: Added static image formats (`PNG`, `JPG`, `WEBP`, `BMP`, `TIFF`) and `🖼` icons to the UI file importer, replaced FFmpeg frame extraction with instant Pillow decoding for static source previews without 1-second black-frame blinking, hid video trim sliders on static images, and added a dedicated `"🖼️ Poster Panorama"` status card in the middle preview panel chaining directly into the live scrolling DMD simulation.
+
+## [8.0.16] - 2026-11-21 (Standalone Zero-Dependency Desktop UI Bundles for Windows & macOS)
+### Added
+- **Out-of-the-Box Windows `.exe` & macOS `.dmg` Releases (`release.yml`, `build_desktop_ui.py`)**: Automated CI/CD builds and smoke-tested standalone desktop installers (`DMD_GIF_Converter_Windows_x64.exe` and `DMD_GIF_Converter_macOS_arm64.dmg`) bundling Python, CustomTkinter, OpenCV, ONNX Runtime, YOLOv8n (`yolov8n.onnx`), pixel-art fonts, and isolated portable `ffmpeg` + `ffprobe` binaries — zero external installation required.
+
 ## [8.0.11] - 2026-10-28 (Sprite-Priority Deep-Ground Protection & Imaginary Floor Line Law)
 ### Fixed & Improved
 - **Imaginary Floor Line Law for Tall Sprites (`camera.py`, `tracker.py`)**: Replaces per-frame head-top tracking on tall platformer & VS Fighting sprites (`standing_h > 0.79 * crop_h`) with a locked **imaginary floor line** raised up to the knees/thighs (`active_floor_y = floor_y - (standing_h - max_fit_h)`) until the character's face fits with `_PLATFORMER_HEAD_PAD_RATIO = 0.11` (~3.5 DMD px headroom) and strictly 3–4 DMD px below the active floor line (`platformer_floor_ratio = 0.90`). The imaginary floor stays steady across crouches/attacks, lifts only when high jumps cross the headroom guard, returns cleanly on landing, and re-anchors automatically onto the knees upon platform climbs or drops.
