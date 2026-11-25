@@ -320,6 +320,34 @@ def _smooth(prev, curr, smoothness: float):
     return CamRect(cx, cy, cw, ch)
 
 
+def _smooth_platformer_camera(prev, curr, base_smoothness: float):
+    """
+    Smooth a platformer camera step with continuous vertical pursuit and bounded velocity.
+
+    Replaces the binary `head_crowded` smoothing cliff (`0.85 -> 0.30`) with a smooth
+    displacement-proportional vertical factor so multi-tier climbs and drops track
+    promptly without sudden catapult lurches.
+    """
+    if prev is None or float(base_smoothness) <= 0.0:
+        return curr
+    smoothed_xy = _smooth(prev, curr, base_smoothness)
+    dy_cam = float(curr[1]) - float(prev[1])
+    ch_cam = max(1.0, float(curr[3]))
+    eff_smooth_y = _clamp(float(base_smoothness), 0.0, 0.98)
+    if dy_cam > ch_cam * 0.04:
+        drop_t = _clamp((dy_cam / ch_cam - 0.04) / 0.16, 0.0, 1.0)
+        eff_smooth_y = eff_smooth_y + drop_t * (min(eff_smooth_y, 0.30) - eff_smooth_y)
+    elif -dy_cam > ch_cam * 0.03:
+        climb_t = _clamp((-dy_cam / ch_cam - 0.03) / 0.18, 0.0, 1.0)
+        eff_smooth_y = eff_smooth_y + climb_t * (min(eff_smooth_y, 0.42) - eff_smooth_y)
+    smoothed_y = _smooth(prev, curr, eff_smooth_y)[1]
+    max_render_dy = ch_cam * (0.24 if dy_cam > 0.0 else 0.20)
+    clamped_y = float(prev[1]) + _clamp(
+        float(smoothed_y) - float(prev[1]), -max_render_dy, max_render_dy
+    )
+    return CamRect(smoothed_xy[0], clamped_y, smoothed_xy[2], smoothed_xy[3])
+
+
 def _crop_frame(frame, cam_rect):
     import numpy as np
     h, w = frame.shape[:2]
