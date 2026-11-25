@@ -1,5 +1,10 @@
 # DMD GIF Converter — Changelog
 
+## [8.0.19] - 2026-11-25 (Autonomous TV-Range Pillarbox, Hardware Overscan Blanking & Horizontal Camera Lock)
+### Fixed & Improved
+- **TV-Range, Watermarked & Thin Hardware Overscan Pillarbox Detection (`analysis.py`, `analyzer.py`)**: Replaces the single-pixel `gray > 15` threshold with a 256-column luma/chroma profile (`_measure_frame_pillarbox_bounds`) and temporal geometric wall lock (`_resolve_pillarbox_margins`) evaluated before `_is_dark_frame`, cleanly stripping BT.601/BT.709 limited-range black bars (`Y=16..28`), corner-watermarked pillarboxes, and thin console hardware blanking strips (`>= 1.2%`, e.g. NES/SMS `8 px` left blanking) while protecting dark-blue/night/starfield gameplay interiors and preserving margins even when initial ROI scan has zero detections.
+- **Strict Horizontal Effective Bounds Across Detection, Camera Pan & Crop (`analyzer.py`, `tracker.py`, `camera.py`)**: Applies inward integer rounding (`ceil`/`floor`) on `effective_frame_left`/`effective_frame_w`, restricts `DetectionStage` slices to the active horizontal playfield, enforces horizontal clamping in `CameraBuilderStage`, and prevents 1-pixel float-rounding edge seams in `_crop_frame` so side borders never appear or move during camera pans.
+
 ## [8.0.18] - 2026-11-25 (Global 2D Sprite Tracking, Anti-Hijack Lock & Autonomous Platformer Detection)
 ### Fixed & Improved
 - **Global Compact-Sprite Detection, 2D Continuity & Anti-Hijack Lock (`detector.py`, `tracker.py`)**: Generalizes compact 8/16-bit sprite detection (`< 1.5%` screen area), 2D `(expected_cx, expected_cy)` trajectory continuity, established hero scale `expected_h` projectile/bubble demotion (`< 48%` hero height), chromatic sprite salience, and target-switch probation (`ValidationStage`) across **all** non-portrait action/sprite scenes (`is_sprite_action_mode`, covering platformers, aquatic/free-2D games, top-down titles, and shoot 'em ups) while keeping `_FloorEstimator` ground-anchoring specific to `platformer_mode`.

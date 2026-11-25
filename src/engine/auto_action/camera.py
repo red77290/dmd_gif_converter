@@ -358,6 +358,10 @@ def _crop_frame(frame, cam_rect):
 
     x1 = int(round(cx - cw / 2.0))
     y1 = int(round(cy - ch / 2.0))
+    if out_w <= w:
+        x1 = max(0, min(w - out_w, x1))
+    if out_h <= h:
+        y1 = max(0, min(h - out_h, y1))
     x2 = x1 + out_w
     y2 = y1 + out_h
 
