@@ -131,6 +131,16 @@ class _FloorEstimator:
         if stance_detected:
             self._reanchoring_up = True
             self._floor_y += self._ALPHA_RELEASE_STANCE * (stance_target - self._floor_y)
+        elif (
+            self._consecutive_elevated >= 5
+            and len(recent) >= 5
+            and all(s <= self._floor_y - 0.125 * self._frame_h for s in recent[-5:])
+        ):
+            # Sustained elevated chain-jumping / climbing / swimming across upper platforms:
+            # follow the 80th-percentile lower foot envelope (upper platform contact tier,
+            # never the jump apex) smoothly without waiting for the character to stand still.
+            lower_envelope_target = float(np.percentile(recent[-5:], 80))
+            self._floor_y += 0.24 * (lower_envelope_target - self._floor_y)
         else:
             self._floor_y += self._ALPHA_RELEASE_JUMP * (rb - self._floor_y)
 

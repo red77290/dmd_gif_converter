@@ -947,6 +947,241 @@ class TestDeepGroundPlatformerRegressionSuite:
         assert cam[1] == pytest.approx(cy_stand, abs=0.5)
 
 
+class TestMultiTierJumpAndAntiHijackStability:
+    """
+    Regression suite for v8.0.18 multi-tier platformer jump tracking & sprite lock:
+    - 2D `(expected_cx, expected_cy)` continuity keeps airborne jumping heroes favored over
+      grounded enemies/sawblades even directly underneath on the same X column.
+    - Global camera-scroll compensation extracts screen-centered jumping sprites over
+      fast-scrolling background pipes/clouds/bushes.
+    - Target-switch probation prevents 1-2 frame enemy/firebar/projectile spikes from
+      stealing focus or corrupting `_FloorEstimator`.
+    - Progressive lower-envelope floor adaptation + `_smooth_platformer_camera` follow
+      continuous multi-platform chain-jumps smoothly without late freezes or catapult jumps.
+    """
+
+    def test_airborne_hero_jump_is_never_hijacked_by_grounded_enemy_in_yolo_or_motion(self):
+        det = _FrameDetector()
+        det._model_w = 640
+        det._model_h = 640
+
+        # Same horizontal column (x≈140 -> cx_model≈295), two sprites on 304x224:
+        # Box 0: Grounded sawblade/enemy right on expected_floor_y=180 (y=144..180 -> cy_m=463, bh_m=103, conf=0.62)
+        # Box 1: Airborne jumping hero above (y=52..88 -> cy_m=200, bh_m=103, conf=0.56)
+        pred = np.zeros((1, 5, 2), dtype=np.float32)
+        pred[0, :, 0] = [295.0, 463.0, 52.0, 103.0, 0.62]
+        pred[0, :, 1] = [295.0, 200.0, 52.0, 103.0, 0.56]
+
+        mock_session = MagicMock()
+        mock_input = MagicMock()
+        mock_input.name = "images"
+        mock_session.get_inputs.return_value = [mock_input]
+        mock_session.run.return_value = [pred]
+        det._onnx_session_fast = mock_session
+
+        frame = np.zeros((224, 304, 3), dtype=np.uint8)
+        roi_yolo = det._detect_yolo(
+            frame,
+            platformer_mode=True,
+            expected_floor_y=180.0,
+            expected_cx=140.0,
+            expected_cy=76.0,
+        )
+        assert roi_yolo is not None
+        assert 44 <= roi_yolo[1] <= 62
+
+        # Verify motion detector likewise keeps airborne hero over grounded enemy
+        det_m = _FrameDetector()
+        bg = np.zeros((224, 304, 3), dtype=np.uint8)
+        for _ in range(3):
+            det_m.detect_motion(bg.copy(), platformer_mode=True)
+        frame_m = bg.copy()
+        frame_m[144:180, 128:152] = (180, 180, 180)  # grounded grey hazard
+        frame_m[52:88, 128:152] = (40, 80, 240)      # airborne colorful hero
+        roi_m = det_m.detect_motion(
+            frame_m,
+            platformer_mode=True,
+            expected_floor_y=180.0,
+            expected_cx=140.0,
+            expected_cy=76.0,
+        )
+        assert roi_m is not None
+        assert 44 <= roi_m[1] <= 62
+
+    def test_scroll_compensated_motion_tracks_stationary_screen_hero_over_scrolling_pipes(self):
+        det = _FrameDetector()
+        fw, fh = 320, 240
+
+        def _render_scrolling_scene(scroll_x: int, hero_y: int) -> np.ndarray:
+            img = np.full((fh, fw, 3), (180, 90, 50), dtype=np.uint8)  # sky
+            # Rigidly scrolling ground, pipes, and clouds (all shift by -scroll_x)
+            for pipe_base in (90, 230, 360):
+                px = pipe_base - scroll_x
+                x1, x2 = max(0, px), min(fw, px + 44)
+                if x2 > x1:
+                    img[152:216, x1:x2] = (40, 185, 40)
+                    img[152:216, x1 : min(x2, x1 + 6)] = (120, 235, 120)
+            for cloud_base in (70, 210, 340):
+                cx = cloud_base - scroll_x
+                x1, x2 = max(0, cx), min(fw, cx + 48)
+                if x2 > x1:
+                    img[42:68, x1:x2] = (235, 235, 235)
+            img[216:240, :] = (60, 110, 190)
+            # Hero stays near screen center x=144 while jumping vertically
+            img[hero_y : hero_y + 34, 144:168] = (30, 40, 245)
+            img[hero_y + 6 : hero_y + 20, 148:164] = (230, 200, 40)
+            return img
+
+        f0 = _render_scrolling_scene(scroll_x=0, hero_y=120)
+        f1 = _render_scrolling_scene(scroll_x=12, hero_y=104)
+        f2 = _render_scrolling_scene(scroll_x=24, hero_y=88)
+
+        det.detect_motion(f0, platformer_mode=True)
+        det.detect_motion(f1, platformer_mode=True)
+        roi = det.detect_motion(f2, platformer_mode=True, expected_cx=156.0, expected_cy=105.0)
+
+        assert roi is not None
+        rx, ry, rw, _rh = roi
+        hero_cx = rx + rw * 0.5
+        assert 132.0 <= hero_cx <= 180.0
+        assert 76 <= ry <= 102
+        assert rw <= 52
+
+    def test_target_switch_probation_rejects_transient_enemy_hijacks_and_preserves_floor(self):
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=1,
+            smoothness=0.75,
+            scene_change_threshold=0.0,
+            roi_history_window_s=1.0,
+        )
+        engine = TrackingEngine(
+            fps=20.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+        blank = np.full((fh, fw, 3), 48, dtype=np.uint8)
+        cam = engine.cam_full_view
+
+        # Lock onto hero on upper platform (x=76..100, y=64..100 -> floor=100) for 6 frames
+        for i in range(6):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(76, 64, 24, 36)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+
+        locked_floor = engine.floor_est.floor_y
+        locked_cx = cam[0]
+        locked_cy = cam[1]
+        assert locked_floor == pytest.approx(100.0, abs=1.0)
+
+        # 2 transient enemy detections far away on lower ground (x=248..272, y=154..190)
+        for i in range(6, 8):
+            engine.detector.detect = lambda *a, **kw: BoundingBox(248, 154, 24, 36)
+            cam = engine.process_frame(blank, cam, i, 128, 32)
+
+        # Must completely ignore the 2-frame hijack: zero floor corruption and near-zero camera jump
+        assert engine.floor_est.floor_y == pytest.approx(locked_floor, abs=0.5)
+        assert abs(cam[0] - locked_cx) < 2.0
+        assert abs(cam[1] - locked_cy) < 2.0
+
+        # Hero resumes jumping at x=80..104 -> stays seamlessly locked
+        engine.detector.detect = lambda *a, **kw: BoundingBox(80, 50, 24, 36)
+        cam = engine.process_frame(blank, cam, 8, 128, 32)
+        assert engine._last_valid_roi_cx == pytest.approx(92.0, abs=1.0)
+
+    def test_chain_jumping_across_vertical_platforms_tracks_smoothly_without_late_lurch(self):
+        from src.engine.auto_action.camera import _smooth_platformer_camera
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        fw, fh = 304, 224
+        cfg = _platformer_cfg(
+            target_width=128,
+            target_height=32,
+            subsample_frames=1,
+            smoothness=0.75,
+            scene_change_threshold=0.0,
+            roi_history_window_s=3.0,
+        )
+        engine = TrackingEngine(
+            fps=20.0,
+            frame_w=fw,
+            frame_h=fh,
+            effective_frame_top=0,
+            effective_frame_h=fh,
+            effective_frame_left=0,
+            effective_frame_w=fw,
+            face_priority_mode=False,
+            cfg=cfg,
+        )
+        blank = np.full((fh, fw, 3), 48, dtype=np.uint8)
+        cam_prev = engine.cam_full_view
+
+        # Continuous upward chain-jumping sequence across 3 platform tiers (never standing still 6f!):
+        # Tier 0 (feet=190) -> Jump -> Tier 1 touch (142) -> Jump (108) -> Tier 2 touch (116) -> Jump (74) -> Tier 3 (84)
+        bottom_seq = [
+            190, 190, 190,
+            166, 140, 142, 122, 106, 116, 96, 78, 84, 72, 82, 84, 84,
+        ]
+        cy_history = []
+        for idx, btm in enumerate(bottom_seq):
+            roi_now = BoundingBox(132, int(btm - 34), 24, 34)
+            engine.detector.detect = lambda *a, _r=roi_now, **kw: _r
+            cam_now = engine.process_frame(blank, cam_prev, idx, 128, 32)
+            if idx == 0 or engine.just_locked_first_detection:
+                cam = cam_now
+            else:
+                cam = _smooth_platformer_camera(cam_prev, cam_now, cfg.smoothness)
+            cam_prev = cam
+            cy_history.append(cam[1])
+
+        ch = cam_prev[3]
+        step_deltas = [abs(cy_history[i] - cy_history[i - 1]) for i in range(2, len(cy_history))]
+
+        # 1. Floor estimator adapted upward via lower-envelope tracking despite non-zero jump spread
+        assert engine.floor_est.floor_y < 140.0
+        # 2. Final camera strip cleanly frames the hero on the top platform (y=50..84)
+        assert (cam_prev[1] - ch / 2.0) <= 50.0
+        assert (cam_prev[1] + ch / 2.0) >= 84.0
+        # 3. Every single frame step is smooth and bounded (zero sudden catapult lurch)
+        assert max(step_deltas) <= ch * 0.21
+
+    def test_projectile_scale_filter_demotes_small_fireballs_and_bubbles_near_hero(self):
+        det = _FrameDetector()
+        fw, fh = 320, 240
+        bg = np.zeros((fh, fw, 3), dtype=np.uint8)
+        for _ in range(3):
+            det.detect_motion(bg.copy(), platformer_mode=True)
+
+        frame = bg.copy()
+        # Small bright projectile/bubble right on expected_floor_y=185 (h=18 < 0.48 * 68)
+        frame[167:185, 165:185] = (40, 200, 255)
+        # Jumping hero above (h=68 matching expected_h=68)
+        frame[78:146, 132:168] = (40, 120, 245)
+
+        roi = det.detect_motion(
+            frame,
+            platformer_mode=True,
+            expected_floor_y=185.0,
+            expected_cx=155.0,
+            expected_cy=125.0,
+            expected_h=68.0,
+        )
+        assert roi is not None
+        assert roi[3] >= 50
+        assert 70 <= roi[1] <= 90
+
+
 
 
 

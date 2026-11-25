@@ -114,6 +114,8 @@ class AbstractDetector(IDetector):
         expected_floor_y: Optional[float] = None,
         is_batch: bool = False,
         expected_cx: Optional[float] = None,
+        expected_cy: Optional[float] = None,
+        expected_h: Optional[float] = None,
     ) -> Optional[BoundingBox]:
         mode = (mode or "person").lower()
         if mode not in available_detectors():
@@ -134,9 +136,15 @@ class AbstractDetector(IDetector):
             platformer_mode=platformer_mode,
             expected_floor_y=expected_floor_y,
         )
-        if expected_cx is not None and isinstance(self, _FrameDetector):
-            person_kw["expected_cx"] = expected_cx
-            motion_kw["expected_cx"] = expected_cx
+        if isinstance(self, _FrameDetector):
+            if expected_cx is not None:
+                person_kw["expected_cx"] = expected_cx
+                motion_kw["expected_cx"] = expected_cx
+            if expected_cy is not None:
+                person_kw["expected_cy"] = expected_cy
+                motion_kw["expected_cy"] = expected_cy
+            if expected_h is not None and float(expected_h) > 8.0:
+                motion_kw["expected_h"] = float(expected_h)
 
         if mode == "person":
             p = self.detect_person(frame, **person_kw)
@@ -182,7 +190,19 @@ class _FrameDetector(AbstractDetector):
         self.cv2 = cv2
         self.prev_gray = None
         self.bg_sub = cv2.createBackgroundSubtractorMOG2(history=200, varThreshold=36)
+        self.last_bg_scroll: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self._scroll_window: Optional[np.ndarray] = None
         self._try_load_onnx()
+
+    def feed_subsampled_frame(self, frame: np.ndarray) -> None:
+        """Keep temporal motion state fresh on subsampled non-YOLO frames to prevent multi-frame ghost lag."""
+        if frame is None or frame.size == 0:
+            return
+        try:
+            self.prev_gray = self.cv2.cvtColor(frame, self.cv2.COLOR_BGR2GRAY)
+            self.bg_sub.apply(frame, learningRate=0.005)
+        except Exception:
+            pass
 
     _shared_session_fast = None
     _shared_session_batch = None
@@ -292,7 +312,8 @@ class _FrameDetector(AbstractDetector):
     def _detect_yolo(self, frame: np.ndarray, min_conf: float = _YOLO_CONF_THRESH,
                      roi_persistence_score: float = 1.0, platformer_mode: bool = False,
                      expected_floor_y: Optional[float] = None, is_batch: bool = False,
-                     expected_cx: Optional[float] = None) -> Optional[BoundingBox]:
+                     expected_cx: Optional[float] = None,
+                     expected_cy: Optional[float] = None) -> Optional[BoundingBox]:
         session = self._get_active_session(is_batch)
         if session is None:
             return None
@@ -351,18 +372,35 @@ class _FrameDetector(AbstractDetector):
                 ),
             )
 
-            # Horizontal subject continuity: prevent argmax ping-pong between player
-            # and secondary enemies/partners, while penalizing static outer-border props
+            # 2D subject continuity: prevent argmax ping-pong between a jumping hero and
+            # secondary enemies/hazards, while penalizing static outer-border props
             # (e.g. level-edge signposts at x < 7% or x > 93% of frame width).
             cx_norm = boxes_raw[:, 0] / float(self._model_w)
             edge_weight = np.where((cx_norm < 0.07) | (cx_norm > 0.93), 0.35, 1.0)
             exp_cx_norm = (
                 float(expected_cx) / max(1.0, float(w)) if expected_cx is not None else -1.0
             )
+            exp_cy_norm = (
+                float(expected_cy) / max(1.0, float(h)) if expected_cy is not None else -1.0
+            )
+            near_tracked_2d = None
+            dist_2d_arr = None
             if expected_cx is not None and 0.07 <= exp_cx_norm <= 0.93:
                 cx_model = float(expected_cx) * (self._model_w / max(1.0, float(w)))
                 dx_norm = np.abs(boxes_raw[:, 0] - cx_model) / float(self._model_w)
-                horiz_weight = (1.0 + 0.90 * np.exp(-dx_norm * 5.0)) * edge_weight
+                if expected_cy is not None and 0.03 <= exp_cy_norm <= 0.96:
+                    cy_model = float(expected_cy) * (self._model_h / max(1.0, float(h)))
+                    dy_norm = np.abs(boxes_raw[:, 1] - cy_model) / float(self._model_h)
+                    dist_2d_arr = np.hypot(dx_norm, dy_norm * 0.85)
+                    near_tracked_2d = dist_2d_arr < 0.24
+                    horiz_weight = (1.0 + 1.85 * np.exp(-dist_2d_arr * 4.5)) * edge_weight
+                    playfield_weight = np.where(
+                        near_tracked_2d & (bottomness <= 0.88),
+                        np.maximum(playfield_weight, 1.15),
+                        playfield_weight,
+                    )
+                else:
+                    horiz_weight = (1.0 + 0.90 * np.exp(-dx_norm * 5.0)) * edge_weight
             else:
                 horiz_weight = (1.0 + 0.30 * np.maximum(0.0, 0.5 - np.abs(cx_norm - 0.5))) * edge_weight
 
@@ -372,11 +410,15 @@ class _FrameDetector(AbstractDetector):
                 dist_to_floor = np.abs(boxes_bottom - expected_floor_model) / float(self._model_h)
 
                 # Reject ONLY hard ceiling pareidolia: detections whose TOP is above the
-                # established floor_y AND whose bottom is far from the floor.
+                # established floor_y AND whose bottom is far from the floor (unless tracking
+                # a hero actively climbing/jumping in that exact 2D neighborhood).
                 boxes_top = boxes_raw[:, 1] - boxes_raw[:, 3] / 2.0
                 is_above_floor = boxes_top < expected_floor_model
                 is_far_from_floor = dist_to_floor > 0.65
-                ceiling_block = is_above_floor & is_far_from_floor
+                if near_tracked_2d is not None:
+                    ceiling_block = is_above_floor & is_far_from_floor & ~near_tracked_2d
+                else:
+                    ceiling_block = is_above_floor & is_far_from_floor
                 mask = mask & ~ceiling_block
 
                 # Moderated floor affinity (~5x range instead of 95x): keeps grounded players
@@ -397,6 +439,14 @@ class _FrameDetector(AbstractDetector):
                         0.50 + 2.0 * np.exp(-dist_to_floor * 5.0),
                     ),
                 )
+                if near_tracked_2d is not None and dist_2d_arr is not None:
+                    # Never penalize a tracked hero mid-jump relative to grounded enemies
+                    airborne_guard = 1.05 + 1.25 * np.exp(-dist_2d_arr * 4.5)
+                    floor_weight = np.where(
+                        near_tracked_2d & (bottomness <= 0.90),
+                        np.maximum(floor_weight, airborne_guard),
+                        floor_weight,
+                    )
                 platformer_scores = person_scores * mask * playfield_weight * horiz_weight * floor_weight
             else:
                 platformer_scores = person_scores * mask * playfield_weight * horiz_weight
@@ -489,7 +539,8 @@ class _FrameDetector(AbstractDetector):
                       platformer_mode: bool = False,
                       expected_floor_y: Optional[float] = None,
                       is_batch: bool = False,
-                      expected_cx: Optional[float] = None) -> Optional[BoundingBox]:
+                      expected_cx: Optional[float] = None,
+                      expected_cy: Optional[float] = None) -> Optional[BoundingBox]:
         if self._get_active_session(is_batch) is None:
             return None
         if multi_fusion:
@@ -502,19 +553,112 @@ class _FrameDetector(AbstractDetector):
                                   platformer_mode=platformer_mode,
                                   expected_floor_y=expected_floor_y,
                                   is_batch=is_batch,
-                                  expected_cx=expected_cx)
+                                  expected_cx=expected_cx,
+                                  expected_cy=expected_cy)
+
+    def _strip_wide_platformer_bands(self, mask: np.ndarray, frame_w: int) -> np.ndarray:
+        """Bridge horizontal brick/mortar gaps along X only, then strip wide scroll bands."""
+        cv2 = self.cv2
+        gap_w = max(9, int(frame_w * 0.065))
+        gap_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_w, 1))
+        band_probe = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, gap_kernel)
+        band_w = max(16, int(frame_w * 0.38))
+        horiz_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (band_w, 3))
+        wide_bands = cv2.morphologyEx(band_probe, cv2.MORPH_OPEN, horiz_kernel)
+        stripped = cv2.bitwise_and(mask, cv2.bitwise_not(wide_bands))
+        return stripped if cv2.countNonZero(stripped) > 0 else mask
+
+    def _build_scroll_compensated_mask(
+        self, prev_gray: np.ndarray, gray: np.ndarray
+    ) -> Optional[np.ndarray]:
+        """
+        Estimate global 2D background camera scroll `(bg_dx, bg_dy)` and extract sprites moving
+        independently of the scrolling background (pipes, clouds, coral reefs, tile walls).
+        """
+        cv2 = self.cv2
+        frame_h, frame_w = gray.shape[:2]
+        if frame_w < 96 or frame_h < 80:
+            self.last_bg_scroll = (0.0, 0.0, 0.0)
+            return None
+        y0 = int(frame_h * 0.14)
+        play_h = frame_h - y0
+        if play_h < 48:
+            self.last_bg_scroll = (0.0, 0.0, 0.0)
+            return None
+
+        try:
+            s_prev = cv2.resize(prev_gray[y0:, :], (128, 96), interpolation=cv2.INTER_AREA).astype(np.float32)
+            s_curr = cv2.resize(gray[y0:, :], (128, 96), interpolation=cv2.INTER_AREA).astype(np.float32)
+            if self._scroll_window is None or self._scroll_window.shape != (96, 128):
+                self._scroll_window = cv2.createHanningWindow((128, 96), cv2.CV_32F)
+            (dx_s, dy_s), resp = cv2.phaseCorrelate(s_prev, s_curr, self._scroll_window)
+            bg_dx = float(dx_s) * (float(frame_w) / 128.0)
+            bg_dy = float(dy_s) * (float(play_h) / 96.0)
+            self.last_bg_scroll = (bg_dx, bg_dy, float(resp))
+        except Exception:
+            self.last_bg_scroll = (0.0, 0.0, 0.0)
+            return None
+
+        scroll_mag = math.hypot(bg_dx, bg_dy)
+        max_scroll = max(float(frame_w), float(frame_h)) * 0.25
+        if resp < 0.30 or scroll_mag < 2.5 or scroll_mag > max_scroll:
+            return None
+
+        warp_mat = np.float32([[1.0, 0.0, bg_dx], [0.0, 1.0, bg_dy]])
+        aligned_prev = cv2.warpAffine(
+            prev_gray,
+            warp_mat,
+            (frame_w, frame_h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        res_diff = cv2.absdiff(gray, aligned_prev)
+        bx = min(frame_w // 3, int(math.ceil(abs(bg_dx))) + 2)
+        by = min(frame_h // 3, int(math.ceil(abs(bg_dy))) + 2)
+        if bg_dx > 0.5 and bx > 0:
+            res_diff[:, :bx] = 0
+        elif bg_dx < -0.5 and bx > 0:
+            res_diff[:, frame_w - bx :] = 0
+        if bg_dy > 0.5 and by > 0:
+            res_diff[:by, :] = 0
+        elif bg_dy < -0.5 and by > 0:
+            res_diff[frame_h - by :, :] = 0
+        # Mask static top HUD score/timer row flicker during camera scroll
+        res_diff[: int(frame_h * 0.11), :] = 0
+
+        _, smask = cv2.threshold(cv2.GaussianBlur(res_diff, (5, 5), 0), 24, 255, cv2.THRESH_BINARY)
+        # Suppress empty background ghost holes left at the sprite's previous world position by
+        # requiring current-frame spatial detail (sprite edges/silhouette present in `gray`).
+        grad_k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, grad_k)
+        _, detail_mask = cv2.threshold(grad, 14, 255, cv2.THRESH_BINARY)
+        k5 = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        detail_mask = cv2.dilate(detail_mask, k5, iterations=2)
+        smask = cv2.bitwise_and(smask, detail_mask)
+        smask = cv2.morphologyEx(smask, cv2.MORPH_OPEN, k5)
+        smask = cv2.morphologyEx(smask, cv2.MORPH_DILATE, k5, iterations=2)
+
+        nz = cv2.countNonZero(smask)
+        if nz <= 0 or nz > int(frame_w * frame_h * 0.28):
+            # Reject global multi-layer parallax shimmer floods
+            return None
+        return self._strip_wide_platformer_bands(smask, frame_w)
 
     def detect_motion(self, frame: np.ndarray, platformer_mode: bool = False,
                       expected_floor_y: Optional[float] = None,
-                      expected_cx: Optional[float] = None) -> Optional[BoundingBox]:
+                      expected_cx: Optional[float] = None,
+                      expected_cy: Optional[float] = None,
+                      expected_h: Optional[float] = None) -> Optional[BoundingBox]:
         cv2 = self.cv2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         if self.prev_gray is None or self.prev_gray.shape != gray.shape:
             self.prev_gray = gray
+            self.last_bg_scroll = (0.0, 0.0, 0.0)
             return None
 
-        diff = cv2.absdiff(gray, self.prev_gray)
+        prev_gray_ref = self.prev_gray
+        diff = cv2.absdiff(gray, prev_gray_ref)
         self.prev_gray = gray
         blur = cv2.GaussianBlur(diff, (7, 7), 0)
         _, mask = cv2.threshold(blur, 24, 255, cv2.THRESH_BINARY)
@@ -527,30 +671,20 @@ class _FrameDetector(AbstractDetector):
         mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=2)
 
         frame_h, frame_w = frame.shape[:2]
+        scroll_comp_mask: Optional[np.ndarray] = None
         if platformer_mode:
+            scroll_comp_mask = self._build_scroll_compensated_mask(prev_gray_ref, gray)
             # Reject global camera flashes before band suppression
             if cv2.countNonZero(mask) > int(frame_w * frame_h * 0.70):
-                return None
-            # Bridge horizontal brick/mortar/checkerboard gaps strictly along X (height=1 so
-            # sprite feet are NEVER fused vertically into ground), then strip wide horizontal
-            # ground/HUD scroll bands (>= 38% frame width).
-            gap_w = max(9, int(frame_w * 0.065))
-            gap_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_w, 1))
-            band_probe = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, gap_kernel)
-            band_w = max(16, int(frame_w * 0.38))
-            horiz_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (band_w, 3))
-            wide_bands = cv2.morphologyEx(band_probe, cv2.MORPH_OPEN, horiz_kernel)
-            stripped = cv2.bitwise_and(mask, cv2.bitwise_not(wide_bands))
-            if cv2.countNonZero(stripped) > 0:
-                mask = stripped
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
+                if scroll_comp_mask is None:
+                    return None
+                mask = scroll_comp_mask
+            else:
+                mask = self._strip_wide_platformer_bands(mask, frame_w)
 
         def score_contour(c):
             area = cv2.contourArea(c)
-            if area < 120.0:
+            if area < 100.0 if platformer_mode else area < 120.0:
                 return 0.0
             x, y, w, h = cv2.boundingRect(c)
             # Reject full-frame camera scroll / global flash artifacts (>92% width and >85% height)
@@ -561,8 +695,10 @@ class _FrameDetector(AbstractDetector):
             if platformer_mode:
                 if (w > frame_w * 0.72 and h > frame_h * 0.65) or h > frame_h * 0.58:
                     return 0.0
+                if w > frame_w * 0.48 and h > frame_h * 0.42:
+                    return 0.0
                 bottom_y = y + h
-                if bottom_y < frame_h * 0.22:
+                if bottom_y < frame_h * 0.12:
                     return 0.0
                 aspect_wh = float(w) / max(1.0, float(h))
                 # Reject wide horizontal ground/HUD scroll bands and thick bottom-border slabs
@@ -573,7 +709,7 @@ class _FrameDetector(AbstractDetector):
                 if bottom_y >= frame_h * 0.98 and w > frame_w * 0.42 and aspect_wh > 1.35:
                     return 0.0
 
-                eff_area = min(float(area), float(frame_w * frame_h) * 0.025)
+                eff_area = min(float(area), max(350.0, float(frame_w * frame_h) * 0.0040))
                 aspect_hw = float(h) / max(1.0, float(w))
                 if 0.60 <= aspect_hw <= 2.6:
                     shape_weight = 1.35
@@ -582,25 +718,74 @@ class _FrameDetector(AbstractDetector):
                 else:
                     shape_weight = 0.25
 
+                # Scale consistency against established hero height: demote tiny projectiles,
+                # bubbles, shells, coins, or fireballs (<48% of hero height) and oversized props.
+                scale_weight = 1.0
+                if expected_h is not None and float(expected_h) >= 16.0:
+                    h_ratio = float(h) / float(expected_h)
+                    if h_ratio < 0.48:
+                        scale_weight = 0.35
+                    elif 0.62 <= h_ratio <= 1.50:
+                        scale_weight = 1.22
+                    elif h_ratio > 2.10:
+                        scale_weight = 0.55
+
+                # Chromatic sprite salience: in 8/16-bit platformers, player sprites use vivid
+                # saturated palettes whereas mechanical hazards (sawblades, chains, rotating stone
+                # platforms, brick walls) are achromatic grey/white. Uniform grayscale frames keep
+                # identical relative scores across all contours.
+                sat_weight = 1.0
+                if frame.ndim == 3 and frame.shape[2] == 3 and w >= 6 and h >= 6:
+                    sub_bgr = frame[y : y + h, x : x + w]
+                    b_ch = sub_bgr[:, :, 0].astype(np.int16)
+                    g_ch = sub_bgr[:, :, 1].astype(np.int16)
+                    r_ch = sub_bgr[:, :, 2].astype(np.int16)
+                    c_max = np.maximum(np.maximum(r_ch, g_ch), b_ch)
+                    c_min = np.minimum(np.minimum(r_ch, g_ch), b_ch)
+                    chroma = c_max - c_min
+                    active_px = c_max > 28
+                    mean_chroma = float(np.mean(chroma[active_px])) if np.any(active_px) else 0.0
+                    if mean_chroma < 18.0:
+                        sat_weight = 0.72
+                    elif mean_chroma >= 55.0:
+                        sat_weight = 1.42
+                    else:
+                        sat_weight = 0.72 + 0.70 * ((mean_chroma - 18.0) / 37.0)
+
                 bottomness = bottom_y / float(frame_h)
-                if 0.45 <= bottomness <= 0.88:
-                    playfield_weight = 1.25
-                elif 0.30 <= bottomness < 0.45:
-                    playfield_weight = 0.75 + 3.3 * (bottomness - 0.30)
+                is_initial_lock = expected_floor_y is None and expected_cx is None
+                if 0.55 <= bottomness <= 0.88:
+                    playfield_weight = 1.60 if is_initial_lock else 1.25
+                elif 0.45 <= bottomness < 0.55:
+                    playfield_weight = 1.05 if is_initial_lock else 1.25
+                elif 0.25 <= bottomness < 0.45:
+                    playfield_weight = (0.60 if is_initial_lock else 0.75) + 2.2 * (bottomness - 0.25)
                 elif 0.88 < bottomness <= 0.94:
                     playfield_weight = 0.85
                 elif bottomness > 0.94:
                     playfield_weight = 0.25
                 else:
-                    playfield_weight = 0.30
+                    playfield_weight = 0.55
 
+                near_tracked = False
+                dist_2d = 1.0
                 if expected_cx is not None:
-                    dx_norm = abs((float(x) + float(w) * 0.5) - float(expected_cx)) / max(1.0, float(frame_w))
-                    horiz_weight = 1.0 + 0.90 * math.exp(-dx_norm * 5.0)
+                    cx_c = float(x) + float(w) * 0.5
+                    dx_norm = abs(cx_c - float(expected_cx)) / max(1.0, float(frame_w))
+                    if expected_cy is not None:
+                        cy_c = float(y) + float(h) * 0.5
+                        dy_norm = abs(cy_c - float(expected_cy)) / max(1.0, float(frame_h))
+                        dist_2d = math.hypot(dx_norm, dy_norm * 0.85)
+                        near_tracked = dist_2d < 0.24
+                        horiz_weight = 1.0 + 2.10 * math.exp(-dist_2d * 4.5)
+                        if near_tracked and bottomness <= 0.88:
+                            playfield_weight = max(playfield_weight, 1.15)
+                    else:
+                        horiz_weight = 1.0 + 0.90 * math.exp(-dx_norm * 5.0)
                 else:
                     horiz_weight = 1.0
 
-                base_score = eff_area * shape_weight * playfield_weight * horiz_weight
+                base_score = eff_area * shape_weight * scale_weight * sat_weight * playfield_weight * horiz_weight
                 if expected_floor_y is not None:
                     dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
                     if bottom_y > expected_floor_y and bottomness <= 0.94:
@@ -609,9 +794,30 @@ class _FrameDetector(AbstractDetector):
                         fw_mult = 0.08 + 1.8 * math.exp(-dist_to_floor * 7.5)
                     else:
                         fw_mult = 0.50 + 2.0 * math.exp(-dist_to_floor * 5.0)
+                    if near_tracked and bottomness <= 0.90:
+                        fw_mult = max(fw_mult, 1.05 + 1.25 * math.exp(-dist_2d * 4.5))
                     return base_score * fw_mult
                 return base_score
             return area
+
+        if scroll_comp_mask is not None:
+            sc_contours, _ = cv2.findContours(
+                scroll_comp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            valid_sc = [
+                c for c in sc_contours
+                if cv2.boundingRect(c)[2] <= frame_w * 0.36
+                and cv2.boundingRect(c)[3] <= frame_h * 0.46
+            ]
+            if valid_sc:
+                c_sc_best = max(valid_sc, key=score_contour)
+                if score_contour(c_sc_best) > 0.0:
+                    sx, sy, sw, sh = cv2.boundingRect(c_sc_best)
+                    return BoundingBox(int(sx), int(sy), int(sw), int(sh))
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
 
         c_best = max(contours, key=score_contour)
         if score_contour(c_best) == 0.0:

@@ -86,6 +86,14 @@ class SceneChangeStage(ITrackerStage):
                 engine.prev_roi_cx = None
                 engine.prev_roi_cy = None
                 engine._last_valid_roi_cx = None
+                engine._last_valid_roi_cy = None
+                engine._last_valid_roi = None
+                engine._last_valid_src_idx = None
+                engine._frames_since_valid_roi = 0
+                engine._mature_lock_frames = 0
+                engine._switch_candidate_roi = None
+                engine._switch_candidate_streak = 0
+                engine._locked_sprite_patch = None
                 engine._last_yolo_roi = None
                 engine.frames_since_scene_change = 0
                 
@@ -98,7 +106,41 @@ class SceneChangeStage(ITrackerStage):
 
 
 class DetectionStage(ITrackerStage):
-    """Invokes the detector model to retrieve raw ROI."""
+    """Invokes the detector model to retrieve raw ROI (with lightweight inter-sample sprite tracking)."""
+
+    @staticmethod
+    def _track_subsampled_sprite_patch(
+        frame: np.ndarray,
+        prev_roi: BoundingBox,
+        patch: np.ndarray,
+        eff_left: int,
+        eff_top: int,
+        eff_w: int,
+        eff_h: int,
+    ) -> Optional[BoundingBox]:
+        """Track a textured pixel-art sprite across skipped YOLO frames in <0.25 ms via local NCC."""
+        fh, fw = frame.shape[:2]
+        ph, pw = patch.shape[:2]
+        if ph < 10 or pw < 10 or fh <= ph or fw <= pw:
+            return None
+        rx, ry, rw, rh = prev_roi
+        pad_x = max(20, int(eff_w * 0.11))
+        pad_y = max(24, int(eff_h * 0.15))
+        sx1 = max(eff_left, rx - pad_x)
+        sy1 = max(eff_top, ry - pad_y)
+        sx2 = min(fw, min(eff_left + eff_w, rx + rw + pad_x))
+        sy2 = min(fh, min(eff_top + eff_h, ry + rh + pad_y))
+        if (sx2 - sx1) < pw + 2 or (sy2 - sy1) < ph + 2:
+            return None
+        search_gray = cv2.cvtColor(frame[sy1:sy2, sx1:sx2], cv2.COLOR_BGR2GRAY)
+        res = cv2.matchTemplate(search_gray, patch, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        if float(max_val) < 0.72:
+            return None
+        nx = int(sx1 + max_loc[0])
+        ny = int(sy1 + max_loc[1])
+        return BoundingBox(nx, ny, int(rw), int(rh))
+
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         expected_floor_y = (
             engine.floor_est.floor_y
@@ -106,10 +148,13 @@ class DetectionStage(ITrackerStage):
             else None
         )
         expected_cx = getattr(engine, "_last_valid_roi_cx", None)
-        
+        expected_cy = getattr(engine, "_last_valid_roi_cy", None)
+        is_plat = bool(getattr(engine.cfg, "platformer_mode", False))
+
         if getattr(engine.cfg, 'auto_fast_tracking', False):
-            # Target roughly 5 frames per second for YOLO processing
-            subsample = max(1, math.ceil(engine.fps / 5.0))
+            # Platformer jumps complete in ~0.4-0.5s: sample at ~10 Hz (vs 5 Hz for slow cinema)
+            target_hz = 10.0 if is_plat else 5.0
+            subsample = max(1, math.ceil(engine.fps / target_hz))
         else:
             subsample = getattr(engine.cfg, 'subsample_frames', 3)
         run_detector = (
@@ -118,19 +163,65 @@ class DetectionStage(ITrackerStage):
             engine.frames_since_scene_change % subsample == 0
         )
 
+        is_native_detector = (
+            isinstance(engine.detector, _FrameDetector)
+            and "detect" not in engine.detector.__dict__
+        )
+
         if not run_detector:
             context.fresh_detection = False
-            context.raw_roi = getattr(engine, "_last_yolo_roi", None)
+            cached_roi = getattr(engine, "_last_yolo_roi", None)
+            if is_native_detector:
+                detect_slice = (
+                    context.frame
+                    if engine.face_priority_mode
+                    else context.frame[engine.effective_frame_top:engine.effective_frame_h, :]
+                )
+                engine.detector.feed_subsampled_frame(detect_slice)
+                if (
+                    is_plat
+                    and cached_roi is not None
+                    and getattr(engine, "_locked_sprite_patch", None) is not None
+                ):
+                    tracked = self._track_subsampled_sprite_patch(
+                        context.frame,
+                        cached_roi,
+                        engine._locked_sprite_patch,
+                        engine.effective_frame_left,
+                        engine.effective_frame_top,
+                        engine.effective_frame_w,
+                        engine.effective_frame_h,
+                    )
+                    if tracked is not None:
+                        cached_roi = tracked
+                        engine._last_yolo_roi = tracked
+            context.raw_roi = cached_roi
             return
 
         context.fresh_detection = True
-        extra_kw = {"expected_cx": expected_cx} if isinstance(engine.detector, _FrameDetector) else {}
+        extra_kw = {}
+        if isinstance(engine.detector, _FrameDetector):
+            extra_kw["expected_cx"] = expected_cx
+            if expected_cy is not None:
+                extra_kw["expected_cy"] = (
+                    expected_cy
+                    if engine.face_priority_mode
+                    else expected_cy - float(engine.effective_frame_top)
+                )
+            if is_plat and getattr(engine, "standing_subject_h", 0.0) >= 16.0:
+                extra_kw["expected_h"] = float(engine.standing_subject_h)
+
+        eff_min_conf = (
+            float(engine.cfg.roi_confidence_min)
+            if float(engine.cfg.roi_confidence_min) > 0.0
+            else (0.36 if is_plat else 0.0)
+        )
 
         if engine.face_priority_mode:
             context.raw_roi = engine.detector.detect(
                 context.frame, engine.current_detector,
                 multi_fusion=engine.cfg.multi_roi_fusion_enabled and not engine.cfg.platformer_mode,
-                min_conf=engine.cfg.roi_confidence_min,
+                min_conf=eff_min_conf,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
                 expected_floor_y=expected_floor_y,
@@ -141,7 +232,7 @@ class DetectionStage(ITrackerStage):
             context.raw_roi = engine.detector.detect(
                 detect_frame, engine.current_detector,
                 multi_fusion=engine.cfg.multi_roi_fusion_enabled and not engine.cfg.platformer_mode,
-                min_conf=engine.cfg.roi_confidence_min,
+                min_conf=eff_min_conf,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
                 expected_floor_y=expected_floor_y - engine.effective_frame_top if expected_floor_y is not None else None,
@@ -168,13 +259,29 @@ class PersistenceStage(ITrackerStage):
 
 
 class ValidationStage(ITrackerStage):
-    """Rejects micro or insignificant ROI detections and full-frame scroll noise."""
+    """Rejects micro/insignificant ROIs and enforces platformer target-switch probation."""
+
+    @staticmethod
+    def _roi_mean_chroma(frame: np.ndarray, roi: BoundingBox) -> float:
+        if frame is None or frame.ndim != 3 or frame.shape[2] != 3:
+            return 0.0
+        fh, fw = frame.shape[:2]
+        x1, y1 = max(0, int(roi[0])), max(0, int(roi[1]))
+        x2, y2 = min(fw, int(roi[0] + roi[2])), min(fh, int(roi[1] + roi[3]))
+        if (x2 - x1) < 4 or (y2 - y1) < 4:
+            return 0.0
+        sub = frame[y1:y2, x1:x2].astype(np.int16)
+        c_max = np.maximum(np.maximum(sub[:, :, 0], sub[:, :, 1]), sub[:, :, 2])
+        c_min = np.minimum(np.minimum(sub[:, :, 0], sub[:, :, 1]), sub[:, :, 2])
+        active = c_max > 28
+        return float(np.mean((c_max - c_min)[active])) if np.any(active) else 0.0
+
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         # Micro-detection Rejection (relaxed in platformer/2D sprite mode where sprites are ~0.8%-1.5% of screen area)
+        is_floor_scene = bool(getattr(engine.cfg, "platformer_mode", False))
         if context.raw_roi is not None and engine.cfg.min_roi_area_ratio > 0.0:
             roi_area = context.raw_roi[2] * context.raw_roi[3]
             frame_area = engine.frame_w * engine.frame_h
-            is_floor_scene = getattr(engine.cfg, "platformer_mode", False)
             min_ratio = (
                 min(engine.cfg.min_roi_area_ratio, 0.004)
                 if is_floor_scene
@@ -191,6 +298,89 @@ class ValidationStage(ITrackerStage):
             dmd_h = context.raw_roi[3] * _dmd_scale
             if dmd_w < engine.cfg.min_subject_dmd_px and dmd_h < engine.cfg.min_subject_dmd_px:
                 context.raw_roi = None
+
+        # Anti-Hijack Target-Switch Probation Gate (platformer_mode):
+        # Prevent 1-2 frame enemy, projectile, sawblade, or firebar detections far from the
+        # tracked hero from suddenly hijacking camera focus or resetting floor estimation.
+        if is_floor_scene and context.fresh_detection:
+            prev_valid = getattr(engine, "_last_valid_roi", None)
+            if context.raw_roi is None:
+                engine._frames_since_valid_roi = getattr(engine, "_frames_since_valid_roi", 0) + 1
+            elif prev_valid is not None:
+                eff_w = max(1.0, float(engine.effective_frame_w))
+                eff_h = max(1.0, float(engine.effective_frame_h))
+                last_src_idx = getattr(engine, "_last_valid_src_idx", None)
+                dt = (
+                    max(1, int(context.src_idx) - int(last_src_idx))
+                    if last_src_idx is not None
+                    else max(1, int(getattr(engine, "_frames_since_valid_roi", 0)) + 1)
+                )
+                prev_cx = float(prev_valid[0]) + float(prev_valid[2]) * 0.5
+                prev_cy = float(prev_valid[1]) + float(prev_valid[3]) * 0.5
+                cand_cx = float(context.raw_roi[0]) + float(context.raw_roi[2]) * 0.5
+                cand_cy = float(context.raw_roi[1]) + float(context.raw_roi[3]) * 0.5
+                dx = abs(cand_cx - prev_cx)
+                dy = abs(cand_cy - prev_cy)
+
+                same_col_jump_or_drop = (
+                    dx <= eff_w * min(0.22, 0.16 + 0.015 * dt)
+                    and dy <= eff_h * min(0.50, 0.34 + 0.03 * dt)
+                )
+                rad_x = eff_w * min(0.36, 0.22 + 0.025 * dt)
+                rad_y = eff_h * min(0.42, 0.26 + 0.025 * dt)
+                in_kinematic_ellipse = math.hypot(dx / rad_x, dy / rad_y) <= 1.0
+
+                prev_area = max(1.0, float(prev_valid[2] * prev_valid[3]))
+                cand_area = float(context.raw_roi[2] * context.raw_roi[3])
+                sudden_scenery_bloat = (
+                    cand_area > prev_area * 2.8
+                    and float(context.raw_roi[2]) > float(prev_valid[2]) * 1.75
+                    and dx > eff_w * 0.08
+                )
+
+                # Early lock upgrade: if frame 1-5 initially locked onto an achromatic upper-screen
+                # hazard (e.g. grey spinning sawblade while the hero stood idle on frame 1) and a
+                # vivid colorful hero sprite now moves on the lower playfield, upgrade immediately.
+                early_hero_upgrade = False
+                if getattr(engine, "_mature_lock_frames", 0) <= 6:
+                    prev_btm_rel = (float(prev_valid[1] + prev_valid[3]) - float(engine.effective_frame_top)) / eff_h
+                    cand_btm_rel = (float(context.raw_roi[1] + context.raw_roi[3]) - float(engine.effective_frame_top)) / eff_h
+                    if prev_btm_rel < 0.55 and 0.50 <= cand_btm_rel <= 0.92:
+                        prev_chroma = self._roi_mean_chroma(context.frame, prev_valid)
+                        cand_chroma = self._roi_mean_chroma(context.frame, context.raw_roi)
+                        if prev_chroma < 24.0 and cand_chroma >= 45.0:
+                            early_hero_upgrade = True
+                            if engine.floor_est is not None:
+                                engine.floor_est = _FloorEstimator(engine.cam_frame_h)
+                            engine.roi_history.clear()
+
+                if ((same_col_jump_or_drop or in_kinematic_ellipse) and not sudden_scenery_bloat) or early_hero_upgrade:
+                    engine._switch_candidate_roi = None
+                    engine._switch_candidate_streak = 0
+                else:
+                    sc_prev = getattr(engine, "_switch_candidate_roi", None)
+                    if sc_prev is not None:
+                        sc_cx = float(sc_prev[0]) + float(sc_prev[2]) * 0.5
+                        sc_cy = float(sc_prev[1]) + float(sc_prev[3]) * 0.5
+                        if abs(cand_cx - sc_cx) <= eff_w * 0.16 and abs(cand_cy - sc_cy) <= eff_h * 0.20:
+                            engine._switch_candidate_streak += 1
+                        else:
+                            engine._switch_candidate_streak = 1
+                    else:
+                        engine._switch_candidate_streak = 1
+                    engine._switch_candidate_roi = context.raw_roi
+
+                    required_streak = 2 if getattr(engine, "_mature_lock_frames", 0) < 3 else 3
+                    if engine._switch_candidate_streak < required_streak:
+                        # Hold lock on the established hero while disjoint candidate is on probation
+                        context.raw_roi = prev_valid
+                        engine._last_yolo_roi = prev_valid
+                        context.fresh_detection = False
+                        engine._frames_since_valid_roi = dt
+                    else:
+                        engine._switch_candidate_roi = None
+                        engine._switch_candidate_streak = 0
+                        engine._mature_lock_frames = 1
 
 
 class FaceClippingStage(ITrackerStage):
@@ -291,45 +481,85 @@ class FloorEstimationStage(ITrackerStage):
                         roi_bottom = bottom_val
             context.floor_y_est = engine.floor_est.update(roi_bottom)
 
+        if context.fresh_detection and context.raw_roi is not None:
+            rx_v, ry_v, rw_v, rh_v = context.raw_roi
+            engine._last_valid_roi = context.raw_roi
+            engine._last_valid_src_idx = int(context.src_idx)
+            engine._last_valid_roi_cx = float(rx_v) + float(rw_v) * 0.5
+            engine._last_valid_roi_cy = float(ry_v) + float(rh_v) * 0.5
+            engine._frames_since_valid_roi = 0
+            engine._mature_lock_frames = min(60, getattr(engine, "_mature_lock_frames", 0) + 1)
+            if bool(getattr(engine.cfg, "platformer_mode", False)):
+                fh_f, fw_f = context.frame.shape[:2]
+                px1, py1 = max(0, int(rx_v)), max(0, int(ry_v))
+                px2, py2 = min(fw_f, int(rx_v + rw_v)), min(fh_f, int(ry_v + rh_v))
+                pw_p, ph_p = px2 - px1, py2 - py1
+                if (
+                    pw_p >= 10
+                    and ph_p >= 10
+                    and pw_p <= int(fw_f * 0.22)
+                    and ph_p <= int(fh_f * 0.42)
+                    and float(pw_p) <= float(ph_p) * 1.18
+                ):
+                    patch_gray = cv2.cvtColor(context.frame[py1:py2, px1:px2], cv2.COLOR_BGR2GRAY)
+                    if float(np.std(patch_gray)) >= 10.0:
+                        engine._locked_sprite_patch = patch_gray
+
 
 class HistorySynthesisStage(ITrackerStage):
     """Smooths ROI over time using a deque history buffer."""
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.roi_history_enabled:
+            is_plat = bool(getattr(engine.cfg, "platformer_mode", False))
+            eff_max_len = (
+                min(engine.roi_history_max_len, max(4, int(round(engine.fps * 0.22))))
+                if is_plat
+                else engine.roi_history_max_len
+            )
             if context.fresh_detection and context.raw_roi is not None:
-                if (
-                    bool(getattr(engine.cfg, "platformer_mode", False))
-                    and engine.roi_history
-                ):
+                if is_plat and engine.roi_history:
                     prev_hr = engine.roi_history[-1][1]
                     prev_bottom = float(prev_hr[1] + prev_hr[3])
                     new_bottom = float(context.raw_roi[1] + context.raw_roi[3])
-                    # Flush stale platform history on genuine downward drops OR confirmed
-                    # upward platform climbs so synthesized ROI tracks the new platform cleanly.
+                    # Flush stale history on genuine downward drops so descent starts immediately;
+                    # upward climbs track smoothly via the short (~0.22s) platformer window without
+                    # causing a 1-frame discontinuity snap.
                     is_downward_drop = (
                         new_bottom - prev_bottom > float(engine.effective_frame_h) * 0.08
                         and new_bottom < float(engine.effective_frame_h) * 0.96
                     )
-                    is_upward_climb = (
-                        engine.floor_est is not None
-                        and getattr(engine.floor_est, "_reanchoring_up", False)
-                        and prev_bottom - new_bottom > float(engine.effective_frame_h) * 0.06
-                    )
-                    if is_downward_drop or is_upward_climb:
+                    if is_downward_drop:
                         engine.roi_history.clear()
                 engine.roi_history.append((1.0, context.raw_roi))
-                while len(engine.roi_history) > engine.roi_history_max_len:
+                while len(engine.roi_history) > eff_max_len:
+                    engine.roi_history.popleft()
+            elif is_plat and context.raw_roi is not None and engine.roi_history:
+                # On subsampled local-patch tracked frames, update most recent slot smoothly
+                while len(engine.roi_history) > eff_max_len:
                     engine.roi_history.popleft()
             if engine.roi_history:
-                total_w = 0.0
-                wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
-                for idx, (_, hr) in enumerate(engine.roi_history):
-                    w = float(idx + 1)
-                    total_w += w
-                    wx += w * hr[0]
-                    wy += w * hr[1]
-                    ww += w * hr[2]
-                    wh += w * hr[3]
+                if is_plat and not context.fresh_detection and context.raw_roi is not None:
+                    # Blend local subsampled sprite patch position directly with short history
+                    total_w = 0.0
+                    wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
+                    items = [hr for _, hr in engine.roi_history] + [context.raw_roi]
+                    for idx, hr in enumerate(items):
+                        w = float(idx + 1)
+                        total_w += w
+                        wx += w * hr[0]
+                        wy += w * hr[1]
+                        ww += w * hr[2]
+                        wh += w * hr[3]
+                else:
+                    total_w = 0.0
+                    wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
+                    for idx, (_, hr) in enumerate(engine.roi_history):
+                        w = float(idx + 1)
+                        total_w += w
+                        wx += w * hr[0]
+                        wy += w * hr[1]
+                        ww += w * hr[2]
+                        wh += w * hr[3]
                 if total_w > 0:
                     context.raw_roi = BoundingBox(int(round(wx / total_w)), int(round(wy / total_w)), int(round(ww / total_w)), int(round(wh / total_w)))
                     context.face_roi = engine._clip_to_face_roi(context.raw_roi)
@@ -430,28 +660,27 @@ class CameraBuilderStage(ITrackerStage):
             prop_cx, prop_cy, cw, ch = float(raw_cam[0]), float(raw_cam[1]), float(raw_cam[2]), float(raw_cam[3])
             dx = prop_cx - prev_cx
             dy = prop_cy - prev_cy
-            # Tripod deadzone hysteresis: wider upward in platformer mode so sprite walk-cycle
-            # wobble and normal hops never cause bobbing, but responsive both when dropping onto
-            # a lower platform and when rescuing a sprite head crowding the top border.
+            # Tripod deadzone & progressive vertical pursuit:
+            # Keeps sprite walk-cycle wobble and same-platform hops rock-steady while ramping
+            # upward responsiveness smoothly as a jumping/climbing sprite enters the upper 24%
+            # of the strip (avoiding both late freeze and sudden catapult jumps).
             is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
             med_h = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
             eff_stand_h = engine.standing_subject_h if engine.standing_subject_h > 0.0 else med_h
             roi_h = float(context.face_roi[3]) if context.face_roi is not None else eff_stand_h
             is_tall_sprite = is_platformer and max(eff_stand_h, roi_h) > ch * 0.79
             prev_top = prev_cy - ch / 2.0
-            head_crowded = (
-                is_platformer
-                and context.face_roi is not None
-                and float(context.face_roi[1]) < prev_top + ch * 0.06
-            )
+            up_urgency = 0.0
+            if is_platformer and dy < 0.0 and context.face_roi is not None:
+                top_margin_ratio = (float(context.face_roi[1]) - prev_top) / max(1.0, ch)
+                up_urgency = _clamp((0.24 - top_margin_ratio) / 0.20, 0.0, 1.0)
             dead_x = cw * (0.065 if is_platformer else 0.04)
             if is_platformer:
                 if dy > 0.0:
                     dead_y = ch * 0.035
-                elif head_crowded:
-                    dead_y = ch * 0.02
                 else:
-                    dead_y = ch * (0.05 if is_tall_sprite else 0.085)
+                    base_dead_y = ch * (0.05 if is_tall_sprite else 0.075)
+                    dead_y = base_dead_y * (1.0 - 0.72 * up_urgency)
             else:
                 dead_y = ch * 0.04
             target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
@@ -459,10 +688,11 @@ class CameraBuilderStage(ITrackerStage):
             # Maximum pan speed per frame before outer smoothing
             max_step_x = max(4.0, cw * (0.11 if is_platformer else 0.14))
             if is_platformer:
-                if dy > 0.0 or head_crowded:
-                    max_step_y = max(8.0, ch * 0.34)
+                if dy > 0.0:
+                    max_step_y = max(8.0, ch * 0.32)
                 else:
-                    max_step_y = max(5.0, ch * 0.22) if is_tall_sprite else max(2.5, ch * 0.08)
+                    base_step_up = ch * (0.16 if is_tall_sprite else 0.11)
+                    max_step_y = max(3.5, base_step_up + (ch * 0.15) * up_urgency)
             else:
                 max_step_y = max(3.5, ch * 0.14)
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
@@ -543,9 +773,12 @@ class LookAheadStage(ITrackerStage):
             engine.scroll_vx, engine.scroll_vy = live_vx, live_vy
 
         if engine.cfg.look_ahead_enabled and engine.cfg.look_ahead_factor > 0.0:
+            # In platformer mode, keep horizontal run look-ahead while suppressing vertical jump
+            # look-ahead so jump velocity never yanks the floor-locked strip off the ground line.
+            eff_scroll_vy = 0.0 if bool(getattr(engine.cfg, "platformer_mode", False)) else engine.scroll_vy
             context.cam_now = _apply_look_ahead(
                 context.cam_now,
-                engine.scroll_vx, engine.scroll_vy,
+                engine.scroll_vx, eff_scroll_vy,
                 engine.frame_w, engine.frame_h,
                 engine.cfg.look_ahead_factor,
                 roi_persistence=engine.roi_persistence_score,
@@ -555,10 +788,14 @@ class LookAheadStage(ITrackerStage):
             
         engine.prev_roi_cx = curr_roi_cx
         engine.prev_roi_cy = curr_roi_cy
-        if curr_roi_cx is not None:
+        if curr_roi_cx is not None and engine._last_valid_roi_cx is None:
             engine._last_valid_roi_cx = curr_roi_cx
-        elif engine.roi_persistence_frames == 0:
+        if curr_roi_cy is not None and engine._last_valid_roi_cy is None:
+            engine._last_valid_roi_cy = curr_roi_cy
+        if curr_roi_cx is None and engine.roi_persistence_frames == 0:
             engine._last_valid_roi_cx = None
+            engine._last_valid_roi_cy = None
+            engine._last_valid_roi = None
         
         engine._last_roi = context.raw_roi
 
@@ -636,6 +873,13 @@ class TrackingEngine(ITracker):
         self.prev_roi_cx: Optional[float] = None
         self.prev_roi_cy: Optional[float] = None
         self._last_valid_roi_cx: Optional[float] = None
+        self._last_valid_roi_cy: Optional[float] = None
+        self._last_valid_roi: Optional[BoundingBox] = None
+        self._frames_since_valid_roi: int = 0
+        self._mature_lock_frames: int = 0
+        self._switch_candidate_roi: Optional[BoundingBox] = None
+        self._switch_candidate_streak: int = 0
+        self._locked_sprite_patch: Optional[np.ndarray] = None
         self.scroll_vx: float = 0.0
         self.scroll_vy: float = 0.0
         self.scroll_memory_frames: int = 0
