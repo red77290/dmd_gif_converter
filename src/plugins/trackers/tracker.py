@@ -150,10 +150,11 @@ class DetectionStage(ITrackerStage):
         expected_cx = getattr(engine, "_last_valid_roi_cx", None)
         expected_cy = getattr(engine, "_last_valid_roi_cy", None)
         is_plat = bool(getattr(engine.cfg, "platformer_mode", False))
+        is_sprite_action = bool(getattr(engine, "is_sprite_action_mode", is_plat))
 
         if getattr(engine.cfg, 'auto_fast_tracking', False):
-            # Platformer jumps complete in ~0.4-0.5s: sample at ~10 Hz (vs 5 Hz for slow cinema)
-            target_hz = 10.0 if is_plat else 5.0
+            # Sprite / fast-action moves complete in ~0.4-0.5s: sample at ~10 Hz (vs 5 Hz for slow cinema/portraits)
+            target_hz = 10.0 if is_sprite_action else 5.0
             subsample = max(1, math.ceil(engine.fps / target_hz))
         else:
             subsample = getattr(engine.cfg, 'subsample_frames', 3)
@@ -179,7 +180,7 @@ class DetectionStage(ITrackerStage):
                 )
                 engine.detector.feed_subsampled_frame(detect_slice)
                 if (
-                    is_plat
+                    is_sprite_action
                     and cached_roi is not None
                     and getattr(engine, "_locked_sprite_patch", None) is not None
                 ):
@@ -208,7 +209,7 @@ class DetectionStage(ITrackerStage):
                     if engine.face_priority_mode
                     else expected_cy - float(engine.effective_frame_top)
                 )
-            if is_plat and getattr(engine, "standing_subject_h", 0.0) >= 16.0:
+            if is_sprite_action and getattr(engine, "standing_subject_h", 0.0) >= 16.0:
                 extra_kw["expected_h"] = float(engine.standing_subject_h)
 
         eff_min_conf = (
@@ -220,7 +221,7 @@ class DetectionStage(ITrackerStage):
         if engine.face_priority_mode:
             context.raw_roi = engine.detector.detect(
                 context.frame, engine.current_detector,
-                multi_fusion=engine.cfg.multi_roi_fusion_enabled and not engine.cfg.platformer_mode,
+                multi_fusion=engine.cfg.multi_roi_fusion_enabled and not is_sprite_action,
                 min_conf=eff_min_conf,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
@@ -231,7 +232,7 @@ class DetectionStage(ITrackerStage):
             detect_frame = context.frame[engine.effective_frame_top:engine.effective_frame_h, :]
             context.raw_roi = engine.detector.detect(
                 detect_frame, engine.current_detector,
-                multi_fusion=engine.cfg.multi_roi_fusion_enabled and not engine.cfg.platformer_mode,
+                multi_fusion=engine.cfg.multi_roi_fusion_enabled and not is_sprite_action,
                 min_conf=eff_min_conf,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
@@ -259,7 +260,7 @@ class PersistenceStage(ITrackerStage):
 
 
 class ValidationStage(ITrackerStage):
-    """Rejects micro/insignificant ROIs and enforces platformer target-switch probation."""
+    """Rejects micro/insignificant ROIs and enforces sprite target-switch probation."""
 
     @staticmethod
     def _roi_mean_chroma(frame: np.ndarray, roi: BoundingBox) -> float:
@@ -277,14 +278,15 @@ class ValidationStage(ITrackerStage):
         return float(np.mean((c_max - c_min)[active])) if np.any(active) else 0.0
 
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
-        # Micro-detection Rejection (relaxed in platformer/2D sprite mode where sprites are ~0.8%-1.5% of screen area)
+        # Micro-detection Rejection (relaxed in 2D sprite/action scenes where sprites are ~0.5%-1.5% of screen area)
         is_floor_scene = bool(getattr(engine.cfg, "platformer_mode", False))
+        is_sprite_action = bool(getattr(engine, "is_sprite_action_mode", is_floor_scene))
         if context.raw_roi is not None and engine.cfg.min_roi_area_ratio > 0.0:
             roi_area = context.raw_roi[2] * context.raw_roi[3]
             frame_area = engine.frame_w * engine.frame_h
             min_ratio = (
                 min(engine.cfg.min_roi_area_ratio, 0.004)
-                if is_floor_scene
+                if is_sprite_action
                 else engine.cfg.min_roi_area_ratio
             )
             if frame_area > 0 and (roi_area / frame_area) < min_ratio:
@@ -299,10 +301,10 @@ class ValidationStage(ITrackerStage):
             if dmd_w < engine.cfg.min_subject_dmd_px and dmd_h < engine.cfg.min_subject_dmd_px:
                 context.raw_roi = None
 
-        # Anti-Hijack Target-Switch Probation Gate (platformer_mode):
-        # Prevent 1-2 frame enemy, projectile, sawblade, or firebar detections far from the
-        # tracked hero from suddenly hijacking camera focus or resetting floor estimation.
-        if is_floor_scene and context.fresh_detection:
+        # Anti-Hijack Target-Switch Probation Gate (all active sprite/action scenes):
+        # Prevent 1-2 frame enemy, fish, projectile, sawblade, or firebar detections far from the
+        # tracked subject from suddenly hijacking camera focus or resetting floor estimation.
+        if is_sprite_action and context.fresh_detection:
             prev_valid = getattr(engine, "_last_valid_roi", None)
             if context.raw_roi is None:
                 engine._frames_since_valid_roi = getattr(engine, "_frames_since_valid_roi", 0) + 1
@@ -326,8 +328,12 @@ class ValidationStage(ITrackerStage):
                     dx <= eff_w * min(0.22, 0.16 + 0.015 * dt)
                     and dy <= eff_h * min(0.50, 0.34 + 0.03 * dt)
                 )
-                rad_x = eff_w * min(0.36, 0.22 + 0.025 * dt)
-                rad_y = eff_h * min(0.42, 0.26 + 0.025 * dt)
+                rad_x = eff_w * (
+                    min(0.36, 0.22 + 0.025 * dt) if is_floor_scene else min(0.42, 0.25 + 0.03 * dt)
+                )
+                rad_y = eff_h * (
+                    min(0.42, 0.26 + 0.025 * dt) if is_floor_scene else min(0.46, 0.28 + 0.03 * dt)
+                )
                 in_kinematic_ellipse = math.hypot(dx / rad_x, dy / rad_y) <= 1.0
 
                 prev_area = max(1.0, float(prev_valid[2] * prev_valid[3]))
@@ -338,19 +344,19 @@ class ValidationStage(ITrackerStage):
                     and dx > eff_w * 0.08
                 )
 
-                # Early lock upgrade: if frame 1-5 initially locked onto an achromatic upper-screen
-                # hazard (e.g. grey spinning sawblade while the hero stood idle on frame 1) and a
-                # vivid colorful hero sprite now moves on the lower playfield, upgrade immediately.
+                # Early lock upgrade: if frame 1-5 initially locked onto an achromatic hazard/prop
+                # and a vivid colorful hero sprite now moves into view, upgrade immediately.
                 early_hero_upgrade = False
                 if getattr(engine, "_mature_lock_frames", 0) <= 6:
                     prev_btm_rel = (float(prev_valid[1] + prev_valid[3]) - float(engine.effective_frame_top)) / eff_h
                     cand_btm_rel = (float(context.raw_roi[1] + context.raw_roi[3]) - float(engine.effective_frame_top)) / eff_h
-                    if prev_btm_rel < 0.55 and 0.50 <= cand_btm_rel <= 0.92:
+                    in_playfield = (not is_floor_scene) or (prev_btm_rel < 0.55 and 0.50 <= cand_btm_rel <= 0.92)
+                    if in_playfield:
                         prev_chroma = self._roi_mean_chroma(context.frame, prev_valid)
                         cand_chroma = self._roi_mean_chroma(context.frame, context.raw_roi)
                         if prev_chroma < 24.0 and cand_chroma >= 45.0:
                             early_hero_upgrade = True
-                            if engine.floor_est is not None:
+                            if is_floor_scene and engine.floor_est is not None:
                                 engine.floor_est = _FloorEstimator(engine.cam_frame_h)
                             engine.roi_history.clear()
 
@@ -489,17 +495,32 @@ class FloorEstimationStage(ITrackerStage):
             engine._last_valid_roi_cy = float(ry_v) + float(rh_v) * 0.5
             engine._frames_since_valid_roi = 0
             engine._mature_lock_frames = min(60, getattr(engine, "_mature_lock_frames", 0) + 1)
-            if bool(getattr(engine.cfg, "platformer_mode", False)):
+            is_plat = bool(getattr(engine.cfg, "platformer_mode", False))
+            if (
+                not is_plat
+                and not engine.face_priority_mode
+                and float(getattr(engine.cfg, "strength", 0.0)) > 0.0
+                and float(rh_v) <= float(engine.effective_frame_h) * 0.38
+            ):
+                engine.standing_heights.append(float(rh_v))
+                pct75_h = float(np.percentile(engine.standing_heights, 75))
+                cfg_med = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
+                engine.standing_subject_h = (
+                    pct75_h if len(engine.standing_heights) >= 6 else max(cfg_med, pct75_h)
+                )
+            is_sprite_action = bool(getattr(engine, "is_sprite_action_mode", is_plat))
+            if is_sprite_action:
                 fh_f, fw_f = context.frame.shape[:2]
                 px1, py1 = max(0, int(rx_v)), max(0, int(ry_v))
                 px2, py2 = min(fw_f, int(rx_v + rw_v)), min(fh_f, int(ry_v + rh_v))
                 pw_p, ph_p = px2 - px1, py2 - py1
+                max_aspect_wh = 1.18 if is_plat else 1.45
                 if (
                     pw_p >= 10
                     and ph_p >= 10
                     and pw_p <= int(fw_f * 0.22)
                     and ph_p <= int(fh_f * 0.42)
-                    and float(pw_p) <= float(ph_p) * 1.18
+                    and float(pw_p) <= float(ph_p) * max_aspect_wh
                 ):
                     patch_gray = cv2.cvtColor(context.frame[py1:py2, px1:px2], cv2.COLOR_BGR2GRAY)
                     if float(np.std(patch_gray)) >= 10.0:
@@ -511,9 +532,10 @@ class HistorySynthesisStage(ITrackerStage):
     def process(self, context: FrameTrackingContext, engine: 'TrackingEngine') -> None:
         if engine.roi_history_enabled:
             is_plat = bool(getattr(engine.cfg, "platformer_mode", False))
+            is_sprite_action = bool(getattr(engine, "is_sprite_action_mode", is_plat))
             eff_max_len = (
                 min(engine.roi_history_max_len, max(4, int(round(engine.fps * 0.22))))
-                if is_plat
+                if is_sprite_action
                 else engine.roi_history_max_len
             )
             if context.fresh_detection and context.raw_roi is not None:
@@ -533,12 +555,12 @@ class HistorySynthesisStage(ITrackerStage):
                 engine.roi_history.append((1.0, context.raw_roi))
                 while len(engine.roi_history) > eff_max_len:
                     engine.roi_history.popleft()
-            elif is_plat and context.raw_roi is not None and engine.roi_history:
+            elif is_sprite_action and context.raw_roi is not None and engine.roi_history:
                 # On subsampled local-patch tracked frames, update most recent slot smoothly
                 while len(engine.roi_history) > eff_max_len:
                     engine.roi_history.popleft()
             if engine.roi_history:
-                if is_plat and not context.fresh_detection and context.raw_roi is not None:
+                if is_sprite_action and not context.fresh_detection and context.raw_roi is not None:
                     # Blend local subsampled sprite patch position directly with short history
                     total_w = 0.0
                     wx, wy, ww, wh = 0.0, 0.0, 0.0, 0.0
@@ -662,18 +684,25 @@ class CameraBuilderStage(ITrackerStage):
             dy = prop_cy - prev_cy
             # Tripod deadzone & progressive vertical pursuit:
             # Keeps sprite walk-cycle wobble and same-platform hops rock-steady while ramping
-            # upward responsiveness smoothly as a jumping/climbing sprite enters the upper 24%
-            # of the strip (avoiding both late freeze and sudden catapult jumps).
+            # vertical responsiveness smoothly as a jumping/swimming sprite approaches the
+            # top or bottom edge of the strip (avoiding both late freeze and sudden catapult jumps).
             is_platformer = bool(getattr(engine.cfg, "platformer_mode", False))
+            is_sprite_action = bool(getattr(engine, "is_sprite_action_mode", is_platformer))
             med_h = float(getattr(engine.cfg, "median_subject_height", 0.0) or 0.0)
             eff_stand_h = engine.standing_subject_h if engine.standing_subject_h > 0.0 else med_h
             roi_h = float(context.face_roi[3]) if context.face_roi is not None else eff_stand_h
             is_tall_sprite = is_platformer and max(eff_stand_h, roi_h) > ch * 0.79
             prev_top = prev_cy - ch / 2.0
+            prev_btm = prev_cy + ch / 2.0
             up_urgency = 0.0
-            if is_platformer and dy < 0.0 and context.face_roi is not None:
-                top_margin_ratio = (float(context.face_roi[1]) - prev_top) / max(1.0, ch)
-                up_urgency = _clamp((0.24 - top_margin_ratio) / 0.20, 0.0, 1.0)
+            down_urgency = 0.0
+            if is_sprite_action and context.face_roi is not None:
+                if dy < 0.0:
+                    top_margin_ratio = (float(context.face_roi[1]) - prev_top) / max(1.0, ch)
+                    up_urgency = _clamp((0.24 - top_margin_ratio) / 0.20, 0.0, 1.0)
+                elif dy > 0.0 and not is_platformer:
+                    btm_margin_ratio = (prev_btm - float(context.face_roi[1] + context.face_roi[3])) / max(1.0, ch)
+                    down_urgency = _clamp((0.24 - btm_margin_ratio) / 0.20, 0.0, 1.0)
             dead_x = cw * (0.065 if is_platformer else 0.04)
             if is_platformer:
                 if dy > 0.0:
@@ -681,6 +710,9 @@ class CameraBuilderStage(ITrackerStage):
                 else:
                     base_dead_y = ch * (0.05 if is_tall_sprite else 0.075)
                     dead_y = base_dead_y * (1.0 - 0.72 * up_urgency)
+            elif is_sprite_action:
+                edge_u = up_urgency if dy < 0.0 else down_urgency
+                dead_y = (ch * 0.055) * (1.0 - 0.70 * edge_u)
             else:
                 dead_y = ch * 0.04
             target_cx = prev_cx if abs(dx) <= dead_x else prev_cx + math.copysign(abs(dx) - dead_x, dx)
@@ -693,6 +725,9 @@ class CameraBuilderStage(ITrackerStage):
                 else:
                     base_step_up = ch * (0.16 if is_tall_sprite else 0.11)
                     max_step_y = max(3.5, base_step_up + (ch * 0.15) * up_urgency)
+            elif is_sprite_action:
+                edge_u = up_urgency if dy < 0.0 else down_urgency
+                max_step_y = max(4.0, ch * (0.13 + 0.16 * edge_u))
             else:
                 max_step_y = max(3.5, ch * 0.14)
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
@@ -724,14 +759,14 @@ class ReadabilityScoreStage(ITrackerStage):
             read_prev_score = engine.readability_engine.evaluate(context.frame, roi=roi_prev).overall / 100.0
             read_prop_score = engine.readability_engine.evaluate(context.frame, roi=roi_prop).overall / 100.0
 
-            is_platformer_sprite = (
-                bool(getattr(engine.cfg, "platformer_mode", False))
+            is_tracked_sprite = (
+                bool(getattr(engine, "is_sprite_action_mode", getattr(engine.cfg, "platformer_mode", False)))
                 and context.face_roi is not None
             )
-            if not is_platformer_sprite and read_prop_score < read_prev_score * 0.72:
-                # Reject severely degraded framing proposals (never in platformer mode when
-                # tracking a detected sprite, where textured deep ground bricks otherwise
-                # outscore clean sky and freeze the camera below the character's head).
+            if not is_tracked_sprite and read_prop_score < read_prev_score * 0.72:
+                # Reject severely degraded framing proposals (never when actively tracking a
+                # game sprite, where textured coral/ground tiles otherwise outscore open sky/water
+                # and freeze the camera while the character jumps or swims away).
                 context.cam_now = context.cam_prev
 
             if getattr(engine.cfg, 'auto_tuning_dataset_dir', None) is not None:
@@ -917,6 +952,26 @@ class TrackingEngine(ITracker):
         if hasattr(self.cfg, "scene_profile") and self.cfg.scene_profile is not None:
             return self.cfg.scene_profile.face_priority
         return self._face_priority_mode_init
+
+    @property
+    def is_sprite_action_mode(self) -> bool:
+        if bool(getattr(self.cfg, "platformer_mode", False)):
+            return True
+        if self.face_priority_mode:
+            return False
+        if float(getattr(self.cfg, "strength", 0.0)) <= 0.0:
+            return False
+        eff_h = float(self.effective_frame_h)
+        if eff_h <= 0.0:
+            return False
+        ref_h = (
+            self.standing_subject_h
+            if self.standing_subject_h > 0.0
+            else float(getattr(self.cfg, "median_subject_height", 0.0) or 0.0)
+        )
+        if ref_h > 0.0:
+            return (ref_h / eff_h) <= 0.38
+        return self.current_detector in ("motion", "hybrid")
 
     @property
     def cam_frame_h(self) -> float:

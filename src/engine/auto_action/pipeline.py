@@ -190,7 +190,10 @@ def preprocess_video_for_dmd(src_path: str, cfg: AutoActionConfig = None, cancel
 
                 if snap_camera:
                     cam = cam_now
-                elif bool(getattr(cfg, "platformer_mode", False)) and cam_prev is not None:
+                elif (
+                    bool(getattr(tracker, "is_sprite_action_mode", False))
+                    or bool(getattr(cfg, "platformer_mode", False))
+                ) and cam_prev is not None:
                     cam = _smooth_platformer_camera(cam_prev, cam_now, dynamic_smoothness)
                 else:
                     cam = _smooth(cam_prev, cam_now, dynamic_smoothness)

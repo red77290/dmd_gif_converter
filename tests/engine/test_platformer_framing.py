@@ -1181,7 +1181,127 @@ class TestMultiTierJumpAndAntiHijackStability:
         assert roi[3] >= 50
         assert 70 <= roi[1] <= 90
 
+    def test_free_2d_swimming_sprite_tracks_across_heights_without_platformer_mode(self):
+        """
+        Verify compact 8-bit sprites (<1.5% screen area) in free-2D / underwater scenes
+        (platformer_mode=False, face_priority_mode=False) are detected despite scrolling
+        scenery and tracked smoothly across vertical spans without switching to distant sprites.
+        """
+        from src.engine.auto_action.camera import _smooth_platformer_camera
+        from src.plugins.trackers.tracker import TrackingEngine
 
+        fw, fh = 256, 240
+        det = _FrameDetector()
+        world = np.zeros((fh, fw * 2, 3), dtype=np.uint8)
+        # Textured coral reef background columns that scroll horizontally
+        for col in range(0, fw * 2, 36):
+            world[40:220, col : col + 14] = (90, 95, 90)
+            world[195:236, :] = (70, 75, 70)
 
+        for k in range(3):
+            det.detect_motion(world[:, k * 4 : k * 4 + fw].copy(), platformer_mode=False)
 
+        # Frame with compact 16x24 vivid mermaid sprite (384 px = 0.62% < old 1.5% threshold!)
+        f_swim = world[:, 16 : 16 + fw].copy()
+        f_swim[52:76, 118:134] = (45, 70, 245)  # vivid red-haired sprite near upper ocean
+        f_swim[60:66, 142:148] = (210, 210, 210)  # tiny grey bubble
 
+        roi = det.detect_motion(
+            f_swim,
+            platformer_mode=False,
+            expected_cx=124.0,
+            expected_cy=68.0,
+            expected_h=24.0,
+        )
+        assert roi is not None
+        assert 108 <= roi[0] <= 136
+        assert 44 <= roi[1] <= 72
+        assert roi[2] <= 36 and roi[3] <= 42
+
+        cfg = AutoActionConfig(
+            target_width=128,
+            target_height=32,
+            platformer_mode=False,
+            auto_vertical_bias=False,
+            strength=0.65,
+            smoothness=0.80,
+            auto_fast_tracking=True,
+            detector="motion",
+        )
+        engine = TrackingEngine(
+            30.0, fw, fh, 0, fh, 0, fw, face_priority_mode=False, cfg=cfg
+        )
+        assert engine.is_sprite_action_mode is True
+
+        cam_prev = engine.cam_full_view
+        ch = cam_prev[3]
+        step_deltas = []
+        for idx in range(28):
+            sx = min(fw - 1, idx * 3)
+            frame = world[:, sx : sx + fw].copy()
+            # Mermaid swims continuously from y=170 up to y=46
+            hero_y = int(round(170 - min(124, idx * 5)))
+            frame[hero_y : hero_y + 24, 112:128] = (40, 65, 250)
+            frame[hero_y + 6 : hero_y + 16, 115:125] = (80, 230, 60)
+            # Distractor fish appearing briefly on the far right on frames 12-13
+            if idx in (12, 13):
+                frame[180:200, 218:238] = (180, 180, 180)
+
+            cam_raw = engine.process_frame(frame, cam_prev, idx, 128, 32)
+            if idx == 0 or engine.just_locked_first_detection:
+                cam_next = cam_raw
+            else:
+                cam_next = _smooth_platformer_camera(cam_prev, cam_raw, 0.80)
+                step_deltas.append(abs(cam_next[1] - cam_prev[1]))
+            cam_prev = cam_next
+
+        # Camera cleanly followed the swimming sprite to the upper ocean without hijacking or leaping
+        assert (cam_prev[1] - ch / 2.0) <= 50.0
+        assert (cam_prev[1] + ch / 2.0) >= 68.0
+        assert max(step_deltas) <= ch * 0.25
+
+    def test_autonomous_smart_scan_detects_multi_tier_platformer_without_scene_type_hint(
+        self, tmp_path
+    ):
+        """
+        Verify _smart_auto_crop_decision autonomously classifies a multi-tier jumping platformer
+        as platformer_mode=True when scene_type='' (zero external genre hint).
+        """
+        from PIL import Image
+        from src.engine.analysis.analysis import _smart_auto_crop_decision
+
+        fw, fh = 256, 224
+        pil_frames = []
+        # 60% of frames on upper platforms (bottom=96, < 0.50*fh=112), 40% on lower ground (bottom=182)
+        feet_ys = [182, 182, 140, 96, 96, 92, 96, 96, 92, 182, 182, 96, 92, 96, 182]
+        for idx, fy in enumerate(feet_ys):
+            arr = np.full((fh, fw, 3), (45, 75, 135), dtype=np.uint8)
+            arr[182:210, :] = (70, 120, 65)
+            arr[96:104, 60:200] = (95, 95, 115)
+            hx = 48 + idx * 10
+            arr[fy - 26 : fy, hx : hx + 18] = (245, 210, 50)
+            pil_frames.append(Image.fromarray(arr))
+
+        gif_path = tmp_path / "auto_multitier.gif"
+        pil_frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=pil_frames[1:],
+            duration=66,
+            loop=0,
+        )
+
+        cfg = AutoActionConfig(
+            detector="hybrid",
+            target_width=128,
+            target_height=32,
+            smart_auto_crop=True,
+            auto_scene_type=True,
+            auto_detector_fallback=True,
+            scene_type="",
+            platformer_mode=False,
+        )
+        dec = _smart_auto_crop_decision(str(gif_path), cfg, fw, fh)
+        sp = dec.get("scene_profile")
+        assert sp is not None
+        assert sp.platformer_mode is True

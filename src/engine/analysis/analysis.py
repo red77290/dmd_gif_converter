@@ -451,7 +451,17 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
     top_space       = median_top    / frame_h
     bottom_gap      = (frame_h - median_bottom) / frame_h
     tall_ratio      = median_height / max(1.0, dmd_crop_h)
-    floor_in_lower  = (median_bottom / frame_h) > FLOOR_LOWER
+    p75_bottom      = float(np.percentile(arr_btm_feet, 75))
+    floor_in_lower  = bool(
+        (median_bottom / frame_h) > FLOOR_LOWER
+        or (
+            len(arr_btm_feet) >= 4
+            and (median_height / frame_h) < 0.30
+            and (p75_bottom / frame_h) > 0.55
+            and (median_bottom / frame_h) > 0.32
+            and (std_bottom / frame_h) <= 0.34
+        )
+    )
     floor_var_score = std_bottom / frame_h
 
     # Additional signals for scene classification
