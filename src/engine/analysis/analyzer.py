@@ -91,8 +91,13 @@ class VideoAnalyzer:
                     self.scene_scores         = _decision.get("scene_scores", {})
                     
                 if _auto_pillarbox and "left_pct" in _decision and "right_pct" in _decision:
-                    self.effective_frame_left = int(self.frame_w * _decision["left_pct"])
-                    self.effective_frame_w = int(self.frame_w * (1.0 - _decision["right_pct"])) - self.effective_frame_left
+                    import math
+                    left_px = int(math.ceil(self.frame_w * float(_decision["left_pct"])))
+                    right_px = int(math.floor(self.frame_w * (1.0 - float(_decision["right_pct"]))))
+                    min_eff_w = min(self.frame_w, max(16, self.cfg.target_width // 2))
+                    if right_px - left_px >= min_eff_w:
+                        self.effective_frame_left = left_px
+                        self.effective_frame_w = right_px - left_px
                 
                 # Apply dynamic strength and smoothness based on content type analysis
                 if (_auto_str or _smart) and "suggested_strength" in _decision:

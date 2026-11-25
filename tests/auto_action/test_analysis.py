@@ -385,6 +385,215 @@ class TestSmartAutoCropDecision(unittest.TestCase):
                         "Les vidéos courtes doivent aussi déclencher face_priority")
 
 
+class TestPillarboxAndSideBorderLocking(unittest.TestCase):
+    """Regression suite ensuring side black borders never survive or move during camera pans."""
+
+    _DETECTOR_PATCH = "src.plugins.detectors.detector._FrameDetector"
+
+    @staticmethod
+    def _make_sequence_cap(frames, fps: float = 20.0):
+        cap = MagicMock()
+        cap.open.return_value = (True, "")
+        idx = {"i": 0}
+
+        def _read():
+            if idx["i"] >= len(frames):
+                return False, None
+            fr = frames[idx["i"]]
+            idx["i"] += 1
+            return True, fr
+
+        cap.read.side_effect = _read
+        cap._test_fps = fps
+        cap._test_duration = len(frames) / fps
+        return cap
+
+    def test_tv_range_pillarbox_with_corner_watermark_detected(self):
+        import numpy as np
+        from src.engine.analysis.analysis import _smart_auto_crop_decision
+
+        w, h = 640, 360
+        frames = []
+        for i in range(30):
+            fr = np.full((h, w, 3), 18, dtype=np.uint8)  # BT.709 limited-range black (18 > 15!)
+            fr[:, 80:560] = (140, 110, 65)  # 4:3 active gameplay area
+            fr[180:220, 120 + (i * 8) % 360 : 148 + (i * 8) % 360] = (40, 220, 250)
+            fr[330:355, 585:632] = 245  # Bright channel watermark in bottom-right black bar
+            frames.append(fr)
+
+        cap = self._make_sequence_cap(frames)
+        cfg = _make_cfg(auto_pillarbox_crop=True)
+        cfg.auto_scene_type = True
+        cfg.is_batch = False
+        cfg.scene_type = ""
+        cfg.platformer_mode = False
+        cfg.auto_detector_fallback = False
+
+        mock_det = MagicMock()
+        rois = [(120 + (i * 8) % 360, 180, 28, 40) for i in range(35)]
+        mock_det.detect_person.side_effect = rois
+        mock_det.detect.side_effect = rois
+
+        with patch(self._DETECTOR_PATCH, return_value=mock_det):
+            with patch("src.engine.conversion.ffmpeg_utils.get_metadata") as mm, patch(
+                "src.engine.auto_action.reader.FFmpegPipeReader", return_value=cap
+            ):
+                mm.return_value = (w, h, 20.0, 1.5)
+                res = _smart_auto_crop_decision("tv_pillarbox.mp4", cfg, frame_w=w, frame_h=h)
+
+        self.assertEqual(res["decision_codes"]["pillarbox"], "detected")
+        self.assertGreater(res["left_pct"], 0.125)
+        self.assertLess(res["left_pct"], 0.16)
+        self.assertGreater(res["right_pct"], 0.125)
+        self.assertLess(res["right_pct"], 0.16)
+
+    def test_nes_8px_left_blanking_cropped_without_touching_deep_blue_water(self):
+        import numpy as np
+        from src.engine.analysis.analysis import _smart_auto_crop_decision
+
+        w, h = 256, 240
+        frames = []
+        for i in range(30):
+            # Deep royal-blue aquatic background (low grayscale luma ~17, high blue channel 96)
+            fr = np.zeros((h, w, 3), dtype=np.uint8)
+            fr[:, :] = (96, 12, 0)
+            fr[:, :8] = (16, 16, 16)  # NES 8px left hardware blanking (3.125% < old 5% threshold!)
+            sx = 20 + (i * 6) % 190
+            fr[110:142, sx : sx + 22] = (50, 210, 250)
+            frames.append(fr)
+
+        cap = self._make_sequence_cap(frames)
+        cfg = _make_cfg(auto_pillarbox_crop=True)
+        cfg.auto_scene_type = True
+        cfg.is_batch = False
+        cfg.scene_type = ""
+        cfg.platformer_mode = False
+        cfg.auto_detector_fallback = False
+
+        mock_det = MagicMock()
+        rois = [(20 + (i * 6) % 190, 110, 22, 32) for i in range(35)]
+        mock_det.detect_person.side_effect = rois
+        mock_det.detect.side_effect = rois
+
+        with patch(self._DETECTOR_PATCH, return_value=mock_det):
+            with patch("src.engine.conversion.ffmpeg_utils.get_metadata") as mm, patch(
+                "src.engine.auto_action.reader.FFmpegPipeReader", return_value=cap
+            ):
+                mm.return_value = (w, h, 20.0, 1.5)
+                res = _smart_auto_crop_decision("nes_water.mp4", cfg, frame_w=w, frame_h=h)
+
+        self.assertEqual(res["decision_codes"]["pillarbox"], "detected")
+        self.assertGreater(res["left_pct"], 8.0 / 256.0)
+        self.assertLess(res["left_pct"], 0.06)
+        self.assertEqual(res["right_pct"], 0.0)
+
+    def test_pillarbox_preserved_when_initial_scan_has_zero_detections(self):
+        import numpy as np
+        from src.engine.analysis.analysis import _smart_auto_crop_decision
+
+        w, h = 640, 360
+        frames = []
+        for _ in range(25):
+            fr = np.full((h, w, 3), 16, dtype=np.uint8)
+            fr[:, 80:560] = (120, 90, 70)
+            frames.append(fr)
+
+        cap = self._make_sequence_cap(frames)
+        cfg = _make_cfg(auto_pillarbox_crop=True)
+        cfg.auto_scene_type = True
+        cfg.is_batch = False
+        cfg.scene_type = ""
+        cfg.platformer_mode = False
+        cfg.auto_detector_fallback = False
+
+        mock_det = MagicMock()
+        mock_det.detect_person.return_value = None
+        mock_det.detect.return_value = None
+
+        with patch(self._DETECTOR_PATCH, return_value=mock_det):
+            with patch("src.engine.conversion.ffmpeg_utils.get_metadata") as mm, patch(
+                "src.engine.auto_action.reader.FFmpegPipeReader", return_value=cap
+            ):
+                mm.return_value = (w, h, 20.0, 1.25)
+                res = _smart_auto_crop_decision("no_roi_pillarbox.mp4", cfg, frame_w=w, frame_h=h)
+
+        self.assertGreater(res["left_pct"], 0.125)
+        self.assertGreater(res["right_pct"], 0.125)
+
+    def test_camera_horizontal_pan_never_exposes_moving_side_borders(self):
+        import math
+        import numpy as np
+        from src.engine.analysis.analysis import _measure_frame_pillarbox_bounds, _resolve_pillarbox_margins
+        from src.engine.auto_action.camera import _compute_detail_preserving_crop_dimensions, _smooth_platformer_camera
+        from src.engine.auto_action.interfaces import BoundingBox
+        from src.engine.auto_action.renderer import Renderer
+        from src.engine.config.auto_action_config import AutoActionConfig
+        from src.plugins.trackers.tracker import TrackingEngine
+
+        w, h = 640, 360
+        frames = []
+        rois = []
+        # Sweep sprite aggressively from extreme left of 4:3 screen (x=84) to extreme right (x=532) and back
+        xs = list(range(84, 532, 24)) + list(range(532, 84, -24))
+        for sx in xs:
+            fr = np.full((h, w, 3), 18, dtype=np.uint8)  # TV-range black pillarbox bars [0..80) and [560..640)
+            fr[:, 80:560] = (150, 115, 80)  # Active 4:3 playfield
+            fr[220:256, sx : sx + 24] = (30, 230, 255)
+            frames.append(fr)
+            rois.append(BoundingBox(sx, 220, 24, 36))
+
+        bounds = [_measure_frame_pillarbox_bounds(f) for f in frames]
+        left_pct, right_pct, code = _resolve_pillarbox_margins(
+            [b[0] for b in bounds if b], [b[1] for b in bounds if b], w, enabled=True
+        )
+        self.assertEqual(code, "detected")
+        eff_left = int(math.ceil(w * left_pct))
+        eff_right = int(math.floor(w * (1.0 - right_pct)))
+        eff_w = eff_right - eff_left
+
+        cfg = AutoActionConfig(
+            detector="hybrid",
+            strength=0.65,
+            smoothness=0.75,
+            zoom_max=1.35,
+            platformer_mode=True,
+            auto_pillarbox_crop=True,
+            look_ahead_enabled=True,
+            target_width=128,
+            target_height=32,
+        )
+        locked_size = _compute_detail_preserving_crop_dimensions(
+            float(eff_w), float(h), cfg, median_h=36.0, median_w=24.0
+        )
+        self.assertLess(locked_size[0], float(eff_w))  # Zoomed in -> camera pans horizontally!
+
+        tracker = TrackingEngine(
+            fps=20.0,
+            frame_w=w,
+            frame_h=h,
+            effective_frame_top=0,
+            effective_frame_h=h,
+            effective_frame_left=eff_left,
+            effective_frame_w=eff_w,
+            face_priority_mode=False,
+            cfg=cfg,
+            locked_crop_size=locked_size,
+        )
+        tracker.detector.detect = MagicMock(side_effect=rois)
+        renderer = Renderer(w, h, 128, 32, bg_sub_enable=False)
+
+        cam_prev = tracker.cam_full_view
+        for idx, fr in enumerate(frames):
+            cam_now = tracker.process_frame(fr, cam_prev, idx, 128, 32)
+            cam = cam_now if idx == 0 else _smooth_platformer_camera(cam_prev, cam_now, 0.75)
+            cam_prev = cam
+            dmd_frame = renderer.render(fr, cam)
+            # Neither outer column of the 128x32 DMD may ever show the dark pillarbox bar (BGR ~18)
+            self.assertGreater(int(dmd_frame[:, 0].mean()), 80, f"Left pillarbox leaked at frame {idx}")
+            self.assertGreater(int(dmd_frame[:, -1].mean()), 80, f"Right pillarbox leaked at frame {idx}")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

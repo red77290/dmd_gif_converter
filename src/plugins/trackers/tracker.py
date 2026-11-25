@@ -169,14 +169,20 @@ class DetectionStage(ITrackerStage):
             and "detect" not in engine.detector.__dict__
         )
 
+        y0_eff = max(0, int(engine.effective_frame_top))
+        y1_eff = min(context.frame.shape[0], y0_eff + max(1, int(engine.effective_frame_h)))
+        x0_eff = max(0, int(engine.effective_frame_left))
+        x1_eff = min(context.frame.shape[1], x0_eff + max(1, int(engine.effective_frame_w)))
+        use_eff_slice = (not engine.face_priority_mode) and (y1_eff > y0_eff) and (x1_eff > x0_eff)
+
         if not run_detector:
             context.fresh_detection = False
             cached_roi = getattr(engine, "_last_yolo_roi", None)
             if is_native_detector:
                 detect_slice = (
-                    context.frame
-                    if engine.face_priority_mode
-                    else context.frame[engine.effective_frame_top:engine.effective_frame_h, :]
+                    context.frame[y0_eff:y1_eff, x0_eff:x1_eff]
+                    if use_eff_slice
+                    else context.frame
                 )
                 engine.detector.feed_subsampled_frame(detect_slice)
                 if (
@@ -202,12 +208,13 @@ class DetectionStage(ITrackerStage):
         context.fresh_detection = True
         extra_kw = {}
         if isinstance(engine.detector, _FrameDetector):
-            extra_kw["expected_cx"] = expected_cx
+            if expected_cx is not None:
+                extra_kw["expected_cx"] = (
+                    expected_cx - float(x0_eff) if use_eff_slice else expected_cx
+                )
             if expected_cy is not None:
                 extra_kw["expected_cy"] = (
-                    expected_cy
-                    if engine.face_priority_mode
-                    else expected_cy - float(engine.effective_frame_top)
+                    expected_cy - float(y0_eff) if use_eff_slice else expected_cy
                 )
             if is_sprite_action and getattr(engine, "standing_subject_h", 0.0) >= 16.0:
                 extra_kw["expected_h"] = float(engine.standing_subject_h)
@@ -218,30 +225,48 @@ class DetectionStage(ITrackerStage):
             else (0.36 if is_plat else 0.0)
         )
 
-        if engine.face_priority_mode:
-            context.raw_roi = engine.detector.detect(
-                context.frame, engine.current_detector,
-                multi_fusion=engine.cfg.multi_roi_fusion_enabled and not is_sprite_action,
-                min_conf=eff_min_conf,
-                roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
-                platformer_mode=engine.cfg.platformer_mode,
-                expected_floor_y=expected_floor_y,
-                **extra_kw,
-            )
+        if not use_eff_slice:
+            if x0_eff > 0 or x1_eff < context.frame.shape[1]:
+                detect_fp = context.frame[:, x0_eff:x1_eff]
+                if "expected_cx" in extra_kw and extra_kw["expected_cx"] is not None:
+                    extra_kw["expected_cx"] = float(extra_kw["expected_cx"]) - float(x0_eff)
+                raw_det = engine.detector.detect(
+                    detect_fp, engine.current_detector,
+                    multi_fusion=engine.cfg.multi_roi_fusion_enabled and not is_sprite_action,
+                    min_conf=eff_min_conf,
+                    roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
+                    platformer_mode=engine.cfg.platformer_mode,
+                    expected_floor_y=expected_floor_y,
+                    **extra_kw,
+                )
+                if raw_det is not None:
+                    rx, ry, rw, rh = raw_det
+                    raw_det = BoundingBox(rx + x0_eff, ry, rw, rh)
+                context.raw_roi = raw_det
+            else:
+                context.raw_roi = engine.detector.detect(
+                    context.frame, engine.current_detector,
+                    multi_fusion=engine.cfg.multi_roi_fusion_enabled and not is_sprite_action,
+                    min_conf=eff_min_conf,
+                    roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
+                    platformer_mode=engine.cfg.platformer_mode,
+                    expected_floor_y=expected_floor_y,
+                    **extra_kw,
+                )
         else:
-            detect_frame = context.frame[engine.effective_frame_top:engine.effective_frame_h, :]
+            detect_frame = context.frame[y0_eff:y1_eff, x0_eff:x1_eff]
             context.raw_roi = engine.detector.detect(
                 detect_frame, engine.current_detector,
                 multi_fusion=engine.cfg.multi_roi_fusion_enabled and not is_sprite_action,
                 min_conf=eff_min_conf,
                 roi_persistence_score=engine.roi_persistence_score if getattr(engine.cfg, 'dynamic_roi_confidence_enabled', True) else 1.0,
                 platformer_mode=engine.cfg.platformer_mode,
-                expected_floor_y=expected_floor_y - engine.effective_frame_top if expected_floor_y is not None else None,
+                expected_floor_y=expected_floor_y - y0_eff if expected_floor_y is not None else None,
                 **extra_kw,
             )
-            if context.raw_roi is not None and engine.effective_frame_top > 0:
+            if context.raw_roi is not None and (x0_eff > 0 or y0_eff > 0):
                 rx, ry, rw, rh = context.raw_roi
-                context.raw_roi = BoundingBox(rx, ry + engine.effective_frame_top, rw, rh)
+                context.raw_roi = BoundingBox(rx + x0_eff, ry + y0_eff, rw, rh)
 
         engine._last_yolo_roi = context.raw_roi
 
@@ -732,6 +757,12 @@ class CameraBuilderStage(ITrackerStage):
                 max_step_y = max(3.5, ch * 0.14)
             clamped_cx = prev_cx + _clamp(target_cx - prev_cx, -max_step_x, max_step_x)
             clamped_cy = prev_cy + _clamp(target_cy - prev_cy, -max_step_y, max_step_y)
+            eff_left = float(engine.effective_frame_left)
+            eff_w = float(engine.effective_frame_w)
+            if cw >= eff_w:
+                clamped_cx = eff_left + eff_w / 2.0
+            else:
+                clamped_cx = _clamp(clamped_cx, eff_left + cw / 2.0, eff_left + eff_w - cw / 2.0)
             raw_cam = CamRect(clamped_cx, clamped_cy, cw, ch)
 
         context.cam_now_proposed = raw_cam

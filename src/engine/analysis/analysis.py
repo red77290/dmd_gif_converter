@@ -272,6 +272,123 @@ def _compute_auto_crop_margins(  # noqa: C901
     return top_pct, bottom_pct, face_priority
 
 
+def _measure_frame_pillarbox_bounds(frame: np.ndarray) -> Optional[Tuple[float, float]]:
+    """
+    Measure normalized `[left_edge, right_edge]` (`0.0 .. 1.0`) of active content in `frame`.
+
+    Handles:
+    - Full-range (`0..4`) and BT.601/BT.709 limited-range (`16..28`) black/charcoal side bars,
+    - Corner watermarks / channel bugs / progress bars (analyzes central 76% vertical band),
+    - 1-2px outer window borders or MPEG edge ringing,
+    while preserving saturated dark gameplay colors (deep blue water / night skies via max-RGB
+    and chroma gating) and starfields (98th-percentile column intensity).
+    Returns `None` when the interior of the frame is dark (fade-to-black).
+    """
+    import cv2
+
+    scan_w, scan_h = 256, 144
+    small = cv2.resize(frame, (scan_w, scan_h), interpolation=cv2.INTER_AREA)
+    if small.ndim == 2:
+        val = small
+        chroma = np.zeros_like(small, dtype=np.int16)
+    else:
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        cmax = small.max(axis=2)
+        cmin = small.min(axis=2)
+        val = np.maximum(gray, cmax)
+        chroma = cmax.astype(np.int16) - cmin.astype(np.int16)
+
+    y0 = int(round(scan_h * 0.12))
+    y1 = int(round(scan_h * 0.88))
+    val_mid = val[y0:y1, :]
+    chroma_mid = chroma[y0:y1, :]
+
+    interior_ref = float(np.percentile(val_mid[:, 48:208], 98))
+    if interior_ref < 45.0:
+        return None
+
+    col_p98 = np.percentile(val_mid, 98, axis=0)
+    col_p15 = np.percentile(val_mid, 15, axis=0)
+    col_span = col_p98 - col_p15
+    col_chroma = np.percentile(chroma_mid, 90, axis=0)
+
+    black_ceil = min(30.0, max(20.0, interior_ref * 0.22))
+    is_bar = (col_p98 <= black_ceil) & (col_span <= 14.0) & (col_chroma <= 14.0)
+
+    max_side_cols = int(scan_w * 0.42)
+
+    x_left = 0
+    if not is_bar[0] and bool(np.all(is_bar[2:5])):
+        x_left = 2
+    while x_left < max_side_cols:
+        if is_bar[x_left]:
+            x_left += 1
+        elif (x_left + 2 < max_side_cols) and is_bar[x_left + 1] and is_bar[x_left + 2]:
+            x_left += 1
+        else:
+            break
+
+    x_right = scan_w - 1
+    if not is_bar[scan_w - 1] and bool(np.all(is_bar[scan_w - 5 : scan_w - 2])):
+        x_right = scan_w - 3
+    min_right_col = scan_w - 1 - max_side_cols
+    while x_right > min_right_col:
+        if is_bar[x_right]:
+            x_right -= 1
+        elif (x_right - 2 > min_right_col) and is_bar[x_right - 1] and is_bar[x_right - 2]:
+            x_right -= 1
+        else:
+            break
+
+    if x_left >= x_right:
+        return None
+    return float(x_left) / float(scan_w), float(x_right + 1) / float(scan_w)
+
+
+def _resolve_pillarbox_margins(
+    frame_lefts: list[float],
+    frame_rights: list[float],
+    frame_w: int,
+    enabled: bool,
+) -> Tuple[float, float, str]:
+    """
+    Resolve static `(left_pct, right_pct, status_code)` horizontal crop margins from sampled frames.
+
+    Detects both wide 4:3-in-16:9 pillarbox bars (~12.5%+) and thin hardware overscan blanking
+    strips (e.g. NES/SMS 8px left blanking ~2.5%-4.5%) by requiring temporal lock around a
+    fixed geometric X wall, plus a compact YUV420p/ringing safety margin so side borders never
+    intrude or visibly slide during horizontal camera pans.
+    """
+    if not enabled:
+        return 0.0, 0.0, "disabled"
+    n = len(frame_lefts)
+    if n == 0 or len(frame_rights) != n:
+        return 0.0, 0.0, "none"
+
+    min_bar = max(0.012, 3.0 / max(128.0, float(frame_w)))
+
+    def _lock_side_wall(bars: np.ndarray) -> float:
+        pos = bars[bars >= min_bar]
+        if pos.size == 0 or (pos.size / float(n)) < 0.50:
+            return 0.0
+        # Use conservative 20th percentile of positive detections so dark space scenes
+        # adjacent to a pillarbox lock onto the outer geometric bar wall rather than
+        # eating into dark gameplay interiors.
+        wall_ref = float(np.percentile(pos, 20))
+        wall_hits = int(np.sum((bars >= wall_ref - 0.008) & (bars <= wall_ref + 0.018)))
+        support = wall_hits / float(n)
+        req_support = 0.50 if wall_ref >= 0.045 else 0.65
+        if support < req_support:
+            return 0.0
+        safety = max(2.0 / max(128.0, float(frame_w)), min(0.016, wall_ref * 0.08 + 0.004))
+        return _clamp(wall_ref + safety, 0.0, 0.42)
+
+    left_pct = _lock_side_wall(np.asarray(frame_lefts, dtype=np.float64))
+    right_pct = _lock_side_wall(1.0 - np.asarray(frame_rights, dtype=np.float64))
+    code = "detected" if (left_pct > 0.0 or right_pct > 0.0) else "none"
+    return left_pct, right_pct, code
+
+
 def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sample_count: int = 80) -> dict:
     from src.plugins.detectors.detector import _FrameDetector
     try:
@@ -283,20 +400,29 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
             "auto_vertical_bias": False,
             "top_pct":            0.0,
             "bottom_pct":         0.0,
+            "left_pct":           0.0,
+            "right_pct":          0.0,
             "face_priority":      False,
             "reasons":            [f"detector init failed: {e!r}"],
         }
-    import cv2
     _EMPTY = {
         "auto_bottom_crop":   False,
         "auto_top_crop":      False,
         "auto_vertical_bias": False,
         "top_pct":            0.0,
         "bottom_pct":         0.0,
+        "left_pct":           0.0,
+        "right_pct":          0.0,
         "face_priority":      False,
         "reasons":            [],
     }
-    if not (cfg.smart_auto_crop or getattr(cfg, "auto_strength", False) or getattr(cfg, "auto_smoothness", False) or getattr(cfg, "auto_pillarbox_crop", False)):
+    if not (
+        bool(cfg.smart_auto_crop)
+        or getattr(cfg, "auto_strength", False) is True
+        or getattr(cfg, "auto_smoothness", False) is True
+        or getattr(cfg, "auto_pillarbox_crop", False) is True
+        or getattr(cfg, "auto_scene_type", False) is True
+    ):
         return {**_EMPTY, "reasons": ["smart features disabled in config"]}
 
     from src.engine.conversion.ffmpeg_utils import get_metadata
@@ -321,7 +447,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
     FACE_FRAC = 0.28
     
     target_fps = float(sample_count) / duration_s
-    check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False)
+    check_pillarbox = getattr(cfg, "auto_pillarbox_crop", False) is True
 
     _explicit_scene_cfg = str(getattr(cfg, "scene_type", "") or "").strip()
     initial_scan_plat = bool(
@@ -351,6 +477,13 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
             for _ in range(sample_count + 5):
                 ok, frame = reader.read()
                 if not ok or frame is None: break
+
+                if check_pillarbox:
+                    pb_bounds = _measure_frame_pillarbox_bounds(frame)
+                    if pb_bounds is not None:
+                        _frame_lefts.append(pb_bounds[0])
+                        _frame_rights.append(pb_bounds[1])
+
                 if _is_dark_frame(frame): continue
                 
                 if _scan_plat:
@@ -372,17 +505,6 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
                     _y_centers.append(float(ry + rh / 2.0))
                     _fill_ratios.append(float(rh) / max(1.0, float(frame_h)))
                     _roi_bottoms_fp.append(float(ry + rh))
-                        
-                if check_pillarbox:
-                    small = cv2.resize(frame, (128, 72), interpolation=cv2.INTER_AREA)
-                    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-                    _, thresh = cv2.threshold(gray, 15, 255, cv2.THRESH_BINARY)
-                    coords = np.argwhere(thresh > 0)
-                    if coords.size > 0:
-                        y_min, x_min = coords.min(axis=0)
-                        y_max, x_max = coords.max(axis=0)
-                        _frame_lefts.append(x_min / 128.0)
-                        _frame_rights.append(x_max / 128.0)
         finally:
             reader.release()
             
@@ -395,18 +517,31 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
     if not roi_tops and getattr(cfg, "auto_detector_fallback", False) and best_detector == "person":
         best_detector = "hybrid"
         (roi_tops, roi_bottoms_feet, roi_bottoms_fp, roi_heights, roi_widths, 
-         x_centers, y_centers, fill_ratios, frame_lefts, frame_rights) = _run_scan(best_detector)
+         x_centers, y_centers, fill_ratios, fb_lefts, fb_rights) = _run_scan(best_detector)
+        if fb_lefts:
+            frame_lefts, frame_rights = fb_lefts, fb_rights
+
+    left_pct, right_pct, pillarbox_code = _resolve_pillarbox_margins(
+        frame_lefts, frame_rights, frame_w, check_pillarbox
+    )
 
     _explicit_scene = str(getattr(cfg, "scene_type", "") or "").strip()
     _auto_scene = getattr(cfg, "auto_scene_type", False)
     if not roi_tops:
         # No detections: honor explicit scene_type first, otherwise assign safe default profile
+        # while still preserving detected pillarbox crop margins!
         from src.engine.analysis.scene_types import SCENE_PROFILES, SceneType
+        base_out = {
+            **_EMPTY,
+            "left_pct": left_pct,
+            "right_pct": right_pct,
+            "decision_codes": {"pillarbox": pillarbox_code},
+            "best_detector": best_detector,
+        }
         if _explicit_scene and _explicit_scene in SCENE_PROFILES:
             _fallback_profile = SCENE_PROFILES[_explicit_scene]
             return {
-                **_EMPTY,
-                "best_detector": best_detector,
+                **base_out,
                 "auto_vertical_bias": _fallback_profile.auto_vertical_bias,
                 "face_priority": _fallback_profile.face_priority,
                 "reasons": [f"no detections in scan → explicit scene '{_explicit_scene}'"],
@@ -418,13 +553,16 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
             }
         if _auto_scene:
             _fallback_profile = SCENE_PROFILES.get(SceneType.ACTION_MOVING)
-            return {**_EMPTY, "best_detector": best_detector,
-                    "reasons": ["no detections in scan → fallback to action_moving"],
-                    "scene_profile": _fallback_profile,
-                    "suggested_strength": _fallback_profile.suggested_strength if _fallback_profile else 0.65,
-                    "suggested_smoothness": _fallback_profile.suggested_smoothness if _fallback_profile else 0.85,
-                    "scoreboard_lines": [], "scene_scores": {}}
-        return {**_EMPTY, "best_detector": best_detector, "reasons": ["no detections in scan — all manual"]}
+            return {
+                **base_out,
+                "reasons": ["no detections in scan → fallback to action_moving"],
+                "scene_profile": _fallback_profile,
+                "suggested_strength": _fallback_profile.suggested_strength if _fallback_profile else 0.65,
+                "suggested_smoothness": _fallback_profile.suggested_smoothness if _fallback_profile else 0.85,
+                "scoreboard_lines": [],
+                "scene_scores": {},
+            }
+        return {**base_out, "reasons": ["no detections in scan — all manual"]}
 
     arr_tops       = np.array(roi_tops)
     arr_btm_feet   = np.array(roi_bottoms_feet)
@@ -607,25 +745,7 @@ def _smart_auto_crop_decision(src_path: str, cfg, frame_w: int, frame_h: int, sa
         pre_top_pct = 0.0
     pre_bottom_pct = _clamp((frame_h - bottom_y) / frame_h,  0.0, 0.9)
 
-    left_pct = 0.0
-    right_pct = 0.0
-    if check_pillarbox and frame_lefts:
-        # We use the median (50th percentile) to find the typical edge of the black bar,
-        # ignoring extreme dark scenes (which would be 95th) and extreme shakes (which would be 5th/10th).
-        # To completely hide any jitter, we add an aggressive 2.5% padding (about 20 pixels).
-        raw_left = float(np.median(frame_lefts))
-        raw_right = float(np.median(frame_rights))
-        
-        if raw_left > 0.05:
-            left_pct = _clamp(raw_left + 0.025, 0.0, 0.4)
-            decision_codes["pillarbox"] = "detected"
-        if raw_right < 0.95:
-            right_pct = _clamp((1.0 - raw_right) + 0.025, 0.0, 0.4)
-            decision_codes["pillarbox"] = "detected"
-        if raw_left <= 0.05 and raw_right >= 0.95:
-            decision_codes["pillarbox"] = "none"
-    else:
-        decision_codes["pillarbox"] = "disabled"
+    decision_codes["pillarbox"] = pillarbox_code
 
     return {
         "best_detector":      best_detector,
