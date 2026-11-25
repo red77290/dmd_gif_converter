@@ -456,25 +456,43 @@ class _FrameDetector(AbstractDetector):
 
             best_i = int(np.argmax(platformer_scores))
         else:
+            bw_norm = boxes_raw[:, 2] / float(self._model_w)
+            aspect_wh = boxes_raw[:, 2] / np.maximum(1.0, boxes_raw[:, 3])
+            wide_band = (bw_norm > 0.45) & (aspect_wh > 2.6)
+            mask = mask & ~wide_band
+
             valid_indices = np.where(mask)[0]
             if len(valid_indices) == 0:
                 return None
-            
+
             valid_scores = person_scores[valid_indices]
             valid_boxes = boxes_raw[valid_indices]
-            
-            # Bias toward the center of the frame
+
             center_x_norm = valid_boxes[:, 0] / float(self._model_w)
             center_y_norm = valid_boxes[:, 1] / float(self._model_h)
-            
-            # Distance from center (0.5, 0.5)
-            # Max possible distance from center is ~0.707
-            dist_from_center = np.sqrt((center_x_norm - 0.5)**2 + (center_y_norm - 0.5)**2)
-            
-            # Apply a centering bonus (up to 1.5x multiplier for perfectly centered)
-            center_bias = 1.0 + np.maximum(0.0, 0.5 - dist_from_center)
-            
-            centered_scores = valid_scores * center_bias
+            dist_from_center = np.sqrt((center_x_norm - 0.5) ** 2 + (center_y_norm - 0.5) ** 2)
+
+            exp_cx_norm = (
+                float(expected_cx) / max(1.0, float(w)) if expected_cx is not None else -1.0
+            )
+            exp_cy_norm = (
+                float(expected_cy) / max(1.0, float(h)) if expected_cy is not None else -1.0
+            )
+            if expected_cx is not None and 0.03 <= exp_cx_norm <= 0.97:
+                dx_norm = np.abs(center_x_norm - exp_cx_norm)
+                if expected_cy is not None and 0.03 <= exp_cy_norm <= 0.97:
+                    dy_norm = np.abs(center_y_norm - exp_cy_norm)
+                    dist_2d = np.hypot(dx_norm, dy_norm * 0.90)
+                    continuity_bias = 1.0 + 1.65 * np.exp(-dist_2d * 4.2)
+                else:
+                    continuity_bias = 1.0 + 0.90 * np.exp(-dx_norm * 5.0)
+                gentle_center = 1.0 + 0.25 * np.maximum(0.0, 0.5 - dist_from_center)
+                centered_scores = valid_scores * continuity_bias * gentle_center
+            else:
+                # Apply a centering bonus (up to 1.5x multiplier for perfectly centered)
+                center_bias = 1.0 + np.maximum(0.0, 0.5 - dist_from_center)
+                centered_scores = valid_scores * center_bias
+
             best_idx_in_valid = int(np.argmax(centered_scores))
             best_i = valid_indices[best_idx_in_valid]
 
@@ -671,88 +689,99 @@ class _FrameDetector(AbstractDetector):
         mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel, iterations=2)
 
         frame_h, frame_w = frame.shape[:2]
-        scroll_comp_mask: Optional[np.ndarray] = None
-        if platformer_mode:
-            scroll_comp_mask = self._build_scroll_compensated_mask(prev_gray_ref, gray)
-            # Reject global camera flashes before band suppression
-            if cv2.countNonZero(mask) > int(frame_w * frame_h * 0.70):
-                if scroll_comp_mask is None:
-                    return None
-                mask = scroll_comp_mask
-            else:
-                mask = self._strip_wide_platformer_bands(mask, frame_w)
+        scroll_comp_mask = self._build_scroll_compensated_mask(prev_gray_ref, gray)
+        # Reject global camera flashes before band suppression
+        if cv2.countNonZero(mask) > int(frame_w * frame_h * 0.70):
+            if scroll_comp_mask is None:
+                return None
+            mask = scroll_comp_mask
+        else:
+            mask = self._strip_wide_platformer_bands(mask, frame_w)
 
         def score_contour(c):
             area = cv2.contourArea(c)
-            if area < 100.0 if platformer_mode else area < 120.0:
+            if area < 100.0:
                 return 0.0
             x, y, w, h = cv2.boundingRect(c)
             # Reject full-frame camera scroll / global flash artifacts (>92% width and >85% height)
             if w > frame_w * 0.92 and h > frame_h * 0.85:
                 return 0.0
-            if not platformer_mode and (w * h) < (frame_w * frame_h * 0.015):
+            if (w > frame_w * 0.72 and h > frame_h * 0.65) or h > frame_h * 0.62:
                 return 0.0
-            if platformer_mode:
-                if (w > frame_w * 0.72 and h > frame_h * 0.65) or h > frame_h * 0.58:
-                    return 0.0
-                if w > frame_w * 0.48 and h > frame_h * 0.42:
-                    return 0.0
-                bottom_y = y + h
-                if bottom_y < frame_h * 0.12:
-                    return 0.0
-                aspect_wh = float(w) / max(1.0, float(h))
-                # Reject wide horizontal ground/HUD scroll bands and thick bottom-border slabs
-                if w > frame_w * 0.40 and aspect_wh > 2.4:
-                    return 0.0
-                if bottom_y >= frame_h * 0.98 and w > frame_w * 0.24 and aspect_wh > 1.8:
-                    return 0.0
-                if bottom_y >= frame_h * 0.98 and w > frame_w * 0.42 and aspect_wh > 1.35:
-                    return 0.0
+            if platformer_mode and (h > frame_h * 0.58 or (w > frame_w * 0.48 and h > frame_h * 0.42)):
+                return 0.0
+            bottom_y = y + h
+            if bottom_y < frame_h * (0.12 if platformer_mode else 0.08):
+                return 0.0
+            aspect_wh = float(w) / max(1.0, float(h))
+            # Reject wide horizontal ground/HUD scroll bands and thick bottom-border slabs
+            if w > frame_w * 0.40 and aspect_wh > 2.4:
+                return 0.0
+            if bottom_y >= frame_h * 0.98 and w > frame_w * 0.24 and aspect_wh > 1.8:
+                return 0.0
+            if bottom_y >= frame_h * 0.98 and w > frame_w * 0.42 and aspect_wh > 1.35:
+                return 0.0
 
-                eff_area = min(float(area), max(350.0, float(frame_w * frame_h) * 0.0040))
-                aspect_hw = float(h) / max(1.0, float(w))
-                if 0.60 <= aspect_hw <= 2.6:
-                    shape_weight = 1.35
-                elif 0.35 <= aspect_hw <= 3.2:
-                    shape_weight = 1.0
+            eff_area = min(float(area), max(350.0, float(frame_w * frame_h) * 0.0040))
+            aspect_hw = float(h) / max(1.0, float(w))
+            if 0.55 <= aspect_hw <= 2.6:
+                shape_weight = 1.35
+            elif 0.32 <= aspect_hw <= 3.2:
+                shape_weight = 1.0
+            else:
+                shape_weight = 0.25
+
+            # Scale consistency against established hero height: demote tiny projectiles,
+            # bubbles, shells, coins, or fireballs (<48% of hero height) and oversized props.
+            scale_weight = 1.0
+            if expected_h is not None and float(expected_h) >= 16.0:
+                h_ratio = float(h) / float(expected_h)
+                if h_ratio < 0.48:
+                    scale_weight = 0.35
+                elif 0.62 <= h_ratio <= 1.50:
+                    scale_weight = 1.22
+                elif h_ratio > 2.10:
+                    scale_weight = 0.55
+
+            # Chromatic sprite salience: in 8/16-bit sprite games, player sprites use vivid
+            # saturated palettes whereas mechanical hazards, bubbles, or stone tiles are often
+            # achromatic grey/white. Uniform grayscale frames keep identical relative scores.
+            sat_weight = 1.0
+            if frame.ndim == 3 and frame.shape[2] == 3 and w >= 6 and h >= 6:
+                sub_bgr = frame[y : y + h, x : x + w]
+                b_ch = sub_bgr[:, :, 0].astype(np.int16)
+                g_ch = sub_bgr[:, :, 1].astype(np.int16)
+                r_ch = sub_bgr[:, :, 2].astype(np.int16)
+                c_max = np.maximum(np.maximum(r_ch, g_ch), b_ch)
+                c_min = np.minimum(np.minimum(r_ch, g_ch), b_ch)
+                chroma = c_max - c_min
+                active_px = c_max > 28
+                mean_chroma = float(np.mean(chroma[active_px])) if np.any(active_px) else 0.0
+                if mean_chroma < 18.0:
+                    sat_weight = 0.72
+                elif mean_chroma >= 55.0:
+                    sat_weight = 1.42
                 else:
-                    shape_weight = 0.25
+                    sat_weight = 0.72 + 0.70 * ((mean_chroma - 18.0) / 37.0)
 
-                # Scale consistency against established hero height: demote tiny projectiles,
-                # bubbles, shells, coins, or fireballs (<48% of hero height) and oversized props.
-                scale_weight = 1.0
-                if expected_h is not None and float(expected_h) >= 16.0:
-                    h_ratio = float(h) / float(expected_h)
-                    if h_ratio < 0.48:
-                        scale_weight = 0.35
-                    elif 0.62 <= h_ratio <= 1.50:
-                        scale_weight = 1.22
-                    elif h_ratio > 2.10:
-                        scale_weight = 0.55
+            bottomness = bottom_y / float(frame_h)
+            near_tracked = False
+            dist_2d = 1.0
+            if expected_cx is not None:
+                cx_c = float(x) + float(w) * 0.5
+                dx_norm = abs(cx_c - float(expected_cx)) / max(1.0, float(frame_w))
+                if expected_cy is not None:
+                    cy_c = float(y) + float(h) * 0.5
+                    dy_norm = abs(cy_c - float(expected_cy)) / max(1.0, float(frame_h))
+                    dist_2d = math.hypot(dx_norm, dy_norm * 0.85)
+                    near_tracked = dist_2d < 0.24
+                    horiz_weight = 1.0 + 2.10 * math.exp(-dist_2d * 4.5)
+                else:
+                    horiz_weight = 1.0 + 0.90 * math.exp(-dx_norm * 5.0)
+            else:
+                horiz_weight = 1.0
 
-                # Chromatic sprite salience: in 8/16-bit platformers, player sprites use vivid
-                # saturated palettes whereas mechanical hazards (sawblades, chains, rotating stone
-                # platforms, brick walls) are achromatic grey/white. Uniform grayscale frames keep
-                # identical relative scores across all contours.
-                sat_weight = 1.0
-                if frame.ndim == 3 and frame.shape[2] == 3 and w >= 6 and h >= 6:
-                    sub_bgr = frame[y : y + h, x : x + w]
-                    b_ch = sub_bgr[:, :, 0].astype(np.int16)
-                    g_ch = sub_bgr[:, :, 1].astype(np.int16)
-                    r_ch = sub_bgr[:, :, 2].astype(np.int16)
-                    c_max = np.maximum(np.maximum(r_ch, g_ch), b_ch)
-                    c_min = np.minimum(np.minimum(r_ch, g_ch), b_ch)
-                    chroma = c_max - c_min
-                    active_px = c_max > 28
-                    mean_chroma = float(np.mean(chroma[active_px])) if np.any(active_px) else 0.0
-                    if mean_chroma < 18.0:
-                        sat_weight = 0.72
-                    elif mean_chroma >= 55.0:
-                        sat_weight = 1.42
-                    else:
-                        sat_weight = 0.72 + 0.70 * ((mean_chroma - 18.0) / 37.0)
-
-                bottomness = bottom_y / float(frame_h)
+            if platformer_mode:
                 is_initial_lock = expected_floor_y is None and expected_cx is None
                 if 0.55 <= bottomness <= 0.88:
                     playfield_weight = 1.60 if is_initial_lock else 1.25
@@ -766,39 +795,25 @@ class _FrameDetector(AbstractDetector):
                     playfield_weight = 0.25
                 else:
                     playfield_weight = 0.55
+                if near_tracked and bottomness <= 0.88:
+                    playfield_weight = max(playfield_weight, 1.15)
+            else:
+                # Free-2D / underwater / top-down / vertical sprite scenes: neutral across playfield
+                playfield_weight = 0.35 if bottomness > 0.96 else 1.0
 
-                near_tracked = False
-                dist_2d = 1.0
-                if expected_cx is not None:
-                    cx_c = float(x) + float(w) * 0.5
-                    dx_norm = abs(cx_c - float(expected_cx)) / max(1.0, float(frame_w))
-                    if expected_cy is not None:
-                        cy_c = float(y) + float(h) * 0.5
-                        dy_norm = abs(cy_c - float(expected_cy)) / max(1.0, float(frame_h))
-                        dist_2d = math.hypot(dx_norm, dy_norm * 0.85)
-                        near_tracked = dist_2d < 0.24
-                        horiz_weight = 1.0 + 2.10 * math.exp(-dist_2d * 4.5)
-                        if near_tracked and bottomness <= 0.88:
-                            playfield_weight = max(playfield_weight, 1.15)
-                    else:
-                        horiz_weight = 1.0 + 0.90 * math.exp(-dx_norm * 5.0)
+            base_score = eff_area * shape_weight * scale_weight * sat_weight * playfield_weight * horiz_weight
+            if platformer_mode and expected_floor_y is not None:
+                dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
+                if bottom_y > expected_floor_y and bottomness <= 0.94:
+                    fw_mult = 0.45 + 2.4 * math.exp(-dist_to_floor * 3.8)
+                elif bottom_y > expected_floor_y:
+                    fw_mult = 0.08 + 1.8 * math.exp(-dist_to_floor * 7.5)
                 else:
-                    horiz_weight = 1.0
-
-                base_score = eff_area * shape_weight * scale_weight * sat_weight * playfield_weight * horiz_weight
-                if expected_floor_y is not None:
-                    dist_to_floor = abs(bottom_y - expected_floor_y) / float(frame_h)
-                    if bottom_y > expected_floor_y and bottomness <= 0.94:
-                        fw_mult = 0.45 + 2.4 * math.exp(-dist_to_floor * 3.8)
-                    elif bottom_y > expected_floor_y:
-                        fw_mult = 0.08 + 1.8 * math.exp(-dist_to_floor * 7.5)
-                    else:
-                        fw_mult = 0.50 + 2.0 * math.exp(-dist_to_floor * 5.0)
-                    if near_tracked and bottomness <= 0.90:
-                        fw_mult = max(fw_mult, 1.05 + 1.25 * math.exp(-dist_2d * 4.5))
-                    return base_score * fw_mult
-                return base_score
-            return area
+                    fw_mult = 0.50 + 2.0 * np.exp(-dist_to_floor * 5.0)
+                if near_tracked and bottomness <= 0.90:
+                    fw_mult = max(fw_mult, 1.05 + 1.25 * math.exp(-dist_2d * 4.5))
+                return base_score * fw_mult
+            return base_score
 
         if scroll_comp_mask is not None:
             sc_contours, _ = cv2.findContours(
