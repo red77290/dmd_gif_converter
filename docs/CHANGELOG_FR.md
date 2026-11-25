@@ -1,5 +1,10 @@
 # DMD GIF Converter — Historique des versions (Changelog)
 
+## [V8.0.19] - 2026-11-25 (Détection Pillarbox Plage TV, Overscan Matériel & Verrouillage Horizontal Caméra)
+### Corrigé & Amélioré
+- **Détection Autonome des Bandes Noires Plage TV, Watermarks & Overscan Matériel Fin (`analysis.py`, `analyzer.py`)** : Remplace le seuil mono-pixel `gray > 15` par un profil colonnaire luminance/chrominance sur 256 colonnes (`_measure_frame_pillarbox_bounds`) et un verrouillage géométrique temporel (`_resolve_pillarbox_margins`) évalués avant `_is_dark_frame`, éliminant les bandes noires YUV en plage limitée (`Y=16..28`), les pillarbox avec logos de coin ainsi que les fines bandes noires d'overscan matériel (`>= 1,2 %`, ex. les `8 px` masqués à gauche sur NES/Master System) tout en protégeant les fonds sombres/nocturnes/aquatiques et en conservant le rognage même sans ROI initial.
+- **Bornage Horizontal Strict de la Détection, du Panoramique Caméra & du Rognage (`analyzer.py`, `tracker.py`, `camera.py`)** : Applique un arrondi intérieur strict (`ceil`/`floor`) sur `effective_frame_left`/`effective_frame_w`, restreint les découpes de `DetectionStage` à la zone active, verrouille les bornes horizontales dans `CameraBuilderStage` et élimine tout débordement d'arrondi dans `_crop_frame` afin qu'aucune bordure latérale ne bouge lors des mouvements de caméra.
+
 ## [V8.0.18] - 2026-11-25 (Suivi Global des Sprites 2D, Verrouillage Anti-Hijack & Détection Autonome du Mode Platformer)
 ### Corrigé & Amélioré
 - **Détection Globale des Petits Sprites, Continuité 2D & Verrouillage Anti-Hijack (`detector.py`, `tracker.py`)** : Généralise la détection des sprites compacts 8/16 bits (`< 1,5 %` de l'écran), la continuité de trajectoire 2D `(expected_cx, expected_cy)`, le filtrage des petits projectiles/bulles (`expected_h`, `< 48 %` du héros), la saillance chromatique et la probation anti-changement de cible (`ValidationStage`) à **toutes** les scènes d'action/sprites hors portraits (`is_sprite_action_mode` : plateformes, jeux aquatiques en nage libre, top-down, shoot'em up) tout en gardant l'ancrage au sol `_FloorEstimator` spécifique à `platformer_mode`.
